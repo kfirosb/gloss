@@ -1,0 +1,80 @@
+import { expect, test } from '@playwright/test';
+import { mockSession } from './session-fixture.js';
+const base = () => ({ id: 'dict', target: { agent: 'codex', sessionRef: 's', projectId: 'p' }, codingState: 'idle', codingMessages: [], discussion: [], deliveries: [], language: 'he', languageSessionId: 'l', languageModel: 'm', sourceRevision: 1 });
+test('mic button is disabled with a reason when the engine is not built', async ({ page }) => {
+  const snapshot = base(); await mockSession(page, () => snapshot);
+  await page.route('**/api/dictation', route => route.fulfill({ json: { available: false, reason: 'engine-missing', model: { present: false }, engine: 'stopped' } }));
+  await page.goto('/#capability=test');
+  const button = page.getByRole('button', { name: 'Dictation unavailable: Speech engine not built' });
+  await expect(button).toBeDisabled();
+});
+test('mic button is enabled and labelled with the write language when available', async ({ page }) => {
+  const snapshot = base(); await mockSession(page, () => snapshot);
+  await page.route('**/api/dictation', route => route.fulfill({ json: { available: true, model: { present: true, bytes: 1 }, engine: 'stopped' } }));
+  await page.goto('/#capability=test');
+  await expect(page.getByRole('button', { name: 'Dictate in Hebrew' })).toBeEnabled();
+});
+test('a status request failure leaves the button disabled rather than broken', async ({ page }) => {
+  const snapshot = base(); await mockSession(page, () => snapshot);
+  await page.route('**/api/dictation', route => route.fulfill({ status: 500, json: { error: 'x' } }));
+  await page.goto('/#capability=test');
+  await expect(page.getByRole('button', { name: /Dictation unavailable/ })).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Discuss with language assistant' })).toBeEditable();
+});
+async function recordingFixture(page: import('@playwright/test').Page, answerStop = true) {
+  const snapshot = base(); await mockSession(page, () => snapshot); const actions: any[] = []; const stops: number[] = [];
+  await page.route('**/api/dictation', route => route.fulfill({ json: { available: true, model: { present: true, bytes: 1 }, engine: 'running' } }));
+  await page.route('**/api/sessions/*/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence: 1, snapshot }) + '\n\n' }));
+  await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { sessionId: snapshot.id, sequence: 2, snapshot } }); });
+  // A synthetic tone stands in for the microphone; the server side is a scripted socket.
+  await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const dest = ctx.createMediaStreamDestination(); osc.connect(dest); osc.start(); return dest.stream; }; });
+  await page.routeWebSocket('**/api/dictation/audio**', ws => {
+    expect(new URL(ws.url()).searchParams.get('language')).toBe('he');
+    ws.send(JSON.stringify({ type: 'state', state: 'starting' })); ws.send(JSON.stringify({ type: 'state', state: 'recording' }));
+    ws.send(JSON.stringify({ type: 'segment', sequence: 1, text: 'שלום' }));
+    ws.onMessage(message => { if (typeof message !== 'string' || JSON.parse(message).type !== 'stop') return; stops.push(Date.now()); if (!answerStop) return;
+      ws.send(JSON.stringify({ type: 'segment', sequence: 2, text: 'עולם' })); ws.send(JSON.stringify({ type: 'state', state: 'finished' })); void ws.close({ code: 1000, reason: 'finished' }); });
+  });
+  await page.goto('/#capability=test');
+  return { actions, stops, composer: page.getByRole('textbox', { name: 'Discuss with language assistant' }) };
+}
+test('Enter while recording stops, waits for the last segment and then sends the full text', async ({ page }) => {
+  const { actions, stops, composer } = await recordingFixture(page);
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect(page.getByRole('button', { name: 'Stop dictation' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('form.composer')).toHaveClass(/composer-recording/);
+  await expect(composer).toHaveValue('שלום');
+  await composer.press('Enter');
+  await expect.poll(() => actions.find(a => a.type === 'send-composer')?.text).toBe('שלום עולם');
+  expect(stops).toHaveLength(1);
+  await expect(page.getByRole('button', { name: 'Dictate in Hebrew' })).toBeEnabled();
+  await expect(page.locator('form.composer')).not.toHaveClass(/composer-recording/);
+});
+test('Escape stops dictation without sending, and the shortcut starts it', async ({ page }) => {
+  const { actions, stops, composer } = await recordingFixture(page);
+  await composer.click(); await composer.press('ControlOrMeta+Shift+KeyM');
+  await expect(composer).toHaveValue('שלום');
+  await composer.press('Escape');
+  await expect.poll(() => stops.length).toBe(1);
+  await expect(composer).toHaveValue('שלום עולם');
+  await expect(page.getByRole('button', { name: 'Dictate in Hebrew' })).toBeEnabled();
+  expect(actions.filter(a => a.type === 'send-composer' || a.type === 'discuss')).toHaveLength(0);
+});
+test('Discuss first while recording waits for the last segment and discusses the full text', async ({ page }) => {
+  const { actions, composer } = await recordingFixture(page);
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect(composer).toHaveValue('שלום');
+  await page.getByRole('button', { name: 'Discuss first', exact: true }).click();
+  await expect.poll(() => actions.find(a => a.type === 'discuss')?.text).toBe('שלום עולם');
+  expect(actions.filter(a => a.type === 'send-composer')).toHaveLength(0);
+});
+test('an insertion scrolls the composer to the end, and a pending stop shows a marker', async ({ page }) => {
+  const { stops, composer } = await recordingFixture(page, false);
+  await composer.fill(Array.from({ length: 40 }, (_, i) => 'line ' + i).join('\n')); await composer.evaluate(el => { el.scrollTop = 0; });
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect(composer).toHaveValue(/שלום$/);
+  await expect.poll(() => composer.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1);
+  await page.getByRole('button', { name: 'Stop dictation' }).click();
+  await expect.poll(() => stops.length).toBe(1);
+  await expect(page.locator('.dictation-control .dictation-status', { hasText: '…' })).toBeVisible();
+});

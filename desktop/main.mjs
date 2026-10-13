@@ -1,5 +1,5 @@
 // Native macOS shell: runs the local server on Electron's bundled Node and shows the UI in an app window.
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -28,8 +28,8 @@ function freePort() {
 function startServer(port, capability, path) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(appRoot, 'dist/server/runtime/cli.js'), '--port', String(port), '--project', homedir()], {
-      // process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE child, so the bundled tmux path travels explicitly.
-      cwd: appRoot, env: { ...process.env, PATH: path, ELECTRON_RUN_AS_NODE: '1', LANGUAGE_PANEL_CAPABILITY: capability, ...(app.isPackaged ? { LANGUAGE_ASSISTANT_TMUX: join(process.resourcesPath, 'bin', 'tmux') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'],
+      // process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE child, so the bundled tmux and whisper-server paths travel explicitly.
+      cwd: appRoot, env: { ...process.env, PATH: path, ELECTRON_RUN_AS_NODE: '1', LANGUAGE_PANEL_CAPABILITY: capability, ...(app.isPackaged ? { LANGUAGE_ASSISTANT_TMUX: join(process.resourcesPath, 'bin', 'tmux'), LANGUAGE_ASSISTANT_WHISPER: join(process.resourcesPath, 'bin', 'whisper-server') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let buffered = ''; let errors = '';
     child.stdout.on('data', chunk => {
@@ -54,6 +54,11 @@ function createWindow() {
   const { bounds } = readConfig();
   mainWindow = new BrowserWindow({ width: 1400, height: 900, minWidth: 720, minHeight: 480, ...bounds, title: 'Gloss', show: false, webPreferences: { contextIsolation: true, sandbox: true, preload: join(appRoot, 'desktop/preload.cjs') } });
   const origin = new URL(panelUrl).origin;
+  // Only the app's own page may use the microphone, and only for audio; other media requests are refused.
+  const allowed = (details) => new URL(details.requestingUrl ?? 'about:blank').origin === origin && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio';
+  // Non-media permissions (e.g. clipboard-sanitized-write for the copy button) keep Electron's default, which is allow.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(permission === 'media' ? allowed(details) : true));
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => permission === 'media' ? (requestingOrigin === origin && (details.mediaType === 'audio' || details.mediaType === undefined)) : true);
   ipcMain.removeHandler('pick-folder');
   // Only the app's own page may open the picker; the result is validated again by the server.
   ipcMain.handle('pick-folder', async event => {

@@ -302,6 +302,15 @@ export async function startServer(application: Application, options: { port?: nu
         if (req.method === 'GET' && application.languageDefaults) return respond(res, 200, application.languageDefaults());
         if (req.method === 'PUT' && application.setLanguageDefaults) return respond(res, 200, application.setLanguageDefaults(await readBody(req, 4096)));
       }
+      if (url.pathname === '/api/dictation' && req.method === 'GET') {
+        res.setHeader('cache-control', 'no-store');
+        if (!application.dictation) return respond(res, 404, { error: 'Dictation unavailable', code: 'not-found' });
+        return respond(res, 200, await application.dictation.status());
+      }
+      if (url.pathname === '/api/dictation/model/cancel' && req.method === 'POST') {
+        if (!application.dictation) return respond(res, 404, { error: 'Dictation unavailable', code: 'not-found' });
+        application.dictation.cancelDownload(); return respond(res, 200, { cancelled: true });
+      }
       if (url.pathname === '/api/settings/launch') {
         res.setHeader('cache-control', 'no-store');
         if (req.method === 'GET' && application.launchSettings) return respond(res, 200, application.launchSettings());
@@ -331,11 +340,13 @@ export async function startServer(application: Application, options: { port?: nu
       });
     }
   });
-  // The terminal ticket travels in this URL's query string, so the URL is never logged.
+  // Tickets and capabilities travel in these URLs' query strings, so the URLs are never logged.
   server.on('upgrade', (req, socket, head) => {
-    const host = req.headers.host ?? '';
-    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || !application.terminals || !(req.url ?? '').startsWith('/api/launches/')) { socket.destroy(); return; }
-    application.terminals.handleUpgrade(req, socket, head);
+    const host = req.headers.host ?? ''; const url = req.url ?? '';
+    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) { socket.destroy(); return; }
+    if (url.startsWith('/api/launches/') && application.terminals) { application.terminals.handleUpgrade(req, socket, head); return; }
+    if (url.startsWith('/api/dictation/') && application.dictation) { application.dictation.handleUpgrade(req, socket, head); return; }
+    socket.destroy();
   });
   return new Promise<{ url: string; close(): Promise<void> }>((resolve, reject) => {
     server.once('error', reject);

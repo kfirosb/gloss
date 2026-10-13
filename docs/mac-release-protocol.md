@@ -61,9 +61,12 @@ npm run typecheck
 npm test
 npm run test:e2e -- --workers=1
 npm run build:tmux
+npm run build:whisper
 npm run desktop:dmg -- --arm64
 git diff --check
 ```
+
+`build:whisper` builds the bundled speech engine (whisper-server); the engine is bundled in the app, while the speech model is downloaded by the app on first use.
 
 Check every exit code and resolve failures before labeling the release ready. Report test counts from this run, not a previous release. Use an isolated test server if a running development server could cause browser tests to exercise a different checkout.
 
