@@ -1,6 +1,6 @@
 {
   "name": "language-assistant",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -67,7 +67,7 @@
       ],
       "identity": null,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Language Assistant uses the microphone to dictate into the composer."
+        "NSMicrophoneUsageDescription": "Gloss uses the microphone to dictate into the composer."
       }
     },
     "afterPack": "scripts/adhoc-sign.mjs",

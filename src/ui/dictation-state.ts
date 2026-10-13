@@ -14,7 +14,7 @@ export type DictationEffect =
   | { type: 'append-text'; text: string } | { type: 'send-now' } | { type: 'start-finish-timer'; ms: number } | { type: 'clear-finish-timer' };
 /** How long a plain Stop/Escape waits for the server's 'finished' before giving up (send-initiated stops use FINISH_TIMEOUT_MS). */
 export const STOP_TIMEOUT_MS = 15_000;
-export const microphoneHint = 'Enable Language Assistant under System Settings → Privacy & Security → Microphone';
+export const microphoneHint = 'Enable Gloss under System Settings → Privacy & Security → Microphone';
 export const initialDictationState: DictationUiState = { phase: 'idle', level: 0, sendAfterFinish: false, lastSequence: 0 };
 const reasons: Record<string, string> = { 'engine-missing': 'Speech engine not built', 'microphone-denied': 'Microphone access denied. ' + microphoneHint };
 const active = (p: DictationPhase) => p === 'downloading' || p === 'starting' || p === 'recording' || p === 'finishing';
