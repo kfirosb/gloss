@@ -93,7 +93,7 @@ test('Forget errors show inside Hidden projects, and sidebar dialogs size to the
   await dialog.getByRole('button', { name: 'Forget /gone' }).click();
   await expect(dialog.getByRole('alert')).toHaveText('Folder store is locked');
   await dialog.getByRole('button', { name: 'Done' }).click();
-  for (const [button, name] of [['Connect folder', 'Connect a folder'], [/^About Language Assistant/, 'About Language Assistant']] as const) {
+  for (const [button, name] of [['Connect folder', 'Connect a folder'], [/^About Gloss/, 'About Gloss']] as const) {
     await sidebar.getByRole('button', { name: button }).click();
     const opened = page.getByRole('dialog', { name });
     await expect(opened).toBeVisible(); expect((await opened.boundingBox())!.height).toBeLessThan(500);

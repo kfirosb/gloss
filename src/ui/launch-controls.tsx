@@ -95,7 +95,7 @@ export function LaunchSettingsFields({ value, onChange }: { value: LaunchSetting
     <div className="language-field"><label htmlFor={id + 'popup'}>When a session needs approval</label>
       <select id={id + 'popup'} value={value.popup} onChange={e => onChange({ ...value, popup: e.target.value as PopupMode })}>
         <option value="auto">Open the terminal automatically</option><option value="current-tab">Only on the current tab</option><option value="dot-only">Only show the red dot</option>
-      </select><small>Applies to sessions started from Language Assistant</small></div>
+      </select><small>Applies to sessions started from Gloss</small></div>
     {(['claude', 'codex'] as const).map(agent => <div className="language-field" key={agent}><label htmlFor={id + agent}>Extra {agent === 'claude' ? 'Claude' : 'Codex'} launch arguments</label>
       <input id={id + agent} type="text" dir="ltr" value={value.extraArgs[agent]} placeholder={agent === 'claude' ? '--model opus' : '--model gpt-5'} onChange={e => onChange({ ...value, extraArgs: { ...value.extraArgs, [agent]: e.target.value } })} /></div>)}
   </section>;

@@ -52,7 +52,7 @@ async function boot() {
 
 function createWindow() {
   const { bounds } = readConfig();
-  mainWindow = new BrowserWindow({ width: 1400, height: 900, minWidth: 720, minHeight: 480, ...bounds, title: 'Language Assistant', show: false, webPreferences: { contextIsolation: true, sandbox: true, preload: join(appRoot, 'desktop/preload.cjs') } });
+  mainWindow = new BrowserWindow({ width: 1400, height: 900, minWidth: 720, minHeight: 480, ...bounds, title: 'Gloss', show: false, webPreferences: { contextIsolation: true, sandbox: true, preload: join(appRoot, 'desktop/preload.cjs') } });
   const origin = new URL(panelUrl).origin;
   ipcMain.removeHandler('pick-folder');
   // Only the app's own page may open the picker; the result is validated again by the server.
@@ -71,13 +71,13 @@ function createWindow() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.setName('Language Assistant');
+  app.setName('Gloss');
   app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
   app.on('activate', () => { if (!mainWindow && panelUrl) createWindow(); });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
   app.on('before-quit', () => { quitting = true; server?.kill(); });
   app.whenReady().then(boot).then(createWindow).catch(async error => {
-    dialog.showErrorBox('Language Assistant could not start', error instanceof Error ? error.message : String(error));
+    dialog.showErrorBox('Gloss could not start', error instanceof Error ? error.message : String(error));
     app.quit();
   });
 }

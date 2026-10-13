@@ -76,7 +76,7 @@ export function DeleteWorktreeDialog({project,folder,currentSessionId,close,onDe
   {info&&<div className={'notice worktree-counts'+(changed||info.unmergedCommits>0||info.launchedSessions>0||info.otherOpenSessions>0?' warning':'')}>
    <p>{changed?<>{info.modified} modified, {info.untracked} untracked{info.oldestChange!==undefined&&<> · oldest {day(info.oldestChange)}</>}{info.newestChange!==undefined&&<> · newest {day(info.newestChange)}</>}</>:'No uncommitted changes.'}</p>
    {info.unmergedCommits>0&&<p>{plural(info.unmergedCommits,'commit','commits')} only on this branch — the branch is kept.</p>}
-   {info.launchedSessions>0&&<p>{plural(info.launchedSessions,'session','sessions')} started from Language Assistant will be ended.</p>}
+   {info.launchedSessions>0&&<p>{plural(info.launchedSessions,'session','sessions')} started from Gloss will be ended.</p>}
    {info.otherOpenSessions>0&&<p>{info.otherOpenSessions===1?'1 other open session in this folder was not started here and keeps running; its folder will be removed from under it.':`${info.otherOpenSessions} other open sessions in this folder were not started here and keep running; their folder will be removed from under them.`}</p>}
    {changed&&info.changedFiles.length>0&&<ul className="worktree-files">{info.changedFiles.map(f=><li key={f.path}><code>{f.status}</code> {f.path}</li>)}{info.truncated&&<li>…and more</li>}</ul>}
   </div>}

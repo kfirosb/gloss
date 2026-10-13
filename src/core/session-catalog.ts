@@ -35,10 +35,10 @@ export interface CatalogEntry {
   folderMissing?: boolean;
   /** Short language flow such as HE→EN→HE, shown on the session tab. */
   languageCode?: string;
-  /** Set when Language Assistant launched this session. */
+  /** Set when Gloss launched this session. */
   launchId?: string;
   launchState?: import('./session-contracts.js').LaunchState;
-  /** Shown when Language Assistant cannot tell whether this launched session needs the user. */
+  /** Shown when Gloss cannot tell whether this launched session needs the user. */
   attentionNotice?: string;
 }
 export interface CatalogSnapshot {

@@ -81,7 +81,7 @@ export async function startClaudeChannel(options: ClaudeChannelOptions = {}): Pr
   const ready = () => !closed && initialized && !!record && !!store;
   const mcp = new Server({ name: 'language-assistant', version: '0.0.0' }, {
     capabilities: { experimental: { 'claude/channel': {} }, tools: {} },
-    instructions: 'Experimental local channel. Messages have a request_id attribute and come from the user of the Language Assistant app. Answer each one in your normal final message of the turn, written to the user: the app reads that message from this session and shows it to them. Do not call the reply tool for the answer; it exists only for an optional short interim status (with the request_id) while you keep working. A transport write is not proof of delivery.',
+    instructions: 'Experimental local channel. Messages have a request_id attribute and come from the user of the Gloss app. Answer each one in your normal final message of the turn, written to the user: the app reads that message from this session and shows it to them. Do not call the reply tool for the answer; it exists only for an optional short interim status (with the request_id) while you keep working. A transport write is not proof of delivery.',
   });
   mcp.oninitialized = () => { initialized = mcp.getClientVersion() !== undefined; };
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{

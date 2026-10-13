@@ -144,7 +144,7 @@ describe('identifies a Codex launch whose writer is the shared app-server daemon
   });
 });
 
-describe('liveness of Codex threads Language Assistant launched', () => {
+describe('liveness of Codex threads Gloss launched', () => {
   const launch = (over: Partial<LaunchRecord>): LaunchRecord => ({ id: 'L', agent: 'codex', folder: '/p', panePid: 7, state: 'running', createdAt: 1, ...over });
   it('is open while the launch runs, closed once it ended, and unknown for threads it never launched', () => {
     expect(launchedCodexLiveness('t1', [launch({ sessionRef: 't1' })], [])).toBe(true);

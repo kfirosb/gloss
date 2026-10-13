@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'language-entrypoint-')));
-const output = join(root, 'Language Assistant #1.app');
+const output = join(root, 'Gloss #1.app');
 const entry = join(output, 'runtime/cli.js');
 
 beforeAll(() => {

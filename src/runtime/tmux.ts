@@ -5,7 +5,7 @@ import { collectProcess, runProcess, type ProcessOutcome, type ProcessRunner } f
 
 export class TmuxUnavailable extends Error {
   readonly code = 'tmux-unavailable';
-  constructor() { super('tmux is not installed. Install it with Homebrew (brew install tmux) or update Language Assistant.'); }
+  constructor() { super('tmux is not installed. Install it with Homebrew (brew install tmux) or update Gloss.'); }
 }
 export const sessionNameFor = (launchId: string) => 'la-' + launchId;
 /** Homebrew first, then the app's bundled tmux: the desktop shell passes its path in LANGUAGE_ASSISTANT_TMUX

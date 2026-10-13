@@ -32,7 +32,7 @@ test('delete warns with counts, offers the agent summary, and deletes on confirm
   await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'Delete dirty worktree' }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete worktree?' });
   await expect(dialog).toContainText('2 modified'); await expect(dialog).toContainText('1 untracked'); await expect(dialog).toContainText('3 commits only on this branch');
-  await expect(dialog).toContainText('2 sessions started from Language Assistant will be ended.');
+  await expect(dialog).toContainText('2 sessions started from Gloss will be ended.');
   await expect(dialog).toContainText('1 other open session in this folder was not started here and keeps running; its folder will be removed from under it.');
   await dialog.getByRole('button', { name: 'Ask the agent about these changes' }).click(); await expect(dialog).toContainText('Two edited files look recent');
   await expect(dialog.getByRole('button', { name: 'Delete worktree', exact: true })).toBeEnabled();

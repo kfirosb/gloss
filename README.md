@@ -30,8 +30,6 @@ Gloss is an early open-source release. What is verified today:
 | Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
 
-The app bundle in the current build (0.3.5) still carries the former name *Language Assistant*. The rename to Gloss ships in the next release.
-
 ## Install the Mac app
 
 1. Download the latest `.dmg` from the [Releases](../../releases) page and check its `.sha256` if you like.
@@ -41,7 +39,7 @@ The app bundle in the current build (0.3.5) still carries the former name *Langu
 The app is ad-hoc signed and not notarized, so macOS will say it cannot verify the app on first launch. Choose *Done*, then open *System Settings > Privacy & Security* and click *Open Anyway*. If macOS instead says the app is damaged, run this once in Terminal:
 
 ```sh
-xattr -cr "/Applications/Language Assistant.app"
+xattr -cr "/Applications/Gloss.app"
 ```
 
 ### Requirements

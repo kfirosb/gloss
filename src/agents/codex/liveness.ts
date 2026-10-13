@@ -105,12 +105,12 @@ export interface LockedThread {
   createdAt?: number;
 }
 export interface ThreadLiveness { open: boolean; reason: string }
-/** For threads Language Assistant launched: true while the launch's tmux session runs, false once it ended. */
+/** For threads Gloss launched: true while the launch's tmux session runs, false once it ended. */
 export type LaunchedLiveness = (sessionRef: string) => boolean | undefined;
 
 /**
  * Decides which locked threads are open, in this precedence:
- * 1. A thread Language Assistant launched is open while its launch's tmux session runs. After the launch ended, only
+ * 1. A thread Gloss launched is open while its launch's tmux session runs. After the launch ended, only
  *    an exact signal (a terminal client holding the lock, or `codex resume <id>`) reopens it.
  * 2. A lock held by a terminal client itself (not the daemon) is open.
  * 3. A daemon-held lock is open only when a live terminal client is attached: `codex resume <id>` names it exactly,

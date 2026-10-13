@@ -71,7 +71,7 @@ export function claimedCodexRefs(launch: LaunchRecord, launches: readonly Launch
 }
 
 /**
- * Liveness of a Codex thread Language Assistant launched: true while any launch that owns it (directly or through its
+ * Liveness of a Codex thread Gloss launched: true while any launch that owns it (directly or through its
  * registered panel) still runs in tmux, false once all of them ended, undefined for threads it never launched.
  * The launcher's watch moves launches whose tmux session is gone to ended.
  */

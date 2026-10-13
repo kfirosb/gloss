@@ -1,6 +1,6 @@
 {
   "name": "language-assistant",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -49,7 +49,7 @@
   "main": "desktop/main.mjs",
   "build": {
     "appId": "local.language-assistant",
-    "productName": "Language Assistant",
+    "productName": "Gloss",
     "asar": false,
     "directories": {
       "output": "release"

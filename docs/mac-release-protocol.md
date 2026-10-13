@@ -1,6 +1,6 @@
 # Mac release protocol
 
-Use this procedure when a future session is asked to update Language Assistant or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
+Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
 
 As of 2026-10-08, version 0.1.0 is running and in use. Its source is tagged `v0.1.0` at `ec752e5`; it includes local `main` through `519e6dd`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
 
@@ -33,7 +33,7 @@ If branches have diverged because the release branch contains packaging commits,
 ## 2. Preserve desktop compatibility when resolving conflicts
 
 - Keep `desktop/main.mjs`, the desktop scripts and Electron build configuration in `package.json`, and the matching lockfile.
-- Preserve the CLI entry-point comparison using `pathToFileURL(process.argv[1]).href`. Concatenating `file://` with a path breaks startup inside `Language Assistant.app` because of spaces.
+- Preserve the CLI entry-point comparison using `pathToFileURL(process.argv[1]).href`. Concatenating `file://` with a path breaks startup inside `Gloss.app` because of spaces.
 - Preserve upstream CLI modes and lazy imports, including Claude channel startup. Do not replace the new CLI with an older desktop copy.
 - Bundle runtime dependencies, including `@modelcontextprotocol/sdk`. Do not exclude all `node_modules` from the packaged app.
 - Preserve `ELECTRON_RUN_AS_NODE=1` for the desktop backend and generated Claude MCP channel configuration. The bundled executable must run as Node in those processes.
@@ -67,12 +67,12 @@ git diff --check
 
 Check every exit code and resolve failures before labeling the release ready. Report test counts from this run, not a previous release. Use an isolated test server if a running development server could cause browser tests to exercise a different checkout.
 
-The expected output is `release/Language Assistant-<version>-arm64.dmg`. Verify its integrity and create a checksum beside it:
+The expected output is `release/Gloss-<version>-arm64.dmg`. Verify its integrity and create a checksum beside it:
 
 ```sh
-hdiutil verify 'release/Language Assistant-<version>-arm64.dmg'
+hdiutil verify 'release/Gloss-<version>-arm64.dmg'
 cd release
-shasum -a 256 'Language Assistant-<version>-arm64.dmg' > 'Language Assistant-<version>-arm64.dmg.sha256'
+shasum -a 256 'Gloss-<version>-arm64.dmg' > 'Gloss-<version>-arm64.dmg.sha256'
 ```
 
 Run these from the appropriate directory; return to the repository root for subsequent Git commands. Keep older released DMGs available. Read version, architecture, and minimum macOS requirements from the produced app, rather than assuming they stayed unchanged.
@@ -110,9 +110,9 @@ Building a DMG can happen while the user works. Replacing or restarting the inst
 
 For installation:
 
-1. Let active work finish, then quit the app normally. Identify and stop any separately launched Language Assistant backend using the same data. Closing a Chrome tab does not stop its server. Do not kill unrelated Node, Codex, Claude, or Electron processes.
+1. Let active work finish, then quit the app normally. Identify and stop any separately launched Gloss backend using the same data. Closing a Chrome tab does not stop its server. Do not kill unrelated Node, Codex, Claude, or Electron processes.
 2. With all writers stopped, back up the full `~/.language-assistant` directory and the installed `.app` to a private, timestamped location. Preserve desktop settings separately if changing them. Backups include private conversations and attachments and must not be packaged or shared.
-3. Copy the verified app from this release to `/Applications/Language Assistant.app` (or the established per-user installation path). Do not rebuild a different artifact during replacement. Keep the previous app until the new version is verified.
+3. Copy the verified app from this release to `/Applications/Gloss.app` (or the established per-user installation path). Do not rebuild a different artifact during replacement. Keep the previous app until the new version is verified.
 4. Launch the installed copy. Confirm the version, backend startup, saved conversations, and composer. Check from an Applications/Dock launch too, since shell PATH differs from terminal launches.
 5. Keep the backup and report the installed version and location.
 

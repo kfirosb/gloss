@@ -499,7 +499,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 
 /* Sidebar frame: brand, Connect folder, projects with grip/chevron/menu, footer with Settings and version. */
 .sidebar-heading strong{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.brand-mark{display:grid;place-items:center;flex:none;width:28px;height:28px;background:#2d6a50;color:#fff;border-radius:9px;font-size:15px}
+.brand-mark{display:grid;place-items:center;flex:none;width:28px;height:28px;background:#e3eef5;color:#111;border-radius:9px;font-size:15px}
 .sessions-sidebar[data-collapsed="true"] .sidebar-heading strong{display:none}
 .connect-folder{display:flex;align-items:center;gap:10px;margin:0 12px 12px;padding:8px 12px;background:#fff;border:1px solid #cddbd0;border-radius:8px;box-shadow:0 2px 3px #203c3208;color:#253c34;text-align:left;flex-shrink:0;font-weight:600}
 .connect-folder:hover{border-color:#8fb59c;background:#f8fbf8}

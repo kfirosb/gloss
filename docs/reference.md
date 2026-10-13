@@ -1,8 +1,12 @@
-# Language Assistant
+# Gloss reference
+
+This is the detailed behaviour reference. The short public introduction is the repository [README](../README.md).
 
 ## Mac desktop release
 
-Future updates follow the [Mac release protocol](docs/mac-release-protocol.md).
+Future updates follow the [Mac release protocol](mac-release-protocol.md).
+
+Version 0.4.0 renames the product to Gloss: the app bundle, window title, Dock name, DMG and About dialog now say Gloss, and the app ships the new Gloss icon. Saved data stays under `~/.language-assistant`, the Claude channel server keeps its `language-assistant` name, and the assistant panels inside the workspace keep their labels, so existing conversations, settings and channel setups continue to work. Sessions launched from the app regenerate their Claude channel configuration with the new executable path the next time they are prepared.
 
 Version 0.3.5 fixes automatic session discovery for Claude Code installed through npm or Homebrew: those installs run as `claude.exe`, which the liveness check rejected, so open sessions never appeared in the sidebar. The check now accepts that name and reads the full process name from lsof.
 
@@ -16,7 +20,7 @@ Version 0.3.1 fixes two issues found right after 0.3.0: a Git project is named a
 
 Version 0.3.0 includes local `main` through `ebe5b72`: the folder-oriented sidebar (resize, reorder, collapse, hide and restore projects), Connect folder with computer-wide search, worktrees created, opened and deleted from the app (with the warn-and-decide delete dialog), plain folders with optional Git initialization, the compact conversation view as the default, and a version label with an About panel. Saved data gains one table (schema 22); version 0.2.0 cannot open the upgraded database, so keep the pre-upgrade backup if you may go back. Version 0.2.0 added background sessions, session tabs, language settings, terminal controls, folder selection, improved Codex session liveness and bundled tmux.
 
-On Apple Silicon with macOS 13 or newer, open `Language Assistant-0.3.5-arm64.dmg`, drag Language Assistant into Applications, and launch it from the Dock or Spotlight. Quit an older running version before replacing it. The app bundles its runtime and starts its local server automatically; Codex/Claude still need to be installed and authenticated separately. File search also requires ripgrep (`rg`) on your PATH. Existing conversations remain under `~/.language-assistant`. This release is ad-hoc signed only (no Apple Developer ID) and is not notarized: on first launch of a downloaded copy, macOS says it cannot verify the app; choose Done, then System Settings > Privacy & Security > Open Anyway. If macOS instead calls the app "damaged", run `xattr -cr "/Applications/Language Assistant.app"` once in Terminal.
+On Apple Silicon with macOS 13 or newer, open `Gloss-0.4.0-arm64.dmg`, drag Gloss into Applications, and launch it from the Dock or Spotlight. Quit an older running version before replacing it. The app bundles its runtime and starts its local server automatically; Codex/Claude still need to be installed and authenticated separately. File search also requires ripgrep (`rg`) on your PATH. Existing conversations remain under `~/.language-assistant`. This release is ad-hoc signed only (no Apple Developer ID) and is not notarized: on first launch of a downloaded copy, macOS says it cannot verify the app; choose Done, then System Settings > Privacy & Security > Open Anyway. If macOS instead calls the app "damaged", run `xattr -cr "/Applications/Gloss.app"` once in Terminal.
 
 To reproduce the installer, use Node.js 24 or newer, run `npm ci`, `npm run build:tmux`, then `npm run desktop:dmg -- --arm64`. The DMG is written to `release/`. `npm run desktop` runs the desktop app from source; `npm run desktop:install` builds and installs it locally. Claude channel setup remains experimental and requires its existing explicit setup and consent flow.
 

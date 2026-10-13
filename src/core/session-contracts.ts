@@ -1,6 +1,6 @@
 import type { Target } from './contracts.js';
 
-/** Lifecycle of a session Language Assistant launched in its private tmux server. */
+/** Lifecycle of a session Gloss launched in its private tmux server. */
 export type LaunchState = 'starting' | 'running' | 'unidentified' | 'ended';
 
 export interface SessionRecord {

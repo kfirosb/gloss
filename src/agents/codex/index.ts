@@ -24,7 +24,7 @@ export function supportsCodexProtocol(version: unknown): boolean { return typeof
 interface Thread { id: string; cwd: string; rollout_path: string; cli_version: string }
 export interface CodexAdapterOptions extends AdapterOptions {
   codexHome?: string; databasePath?: string; executable?: string;
-  /** Trusted server hook: for threads Language Assistant launched, whether the launch's tmux session still runs. */
+  /** Trusted server hook: for threads Gloss launched, whether the launch's tmux session still runs. */
   launched?: LaunchedLiveness;
   now?: () => number;
 }
