@@ -1,0 +1,23 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { SqliteStore } from '../../src/storage/sqlite-store.js';
+const paths:string[]=[];
+afterEach(()=>{for(const path of paths.splice(0))rmSync(path,{recursive:true,force:true});});
+it('migrates schema 14 and allocates independent transactional kind counters without reusing removed membership',()=>{
+ const root=mkdtempSync(join(tmpdir(),'file-migration-'));paths.push(root);const path=join(root,'db.sqlite');
+ let store=new SqliteStore(path);store.registerSession({id:'A',target:{agent:'codex',sessionRef:'A',projectId:root},canonicalRoot:root,projectName:'A',enabled:true});store.close();
+ const old=new DatabaseSync(path);old.exec('DROP TABLE session_file_counters; DROP TABLE session_files; DELETE FROM schema_migrations WHERE version=15');old.close();
+ store=new SqliteStore(path);
+ const file={id:'one',sessionId:'A',kind:'file' as const,name:'one',path:join(root,'one'),worktreePath:root,source:'upload' as const,mime:'text/plain',size:1};
+ expect(store.registerFileReference(file).index).toBe(1);
+ expect(()=>store.registerFileReference({...file,id:'collision',index:1})).toThrow();
+ expect(store.registerFileReference({...file,id:'two'}).index).toBe(2);
+ expect(store.registerFileReference({...file,id:'image',kind:'image',index:7}).index).toBe(7);
+ store.close();store=new SqliteStore(path);
+ expect(store.registerFileReference({...file,id:'three'}).index).toBe(3);
+ expect(store.registerFileReference({...file,id:'image2',kind:'image'}).index).toBe(8);
+ expect(store.listFileReferences('A')).toHaveLength(5);store.close();
+});

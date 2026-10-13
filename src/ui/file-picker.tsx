@@ -1,0 +1,11 @@
+import {forwardRef,useEffect,useImperativeHandle,useRef,useState} from 'react';
+import {SessionClient} from './session-client.js';
+export interface FilePickerHandle {key(key:string):boolean}
+export const FilePicker=forwardRef<FilePickerHandle,{sessionId:string;query:string;listboxId:string;onActiveOption(id:string|undefined):void;onChoose(relativePath:string):void;onClose():void}>(function FilePicker({sessionId,query,listboxId,onActiveOption,onChoose,onClose},ref){
+ const [results,setResults]=useState<{name:string;relativePath:string}[]>([]);const [selected,setSelected]=useState(0);const [status,setStatus]=useState('Searching…');const generation=useRef(0);
+ useEffect(()=>{const version=++generation.current;const controller=new AbortController();setResults([]);setSelected(0);setStatus('Searching…');const timer=setTimeout(()=>{void new SessionClient(sessionId).searchFiles(query,controller.signal).then(rows=>{if(controller.signal.aborted||version!==generation.current)return;setResults(rows);setStatus(rows.length?'':'No matching files');}).catch(e=>{if(!controller.signal.aborted&&version===generation.current)setStatus(e instanceof Error?e.message:'Search unavailable');});},150);return()=>{controller.abort();clearTimeout(timer);};},[sessionId,query]);
+ useEffect(()=>{onActiveOption(results[selected]?`${listboxId}-${selected}`:undefined);return()=>onActiveOption(undefined);},[results,selected,listboxId,onActiveOption]);
+ const choose=(index:number)=>{const result=results[index];if(result)onChoose(result.relativePath);};
+ useImperativeHandle(ref,()=>({key(key){if(key==='Escape'){onClose();return true;}if(key==='ArrowDown'||key==='ArrowUp'){setSelected(i=>results.length?(i+(key==='ArrowDown'?1:-1)+results.length)%results.length:0);return true;}if(key==='Enter'){if(results.length){void choose(selected);return true;}onClose();return false;}return false;}}));
+ return <div className="file-picker" dir="ltr"><div id={listboxId} role="listbox" aria-label="Worktree files">{results.map((result,index)=><button id={`${listboxId}-${index}`} type="button" role="option" aria-selected={index===selected} key={result.relativePath} onMouseDown={e=>e.preventDefault()} onClick={()=>void choose(index)}><strong>{result.name}</strong><span>{result.relativePath}</span></button>)}</div>{status&&<span role="status">{status}</span>}</div>;
+});

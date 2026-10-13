@@ -1,0 +1,4 @@
+{"type": "event_msg", "payload": {"type": "task_started", "turn_id": "fixture-turn"}}
+{"type": "event_msg", "payload": {"type": "item_completed", "thread_id": "fixture-codex-session", "turn_id": "fixture-turn", "item": {"type": "UserMessage", "id": "fixture-item-2", "client_id": "fixture-client", "content": [{"type": "text", "text": "This is a disposable integration test. Reply READY to this message only. Later requests will come from a language assistant I control. Answer harmless exact-marker and translation requests. Do not use tools.", "text_elements": []}]}}}
+{"type": "event_msg", "payload": {"type": "item_completed", "thread_id": "fixture-codex-session", "turn_id": "fixture-turn", "item": {"type": "AgentMessage", "id": "fixture-item-3", "content": [{"type": "Text", "text": "READY"}], "phase": "final_answer"}}}
+{"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "fixture-turn"}}

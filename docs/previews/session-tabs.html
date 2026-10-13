@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Session tabs · Design preview</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#23322f;background:#f6f7fb;font-size:13px}
+*{box-sizing:border-box}body{margin:0;height:100dvh;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #2f5bd3;outline-offset:2px}
+.preview{background:#243b33;color:#e0eee6;padding:9px 18px;display:flex;align-items:center;gap:14px;font-size:12px;flex-shrink:0}
+.preview strong{letter-spacing:1.4px;font-size:10px}.preview span{opacity:.85}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:250px minmax(0,1fr)}
+/* Sidebar: projects and worktrees only */
+.side{background:#f1f5f2;border-right:1px solid #d6e0da;display:flex;flex-direction:column;min-height:0}
+.side h2{font-size:10px;letter-spacing:1.5px;color:#7a8a80;margin:16px 14px 8px;font-weight:650}
+.proj{margin:0 8px 6px}
+.proj-name{display:flex;align-items:center;gap:8px;padding:7px 8px;font-weight:600;font-size:12.5px}
+.proj-name i{width:20px;height:20px;border-radius:5px;background:#dce9e1;color:#315f4b;display:grid;place-items:center;font-style:normal;font-size:11px}
+.wt{width:100%;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 36px;border:1px solid transparent;background:transparent;border-radius:8px;text-align:left;font-size:12px}
+.wt:hover{background:#e8efea}
+.wt.sel{background:#dfece3;border-color:#b5cdbd;box-shadow:inset 3px 0 #478762}
+.wt small{margin-left:auto;color:#6c7d72;font-size:10.5px;background:#fff;border:1px solid #d6e0da;border-radius:10px;padding:0 6px}
+.side .note{margin:14px;font-size:11px;color:#7a8a80;line-height:1.5}
+/* Main */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.tabs{display:flex;align-items:flex-end;gap:2px;padding:8px 12px 0;background:#eceff5;border-bottom:1px solid #d9deea;flex-shrink:0;position:relative}
+.tab{display:flex;align-items:center;gap:8px;max-width:220px;min-width:120px;padding:9px 12px;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;background:transparent;font-size:12.5px;color:#4b566b;position:relative;top:1px}
+.tab:hover{background:#e3e7ef}
+.tab.sel{background:#fff;border-color:#d9deea;color:#172033;font-weight:600}
+.tab .ic{font-size:14px}.tab .claude{color:#d97757}.tab .codex{color:#172033}
+.tab .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;margin-left:auto}
+.dot.idle{background:#4f9a6b}.dot.working{background:#e0a23a;animation:pulse 1.2s infinite}.dot.approval{background:#d0453a}.dot.starting{background:#9aa4b8;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.plus{margin:0 0 5px 6px;width:30px;height:30px;border:1px solid #c9d1e0;border-radius:8px;background:#fff;font-size:17px;line-height:1;color:#2f5bd3}
+.plus:hover{background:#f0f3fb}
+.menu{position:absolute;top:44px;z-index:5;background:#fff;border:1px solid #d9deea;border-radius:10px;box-shadow:0 14px 40px #17203324;padding:6px;width:250px}
+.menu[hidden]{display:none}
+.menu .mh{font-size:10.5px;color:#7a8499;padding:6px 8px 8px;line-height:1.4}
+.menu button{width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;padding:9px 8px;border-radius:7px;text-align:left}
+.menu button:hover{background:#f0f3fb}.menu button small{margin-left:auto;color:#8a93a6;font-size:10.5px}
+.menu button:disabled{opacity:.45;cursor:default}
+.status-line{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:11.5px;color:#58657d;border-bottom:1px solid #e6e9f0;background:#fff;flex-shrink:0}
+.status-line b{color:#172033;font-weight:600}
+.pill{border-radius:999px;padding:2px 9px;font-size:10.5px;background:#d8f3e5;color:#2e6b45}
+.pill.off{background:#eceff5;color:#6a7488}
+.work{flex:1;min-height:0;display:grid;grid-template-columns:1.1fr 1fr;gap:14px;padding:14px;background:#fff}
+.panel{border:1px solid #d9deea;border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel h3{margin:0;padding:11px 14px;font-size:12.5px;color:#384761;border-bottom:1px solid #eef0f5}
+.feed{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:9px;background:#f6f8ff}
+.msg{background:#fff;border:1px solid #e0e4ed;border-radius:11px;padding:9px 12px;line-height:1.6}
+.msg small{display:block;color:#66718a;font-weight:600;font-size:10.5px;margin-bottom:3px}
+.msg.la{background:#edf1ff}
+.he{direction:rtl;text-align:right}
+.composer{margin:0 14px 14px;border:1px solid #8d9fc4;border-radius:12px;padding:10px;box-shadow:0 0 0 2px #f0f3fb;flex-shrink:0;background:#fff}
+.composer textarea{width:100%;height:58px;border:1px solid #bbc5d8;border-radius:9px;padding:8px;font:inherit;direction:rtl;resize:none}
+.composer .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+.composer .row button{border:1px solid #b7c1d4;border-radius:8px;padding:7px 12px;background:#fff;font-size:12px}
+.composer .row .primary{background:#2f5bd3;border-color:#2f5bd3;color:#fff}
+.composer .row span{margin-left:auto;font-size:11px;color:#7a8499}
+.callout{position:fixed;left:10px;bottom:10px;width:230px;background:#fff;border:1px solid #d9deea;border-radius:12px;box-shadow:0 14px 40px #17203322;padding:14px 16px;font-size:12px;line-height:1.55;z-index:9}
+.callout h4{margin:0 0 6px;font-size:12.5px}.callout ol{margin:0;padding-left:18px}.callout li{margin:3px 0}
+.callout .x{float:right;border:0;background:none;color:#8a93a6;font-size:15px;padding:0}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#243b33;color:#fff;padding:10px 16px;border-radius:8px;font-size:12px;z-index:10}
+.toast[hidden]{display:none}
+@media(max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.work{grid-template-columns:1fr}.callout{display:none}.tab{min-width:90px}}
+</style>
+<body>
+<div class="preview"><strong>DESIGN PREVIEW</strong><span>Session tabs per folder · sample data, nothing is connected</span></div>
+<div class="app">
+ <aside class="side" aria-label="Projects">
+  <h2>PROJECTS</h2>
+  <div id="projects"></div>
+  <p class="note">The sidebar shows only projects and folders (like Superset on the left).<br>Sessions move to the tabs at the top.</p>
+ </aside>
+ <section class="main">
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div class="menu" id="menu" hidden>
+   <div class="mh">New session in <b id="menu-folder"></b><br>Opens in a Terminal window and connects automatically</div>
+   <button data-new="claude"><span class="ic" style="color:#d97757">✳</span>Claude<small>connects to the app</small></button>
+   <button data-new="codex"><span class="ic">◎</span>Codex<small>later step</small></button>
+  </div>
+  <div class="status-line" id="status"></div>
+  <div class="work">
+   <div class="panel"><h3>Live conversation · translated</h3><div class="feed" id="live"></div></div>
+   <div class="panel"><h3>Language Assistant</h3><div class="feed" id="disc"></div>
+    <div class="composer"><textarea id="draft" placeholder="כתוב בעברית…"></textarea>
+     <div class="row"><button>Discuss first</button><button class="primary" id="send">Send to Claude</button><span>Each tab keeps its own draft</span></div></div>
+   </div>
+  </div>
+ </section>
+</div>
+<div class="callout" id="callout"><button class="x" aria-label="Close" onclick="this.parentNode.remove()">×</button><h4>What to try</h4><ol>
+ <li>Click the tabs at the top to switch between sessions in the same folder. One click.</li>
+ <li>Click <b>+</b> → Claude to open a new connected session.</li>
+ <li>Pick a different folder on the left and the tabs change.</li>
+ <li>Type a draft, switch tabs, and come back: the draft is kept.</li></ol></div>
+<div class="toast" id="toast" hidden></div>
+<script>
+const data={
+ 'hebrow-for-terminal':{icon:'H',folders:{
+  'default':[
+   {id:1,agent:'claude',title:'Channel connection',state:'idle',live:['The connection works. Messages now arrive through the channel without approval.','I suggest starting with Claude only.'],disc:['מה הצעד הבא?','אפשר להוסיף כפתור לפתיחת session חדש.']},
+   {id:2,agent:'codex',title:'Session switcher',state:'working',live:['Running the test suite…','14 of 52 tests done.'],disc:['תבדוק למה הבדיקות נכשלות']},
+   {id:3,agent:'claude',title:'Release 0.1.1',state:'approval',live:['Need approval to run npm run desktop:dmg.'],disc:['תכין גרסה חדשה']}],
+  'ori-hebrew-thumbnails':[
+   {id:4,agent:'claude',title:'Thumbnails',state:'idle',live:['The thumbnail generator is ready.'],disc:['תוסיף תמיכה ב-RTL']}]}},
+ 'genie':{icon:'G',folders:{'default':[{id:5,agent:'codex',title:'API refactor',state:'idle',live:['Refactor finished.'],disc:['תסכם מה השתנה']}]}},
+ 'aco':{icon:'A',folders:{'default':[]}}
+};
+const labels={idle:'Idle',working:'Working',approval:'Approval required',starting:'Starting…'};
+let proj='hebrow-for-terminal',folder='default',active=1,nextId=10;const drafts={};
+const $=id=>document.getElementById(id);
+const list=()=>data[proj].folders[folder];
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function renderSide(){let h='';for(const [p,v] of Object.entries(data)){h+=`<div class="proj"><div class="proj-name"><i>${v.icon}</i>${p}</div>`;for(const [f,s] of Object.entries(v.folders)){const sel=p===proj&&f===folder;h+=`<button class="wt${sel?' sel':''}" data-p="${p}" data-f="${f}">${f}<small>${s.length}</small></button>`}h+='</div>'}$('projects').innerHTML=h}
+function renderTabs(){const s=list();$('tabs').innerHTML=s.map(t=>`<button role="tab" class="tab${t.id===active?' sel':''}" aria-selected="${t.id===active}" data-id="${t.id}" title="${labels[t.state]}"><span class="ic ${t.agent}">${t.agent==='claude'?'✳':'◎'}</span><span class="lbl">${t.agent==='claude'?'Claude':'Codex'} · ${esc(t.title)}</span><span class="dot ${t.state}" aria-label="${labels[t.state]}"></span></button>`).join('')+`<button class="plus" id="plus" aria-label="New session" aria-expanded="${!$('menu').hidden}">+</button>`}
+function renderBody(){const t=list().find(x=>x.id===active);
+ if(!t){$('status').innerHTML=`<b>${proj} / ${folder}</b><span>No open sessions in this folder. Click + to open one.</span>`;$('live').innerHTML='';$('disc').innerHTML='';$('send').textContent='Send';return}
+ $('status').innerHTML=`<b>${proj} / ${folder}</b><span>${t.agent==='claude'?'Claude':'Codex'} · ${labels[t.state]}</span>`+(t.agent==='claude'?(t.state==='starting'?'<span class="pill off">Connecting…</span>':'<span class="pill">Channel connected</span>'):'');
+ $('live').innerHTML=t.live.map(m=>`<div class="msg"><small>${t.agent==='claude'?'CLAUDE':'CODEX'} · translated</small><div>${esc(m)}</div></div>`).join('');
+ $('disc').innerHTML=t.disc.map(m=>`<div class="msg la he"><small>אתה</small><div>${esc(m)}</div></div>`).join('');
+ $('send').textContent='Send to '+(t.agent==='claude'?'Claude':'Codex');$('draft').value=drafts[t.id]||''}
+function render(){renderSide();renderTabs();renderBody()}
+function select(id){const cur=list().find(x=>x.id===active);if(cur)drafts[cur.id]=$('draft').value;active=id;render()}
+function toast(t){$('toast').textContent=t;$('toast').hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').hidden=true,3200)}
+function placeMenu(){const p=$('plus');$('menu').style.left=Math.min(p.offsetLeft,innerWidth-270)+'px';$('menu-folder').textContent=proj+' / '+folder}
+document.addEventListener('click',e=>{
+ const tab=e.target.closest('.tab');if(tab){select(+tab.dataset.id);return}
+ if(e.target.closest('#plus')){$('menu').hidden=!$('menu').hidden;placeMenu();renderTabs();return}
+ const n=e.target.closest('[data-new]');if(n){$('menu').hidden=true;
+  if(n.dataset.new==='codex'){toast('Codex would come in a later step. This preview opens Claude only.');renderTabs();return}
+  const t={id:nextId++,agent:'claude',title:'New session',state:'starting',live:['Opening Claude in a Terminal window…','Accept Claude’s one-time approval in the terminal.'],disc:[]};
+  list().push(t);select(t.id);toast('A Terminal window opens. Accept Claude’s approval there once.');
+  setTimeout(()=>{t.state='idle';t.live=['Claude is ready. Write here and it goes straight to this session.'];if(active===t.id)renderBody();renderTabs();renderSide();toast('Connected. The new tab is ready to use.')},2600);return}
+ const wt=e.target.closest('.wt');if(wt){const cur=list().find(x=>x.id===active);if(cur)drafts[cur.id]=$('draft').value;proj=wt.dataset.p;folder=wt.dataset.f;active=(list()[0]||{}).id;$('menu').hidden=true;render();return}
+ if(!e.target.closest('#menu')&&!$('menu').hidden){$('menu').hidden=true;renderTabs()}
+});
+$('send').onclick=()=>toast('Preview only: sending is disabled.');
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('menu').hidden){$('menu').hidden=true;renderTabs()}});
+render();
+</script></body></html>

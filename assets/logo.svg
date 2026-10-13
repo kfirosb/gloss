@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <title>Gloss</title>
+  <g fill="#111111">
+    <path d="M250 500 A250 250 0 0 1 750 500 L610 500 A110 110 0 0 0 390 500 Z"/>
+    <path d="M537 93 L945 500 L537 500 Z"/>
+    <g transform="rotate(180 500 500)">
+      <path d="M250 500 A250 250 0 0 1 750 500 L610 500 A110 110 0 0 0 390 500 Z"/>
+      <path d="M537 93 L945 500 L537 500 Z"/>
+    </g>
+  </g>
+</svg>

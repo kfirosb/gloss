@@ -1,0 +1,181 @@
+import type { OpenSessionScan } from './session-catalog.js';
+import type { FileReference } from './file-references.js';
+import type { LanguageSettings } from './language-settings.js';
+export type { FileReference, FileReferenceStore, FileRegistry } from './file-references.js';
+export type AgentKind = 'claude' | 'codex';
+export type CodingState = 'idle' | 'working' | 'approval-required' | 'disconnected';
+export type DeliveryState = 'sending' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
+
+export interface Target { agent: AgentKind; sessionRef: string; projectId: string }
+export interface ImageAttachment { kind?: 'image'; index?:number; id:string; name:string; mime:string; size:number; path:string }
+export type Attachment = FileReference | ImageAttachment;
+export interface Draft {
+  attachments?: Attachment[];
+  selectedDiscussion?: number[];
+  id: string; revision: number; target: Target; sourceRevision: number;
+  language: string; localizedText: string; englishText: string;
+}
+export interface Delivery {
+  transport?: 'channel' | 'peer';
+  channelGeneration?: string;
+  referenceFormat?: 'manifest-v1';
+  attachments?: Attachment[];
+  nativeMessageId?: string;
+  nativeAfterRevision?: number;
+  id: string; draftId: string; revision: number; target: Target;
+  englishText: string; state: DeliveryState; reason?: string;
+}
+/** The channel accepted the handoff; Claude's matching reply is still pending. */
+export function isChannelAwaitingReply(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
+  return delivery.transport === 'channel' && delivery.state === 'queued';
+}
+/** A submitted draft can be released without claiming that Claude has replied. */
+export function isDeliverySubmitted(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
+  return delivery.state === 'sent' || isChannelAwaitingReply(delivery);
+}
+export interface AgentMessage {
+  clientId?: string;
+  sourceId: string; revision: number; role: 'user' | 'assistant';
+  text: string; complete: boolean;
+  timestamp?: string;
+  translatedText?: string; translationStatus?: 'pending' | 'complete' | 'error';
+}
+/** Revisions belong to a source namespace. Claude channel sequences are not byte offsets. */
+export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind): AgentMessage[] {
+  if (agent !== 'claude') return messages.sort((a, b) => a.revision - b.revision);
+  return messages.sort((a, b) => {
+    const time = (message: AgentMessage) => Date.parse(message.timestamp ?? '') || 0;
+    const chronological = time(a) - time(b);
+    if (chronological) return chronological;
+    const channelA = a.sourceId.startsWith('channel:');
+    const channelB = b.sourceId.startsWith('channel:');
+    return channelA === channelB ? a.revision - b.revision : Number(channelA) - Number(channelB);
+  });
+}
+export function canSendWhileWorking(capabilities: Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy'> | undefined, transport?: 'channel' | 'peer'): boolean {
+  return Boolean(capabilities?.sendWhileBusy || (transport === 'channel' && capabilities?.channelSendWhileBusy));
+}
+export interface AgentCapabilities {
+  imageAttachments?: boolean;
+  fileReferences?: boolean;
+  history: boolean; liveMessages: boolean; attachExisting: boolean;
+  sendWhileBusy: boolean;
+  /** Verified channel transport queues messages until the agent is free, so it may send while 'working'. */
+  channelSendWhileBusy?: boolean;
+  acknowledgement: 'none' | 'queued' | 'accepted';
+}
+export type AgentEvent =
+  | { type: 'message'; message: AgentMessage }
+  | { type: 'status'; state: CodingState }
+  | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
+  | { type: 'gap'; reason: string };
+export interface CodingConnection {
+  target: Target; capabilities: AgentCapabilities;
+  history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }>;
+  events(signal: AbortSignal): AsyncIterable<AgentEvent>;
+  reconcileDelivery?(delivery: Delivery): Promise<boolean>;
+  send(requestId: string, englishText: string, attachments?: Attachment[], context?: SendContext): Promise<{ state: DeliveryState; reason?: string; nativeMessageId?: string; nativeAfterRevision?: number; channelGeneration?: string }>;
+  detach(): Promise<void>;
+}
+export interface SendContext { panelSessionId: string; transport: 'channel' | 'peer' }
+export interface AgentAdapter {
+  kind: AgentKind;
+  discover(projectPath: string): Promise<Target[]>;
+  discoverOpen?(signal: AbortSignal): Promise<OpenSessionScan>;
+  attach(target: Target, context?: { panelSessionId: string }): Promise<CodingConnection>;
+}
+export interface LanguageTurn { id?:string; complete?:boolean; attachments?: Attachment[]; role: 'user' | 'assistant'; text: string }
+export interface LanguageInput {
+  fileContext?: {id:string; index:number; text?:string; unreadable?:string}[];
+  reviewText?: string;
+  language: string; deliveryLanguage?: string; projectContext: string;
+  codingMessages: AgentMessage[]; discussion: LanguageTurn[]; selectedDiscussion?: LanguageTurn[];
+}
+export interface LanguageSession {
+  summarize(text:string,language:string,signal:AbortSignal):Promise<string>;
+  id: string;
+  discuss(input: LanguageInput, signal: AbortSignal): AsyncIterable<string>;
+  prepare(input: LanguageInput, signal: AbortSignal): Promise<{ localizedText: string; englishText: string }>;
+  translate(text: string, language: string, signal: AbortSignal): Promise<string>;
+  resetContext(): Promise<void>;
+  close(): Promise<void>;
+}
+export interface LanguageBackend {
+  models(): Promise<{ id: string; label: string }[]>;
+  open(model: string, resumeId?: string): Promise<LanguageSession>;
+}
+export interface HostAdapter {
+  openPanel(url: string): Promise<void>;
+  revealCodingSession(target: Target): Promise<void>;
+}
+
+export interface ConversationSnapshot {
+  id: string;
+  target?: Target;
+  codingState: CodingState;
+  codingMessages: AgentMessage[];
+  discussion: LanguageTurn[];
+  currentDraft?: Draft;
+  composerDraft?: Draft;
+  deliveries: Delivery[];
+  language: string;
+  languageSettings?: LanguageSettings;
+  languageSessionId: string;
+  languageModel: string;
+  sourceRevision: number;
+  historyCursor?: string;
+  sourceSessionId?: string;
+  sourceCursor?: string;
+  sourceSequence?: number;
+  capabilities?: AgentCapabilities;
+  sourceGaps?: string[];
+  hostMetadata?: Record<string, unknown>;
+}
+
+export interface SourceMessage {
+  timestamp?: string;
+  sourceSessionId: string;
+  sourceId: string;
+  sequence: number;
+  role: 'user' | 'assistant';
+  text: string;
+  complete?: boolean;
+  cursor?: string;
+}
+
+export interface TranslationKey {
+  sourceScope: string;
+  sourceId: string;
+  sourceRevision: number;
+  contentHash: string;
+  language: string;
+  model: string;
+  promptVersion: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  projectId?: string;
+  target?: Target;
+  language: string;
+  languageModel: string;
+  sourceRevision: number;
+}
+
+export interface ConversationStore {
+  releaseComposerAttempt(conversationId: string, requestId: string): void;
+  getSummary(key: import('./summary-contracts.js').SummaryKey): string | undefined;
+  putSummary(key: import('./summary-contracts.js').SummaryKey, text:string): void;
+  load(id: string): ConversationSnapshot | undefined;
+  save(snapshot: ConversationSnapshot): void;
+  claimDelivery(delivery: Delivery): boolean;
+  updateDelivery(delivery: Delivery): void;
+  getTranslation(key: TranslationKey): string | undefined;
+  putTranslation(key: TranslationKey, text: string): void;
+  readContext(projectId: string): string | undefined;
+  writeContext(projectId: string, text: string): void;
+  deleteContext(projectId: string): void;
+  deleteConversation(id: string): void;
+  list(projectId?: string): ConversationSummary[];
+  recoverInFlightDeliveries(): number;
+}

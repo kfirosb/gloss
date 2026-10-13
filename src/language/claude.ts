@@ -1,0 +1,40 @@
+import { readFile } from 'node:fs/promises';
+import type { LanguageBackend, LanguageSession } from '../core/contracts.js';
+import { classifyError, LanguageError, LanguageWorkers, requireSubscription, type BackendOptions, type ResponseParser } from './shared.js';
+export { LanguageError } from './shared.js';
+
+export const DEFAULT_CLAUDE_MODEL = 'haiku';
+function parser(): ResponseParser {
+  let streamed = '';
+  let assistant = '';
+  let final: string | undefined;
+  return {
+    accept(event) {
+      if (event.type === 'error' || (event.type === 'result' && (event.is_error || event.subtype !== 'success'))) throw classifyError(event);
+      const delta = event.type === 'stream_event' && event.event?.type === 'content_block_delta' ? event.event.delta : undefined;
+      if (delta?.type === 'text_delta' && typeof delta.text === 'string') { streamed += delta.text; return delta.text; }
+      if (event.type === 'assistant' && Array.isArray(event.message?.content)) assistant = event.message.content.filter((block: any) => block.type === 'text' && typeof block.text === 'string').map((block: any) => block.text).join('');
+      if (event.type === 'result' && typeof event.result === 'string') final = event.result;
+      return '';
+    },
+    finish() { if (final === undefined) throw new LanguageError('invalid-output'); return final || streamed || assistant; },
+  };
+}
+export class ClaudeLanguageBackend implements LanguageBackend {
+  private readonly workers: LanguageWorkers;
+  constructor(private readonly options: BackendOptions = {}) {
+    this.workers = new LanguageWorkers({ executable: 'claude', parser, args: (model, images=[]) => [
+      '--safe-mode', '-p', '--model', model, '--tools', '', '--no-session-persistence',
+      ...(images.length?['--input-format','stream-json']:[]), '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    ], async input(prompt,images) {
+      if(!images.length)return prompt;
+      const content = [{type:'text',text:prompt}, ...await Promise.all(images.map(async image=>({type:'image',source:{type:'base64',media_type:image.mime,data:(await readFile(image.path)).toString('base64')}})))];
+      return JSON.stringify({type:'user',message:{role:'user',content}})+'\n';
+    } }, options);
+  }
+  async models() {
+    // Documented CLI aliases, not a claim that every subscription has access.
+    return ['haiku', 'sonnet', 'opus'].map(id => ({ id, label: `${id} (CLI alias; account access checked on use)` }));
+  }
+  async open(model: string = DEFAULT_CLAUDE_MODEL, _resumeId?: string): Promise<LanguageSession> { await requireSubscription('claude', this.options); return this.workers.session(model); }
+}

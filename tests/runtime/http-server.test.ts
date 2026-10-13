@@ -1,0 +1,9 @@
+import { describe, expect, it } from 'vitest';
+import { startServer } from '../../src/runtime/http-server.js';
+import type { Application } from '../../src/runtime/application.js';
+const snapshot = { sequence: 0, snapshot: { id: 'c', codingState: 'disconnected', codingMessages: [], discussion: [], deliveries: [], language: 'he', languageSessionId: 'l', languageModel: 'm', sourceRevision: 0 } } as any;
+function fake(): Application { const listeners = new Set<(v: any) => void>(); return { capability: 'cap', snapshot: () => snapshot, action: async () => snapshot, subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); }, close: async () => undefined }; }
+describe('local application HTTP boundary', () => {
+  it('requires the launch capability and accepts authenticated snapshots', async () => { const server = await startServer(fake()); try { const denied = await fetch(server.url.replace(/#.*$/, '') + 'api/snapshot'); expect(denied.status).toBe(401); const allowed = await fetch(server.url.replace(/#.*$/, '') + 'api/snapshot', { headers: { authorization: 'Bearer cap' } }); expect(allowed.status).toBe(200); expect((await allowed.json()).snapshot.id).toBe('c'); } finally { await server.close(); } });
+  it('bounds malformed and oversized action bodies', async () => { const server = await startServer(fake()); try { const base = server.url.replace(/#.*$/, '') + 'api/actions'; const malformed = await fetch(base, { method: 'POST', headers: { authorization: 'Bearer cap', 'content-type': 'application/json' }, body: '{' }); expect(malformed.status).toBe(400); const huge = await fetch(base, { method: 'POST', headers: { authorization: 'Bearer cap', 'content-type': 'application/json' }, body: 'x'.repeat(256001) }); expect(huge.status).toBe(400); } finally { await server.close(); } });
+});

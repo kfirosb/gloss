@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Language settings · Design preview</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#23322f;background:#f6f7fb;font-size:13px}
+*{box-sizing:border-box}body{margin:0;height:100dvh;display:flex;flex-direction:column}
+button,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid #2f5bd3;outline-offset:2px}
+.preview{background:#243b33;color:#e0eee6;padding:9px 18px;display:flex;align-items:center;gap:14px;font-size:12px;flex-shrink:0}
+.preview strong{letter-spacing:1.4px;font-size:10px}.preview .sp{margin-left:auto}
+.preview button{border:1px solid #698278;background:transparent;color:#fff;border-radius:6px;padding:5px 10px;font-size:12px}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:230px minmax(0,1fr)}
+.side{background:#f1f5f2;border-right:1px solid #d6e0da;display:flex;flex-direction:column}
+.side h2{font-size:10px;letter-spacing:1.5px;color:#7a8a80;margin:16px 14px 8px;font-weight:650}
+.wt{margin:0 8px;padding:7px 10px;border-radius:8px;font-size:12px}
+.wt.sel{background:#dfece3;box-shadow:inset 3px 0 #478762;font-weight:600}
+.side .gear{margin:auto 10px 12px;display:flex;align-items:center;gap:8px;border:1px solid #d0dad3;background:#fff;border-radius:8px;padding:8px 10px;font-size:12px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.tabs{display:flex;align-items:flex-end;gap:2px;padding:8px 12px 0;background:#eceff5;border-bottom:1px solid #d9deea;flex-shrink:0}
+.tab{display:flex;align-items:center;gap:7px;padding:9px 12px;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;background:transparent;font-size:12.5px;color:#4b566b;position:relative;top:1px}
+.tab.sel{background:#fff;border-color:#d9deea;color:#172033;font-weight:600}
+.tab .flag{font-size:10px;font-weight:600;border-radius:4px;padding:1px 4px;background:#e3e7ef;color:#4b566b}
+.tab.sel .flag{background:#edf1ff;color:#2f5bd3}
+.dot{width:7px;height:7px;border-radius:50%;background:#4f9a6b}
+.plus{margin:0 0 5px 6px;width:30px;height:30px;border:1px solid #c9d1e0;border-radius:8px;background:#fff;font-size:17px;color:#2f5bd3}
+.bar{display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #e6e9f0;background:#fff;flex-shrink:0;font-size:11.5px;color:#58657d;position:relative}
+.bar b{color:#172033}
+.langchip{margin-left:auto;display:flex;align-items:center;gap:6px;border:1px solid #c9d1e0;background:#fff;border-radius:999px;padding:4px 11px;font-size:11.5px}
+.langchip:hover{background:#f0f3fb}
+.cost{font-size:10.5px;border-radius:999px;padding:2px 8px;background:#d8f3e5;color:#2e6b45}
+.cost.paid{background:#fff3dc;color:#8a5a12}
+.pop{position:absolute;right:14px;top:38px;z-index:6;width:340px;background:#fff;border:1px solid #d9deea;border-radius:12px;box-shadow:0 16px 44px #17203326;padding:14px}
+.pop[hidden],.modal[hidden]{display:none}
+.pop h4{margin:0 0 3px;font-size:13px}.pop p{margin:0 0 10px;color:#7a8499;font-size:11px}
+.set{display:grid;grid-template-columns:1fr 128px;align-items:center;gap:6px 10px;margin:9px 0}
+.set label{font-size:12px}.set small{grid-column:1/-1;color:#8a93a6;font-size:10.5px;margin-top:-4px}
+.set select{border:1px solid #bbc5d8;border-radius:7px;padding:5px 6px;background:#fff;font-size:12px}
+.flow{margin-top:10px;padding:9px 10px;background:#f6f8ff;border-radius:8px;font-size:11px;line-height:1.7;color:#4b566b}
+.flow b{color:#172033}
+.pop .row{display:flex;gap:8px;margin-top:12px}
+.pop .row button,.modal .row button{border:1px solid #b7c1d4;border-radius:7px;padding:6px 11px;background:#fff;font-size:12px}
+.primary{background:#2f5bd3!important;border-color:#2f5bd3!important;color:#fff}
+.work{flex:1;min-height:0;display:grid;grid-template-columns:1.1fr 1fr;gap:14px;padding:14px;background:#fff}
+.panel{border:1px solid #d9deea;border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel h3{margin:0;padding:11px 14px;font-size:12.5px;color:#384761;border-bottom:1px solid #eef0f5;display:flex;justify-content:space-between}
+.panel h3 span{font-weight:400;color:#8a93a6;font-size:11px}
+.feed{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:9px;background:#f6f8ff}
+.msg{background:#fff;border:1px solid #e0e4ed;border-radius:11px;padding:10px 13px;line-height:1.6}
+.msg small{display:block;color:#66718a;font-weight:600;font-size:10.5px;margin-bottom:4px}
+.msg.la{background:#edf1ff}.msg h5{margin:4px 0;font-size:13px}.msg ul{margin:4px 0;padding-inline-start:20px}
+.msg code{background:#eef1f7;padding:1px 5px;border-radius:4px;font-size:12px}
+.rtl{direction:rtl;text-align:right}
+.composer{margin:0 14px 14px;border:1px solid #8d9fc4;border-radius:12px;padding:10px;background:#fff;flex-shrink:0}
+.composer textarea{width:100%;height:54px;border:1px solid #bbc5d8;border-radius:9px;padding:8px;resize:none}
+.composer .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+.composer .row button{border:1px solid #b7c1d4;border-radius:8px;padding:7px 12px;background:#fff;font-size:12px}
+.composer .row span{margin-left:auto;font-size:11px;color:#7a8499}
+.modal{position:fixed;inset:0;background:#17203344;display:grid;place-items:center;z-index:20}
+.card{width:min(460px,calc(100% - 32px));background:#fff;border-radius:14px;box-shadow:0 24px 70px #17203340;padding:18px 20px}
+.card h3{margin:0 0 4px;font-size:15px}.card>p{margin:0 0 12px;color:#7a8499;font-size:12px}
+.card .row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.seg{display:flex;gap:6px;margin:6px 0 4px}.seg button{flex:1;border:1px solid #c9d1e0;background:#fff;border-radius:8px;padding:8px;font-size:12px}
+.seg button.on{border-color:#2f5bd3;background:#edf1ff;color:#2f5bd3;font-weight:600}
+hr{border:0;border-top:1px solid #eef0f5;margin:12px 0}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#243b33;color:#fff;padding:10px 16px;border-radius:8px;font-size:12px;z-index:30}
+.toast[hidden]{display:none}
+@media(max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.work{grid-template-columns:1fr}.pop{right:8px;left:8px;width:auto}}
+</style>
+<body>
+<div class="preview"><strong>DESIGN PREVIEW</strong><span>Language settings · sample data</span><span class="sp"></span><button id="open-defaults">⚙ Default settings</button><button id="open-new">+ New session</button></div>
+<div class="app">
+ <aside class="side"><h2>PROJECTS</h2><div class="wt sel">hebrow-for-terminal / default</div><div class="wt">genie / default</div>
+  <button class="gear" id="gear">⚙ Language defaults</button></aside>
+ <section class="main">
+  <div class="tabs" id="tabs"></div>
+  <div class="bar"><b>hebrow-for-terminal / default</b><span id="agent"></span><span class="cost" id="cost"></span>
+   <button class="langchip" id="chip" aria-expanded="false"></button>
+   <div class="pop" id="pop" hidden>
+    <h4>Languages for this session</h4><p>Applies to this tab only. Defaults are unchanged.</p>
+    <div id="pop-sets"></div>
+    <div class="flow" id="flow"></div>
+    <div class="row"><button id="reset">Reset to defaults</button><button class="primary" id="close-pop" style="margin-left:auto">Done</button></div>
+   </div>
+  </div>
+  <div class="work">
+   <div class="panel"><h3>Live conversation <span id="live-mode"></span></h3><div class="feed" id="live"></div></div>
+   <div class="panel"><h3>Language Assistant <span id="la-mode"></span></h3><div class="feed" id="disc"></div>
+    <div class="composer"><textarea id="draft"></textarea><div class="row"><button>Discuss first</button><button class="primary" id="send"></button><span id="send-note"></span></div></div></div>
+  </div>
+ </section>
+</div>
+<div class="modal" id="defaults" hidden><div class="card"><h3>Language defaults</h3><p>Every new session starts with these. You can change them per session later.</p><div id="def-sets"></div><div class="row"><button id="def-cancel">Cancel</button><button class="primary" id="def-save">Save defaults</button></div></div></div>
+<div class="modal" id="newmodal" hidden><div class="card"><h3>New session</h3><p>hebrow-for-terminal / default</p>
+ <div style="font-size:12px;font-weight:600">Agent</div><div class="seg" id="agent-seg"><button class="on" data-a="Claude">✳ Claude</button><button data-a="Codex">◎ Codex</button></div>
+ <hr><div style="font-size:12px;font-weight:600">Languages <span style="font-weight:400;color:#8a93a6">· from your defaults</span></div><div id="new-sets"></div>
+ <div class="row"><button id="new-cancel">Cancel</button><button class="primary" id="new-go">Open session</button></div></div></div>
+<div class="toast" id="toast" hidden></div>
+<script>
+const L={he:'Hebrew',en:'English'};
+const fields=[
+ {k:'write',label:'I write in',hint:'Sets the composer direction (Hebrew = right to left)'},
+ {k:'send',label:'Send to the agent in',hint:'What the coding session receives'},
+ {k:'reply',label:'Show agent replies in',hint:'English = original text, no translation'},
+ {k:'assist',label:'Language Assistant speaks',hint:'The discussion with the assistant'}];
+let defaults={write:'he',send:'en',reply:'he',assist:'he'};
+const sessions=[{id:1,agent:'Claude',title:'Channel connection',lang:{...defaults}},{id:2,agent:'Codex',title:'Session switcher',lang:{write:'he',send:'en',reply:'en',assist:'he'}},{id:3,agent:'Claude',title:'Release 0.1.1',lang:{write:'en',send:'en',reply:'en',assist:'en'}}];
+let active=1,newAgent='Claude',newLang;const $=id=>document.getElementById(id);
+const cur=()=>sessions.find(s=>s.id===active);
+const short=l=>`${l.write==='he'?'HE':'EN'}→${l.send==='he'?'HE':'EN'}→${l.reply==='he'?'HE':'EN'}`;
+function sets(lang,prefix){return fields.map(f=>`<div class="set"><label for="${prefix+f.k}">${f.label}</label><select id="${prefix+f.k}" data-k="${f.k}">${Object.entries(L).map(([v,n])=>`<option value="${v}" ${lang[f.k]===v?'selected':''}>${n}${v==='he'?' (RTL)':''}</option>`).join('')}</select><small>${f.hint}</small></div>`).join('')}
+function flow(l){const out=l.write!==l.send,inn=l.reply!=='en';
+ return `<b>You type</b> ${L[l.write]} → ${out?'<b>translated</b> to ':'sent as is in '}${L[l.send]}<br><b>Agent replies</b> English → ${inn?'<b>translated</b> to '+L[l.reply]:'shown as is, formatted'}<br>${!out&&!inn?'✓ No translation tokens for this session':'Translation tokens used for: '+[out&&'your messages',inn&&'replies'].filter(Boolean).join(' + ')}`}
+function cost(l){const n=(l.write!==l.send)+(l.reply!=='en');$('cost').textContent=n?'Translation on':'No translation';$('cost').className='cost'+(n?' paid':'')}
+function renderTabs(){$('tabs').innerHTML=sessions.map(s=>`<button class="tab${s.id===active?' sel':''}" data-id="${s.id}"><span style="color:${s.agent==='Claude'?'#d97757':'#172033'}">${s.agent==='Claude'?'✳':'◎'}</span>${s.agent} · ${s.title}<span class="flag">${short(s.lang)}</span><span class="dot"></span></button>`).join('')+'<button class="plus" id="plus" aria-label="New session">+</button>'}
+const reply={en:`<h5>Summary</h5><ul><li>Added the <code>sessionLanguage</code> setting</li><li>Translation is skipped when reply language is English</li></ul>All 52 tests pass.`,
+ he:`<h5>סיכום</h5><ul><li>נוספה ההגדרה <code>sessionLanguage</code></li><li>התרגום מדולג כששפת התשובות היא אנגלית</li></ul>כל 52 הבדיקות עוברות.`};
+function renderBody(){const s=cur(),l=s.lang;$('agent').textContent=s.agent;cost(l);$('chip').innerHTML=`🌐 ${short(l)} <span style="color:#8a93a6">▾</span>`;
+ $('live-mode').textContent=l.reply==='en'?'original English':'translated to Hebrew';
+ $('live').innerHTML=`<div class="msg${l.reply==='he'?' rtl':''}"><small>${s.agent.toUpperCase()} · ${l.reply==='en'?'original':'translated'}</small>${reply[l.reply]}</div>`;
+ $('la-mode').textContent=L[l.assist];
+ $('disc').innerHTML=l.assist==='he'?`<div class="msg la rtl"><small>Language Assistant</small>הסשן הזה מוגדר: כותב ב${l.write==='he'?'עברית':'אנגלית'}, שולח ב${l.send==='he'?'עברית':'אנגלית'}, תשובות ב${l.reply==='he'?'עברית':'אנגלית'}.</div>`:`<div class="msg la"><small>Language Assistant</small>This session: you write in ${L[l.write]}, send in ${L[l.send]}, replies in ${L[l.reply]}.</div>`;
+ const t=$('draft');t.dir=l.write==='he'?'rtl':'ltr';t.placeholder=l.write==='he'?'כתוב בעברית…':'Write in English…';
+ $('send').textContent=`Send to ${s.agent} in ${L[l.send]}`;$('send-note').textContent=l.write!==l.send?'Translated before sending':'Sent exactly as typed';
+ $('pop-sets').innerHTML=sets(l,'p-');$('flow').innerHTML=flow(l)}
+function render(){renderTabs();renderBody()}
+function toast(t){$('toast').textContent=t;$('toast').hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').hidden=true,3000)}
+function openDefaults(){$('def-sets').innerHTML=sets(defaults,'d-');$('defaults').hidden=false}
+function openNew(){newLang={...defaults};$('new-sets').innerHTML=sets(newLang,'n-');$('newmodal').hidden=false}
+document.addEventListener('click',e=>{const t=e.target.closest('.tab');if(t){active=+t.dataset.id;$('pop').hidden=true;render();return}
+ if(e.target.closest('#plus')||e.target.closest('#open-new')){openNew();return}
+ if(e.target.closest('#gear')||e.target.closest('#open-defaults')){openDefaults();return}
+ if(e.target.closest('#chip')){$('pop').hidden=!$('pop').hidden;$('chip').setAttribute('aria-expanded',String(!$('pop').hidden));return}
+ const a=e.target.closest('#agent-seg button');if(a){newAgent=a.dataset.a;document.querySelectorAll('#agent-seg button').forEach(b=>b.classList.toggle('on',b===a));return}
+ if(!e.target.closest('#pop')&&!$('pop').hidden){$('pop').hidden=true}});
+document.addEventListener('change',e=>{const k=e.target.dataset.k;if(!k)return;const v=e.target.value;
+ if(e.target.id.startsWith('p-')){cur().lang[k]=v;render();$('pop').hidden=false}
+ else if(e.target.id.startsWith('n-'))newLang[k]=v;
+ else if(e.target.id.startsWith('d-'))e.target.closest('.card').dataset.dirty=1});
+$('close-pop').onclick=()=>$('pop').hidden=true;
+$('reset').onclick=()=>{cur().lang={...defaults};render();$('pop').hidden=false;toast('This session now uses your defaults.')};
+$('def-cancel').onclick=()=>$('defaults').hidden=true;
+$('def-save').onclick=()=>{for(const f of fields)defaults[f.k]=$('d-'+f.k).value;$('defaults').hidden=true;toast('Defaults saved. Existing sessions keep their own settings.')};
+$('new-cancel').onclick=()=>$('newmodal').hidden=true;
+$('new-go').onclick=()=>{const s={id:Date.now(),agent:newAgent,title:'New session',lang:{...newLang}};sessions.push(s);active=s.id;$('newmodal').hidden=true;render();toast(`${newAgent} opened in the background with ${short(s.lang)}.`)};
+$('send').onclick=()=>toast('Preview only: sending is disabled.');
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('pop').hidden=true;$('defaults').hidden=true;$('newmodal').hidden=true}});
+render();
+</script></body></html>

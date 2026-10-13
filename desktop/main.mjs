@@ -1,0 +1,83 @@
+// Native macOS shell: runs the local server on Electron's bundled Node and shows the UI in an app window.
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { spawn, execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const configPath = () => join(app.getPath('userData'), 'desktop.json');
+let server; let panelUrl; let mainWindow; let quitting = false;
+
+function readConfig() { try { return JSON.parse(readFileSync(configPath(), 'utf8')); } catch { return {}; } }
+function writeConfig(config) { mkdirSync(dirname(configPath()), { recursive: true }); writeFileSync(configPath(), JSON.stringify(config, null, 2), { mode: 0o600 }); }
+
+// Apps opened from Finder get a minimal PATH; the server needs `claude` and `codex` from the user's shell.
+function loginShellPath() {
+  try { return execFileSync(process.env.SHELL || '/bin/zsh', ['-lic', 'printf "__PATH__%s" "$PATH"'], { encoding: 'utf8', timeout: 5000 }).split('__PATH__').pop().trim(); }
+  catch { return [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local/bin')].filter(Boolean).join(':'); }
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => { const probe = createServer(); probe.once('error', reject); probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); }); });
+}
+
+function startServer(port, capability, path) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(appRoot, 'dist/server/runtime/cli.js'), '--port', String(port), '--project', homedir()], {
+      // process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE child, so the bundled tmux path travels explicitly.
+      cwd: appRoot, env: { ...process.env, PATH: path, ELECTRON_RUN_AS_NODE: '1', LANGUAGE_PANEL_CAPABILITY: capability, ...(app.isPackaged ? { LANGUAGE_ASSISTANT_TMUX: join(process.resourcesPath, 'bin', 'tmux') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let buffered = ''; let errors = '';
+    child.stdout.on('data', chunk => {
+      if (panelUrl) return; buffered += chunk;
+      const line = buffered.split('\n').find(value => value.startsWith('http://'));
+      if (line) { panelUrl = line.trim(); resolve(child); }
+    });
+    child.stderr.on('data', chunk => { errors += chunk; });
+    child.once('exit', code => { if (!panelUrl) reject(new Error(errors.trim() || `Server exited (${code})`)); else if (!quitting) app.quit(); });
+  });
+}
+
+async function boot() {
+  const config = readConfig(); config.capability ??= randomUUID(); config.port ??= await freePort(); writeConfig(config);
+  const path = loginShellPath();
+  // Keep the same port so browser-side recovery for this origin survives restarts; move only if it is taken.
+  try { server = await startServer(config.port, config.capability, path); }
+  catch { config.port = await freePort(); writeConfig(config); server = await startServer(config.port, config.capability, path); }
+}
+
+function createWindow() {
+  const { bounds } = readConfig();
+  mainWindow = new BrowserWindow({ width: 1400, height: 900, minWidth: 720, minHeight: 480, ...bounds, title: 'Language Assistant', show: false, webPreferences: { contextIsolation: true, sandbox: true, preload: join(appRoot, 'desktop/preload.cjs') } });
+  const origin = new URL(panelUrl).origin;
+  ipcMain.removeHandler('pick-folder');
+  // Only the app's own page may open the picker; the result is validated again by the server.
+  ipcMain.handle('pick-folder', async event => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || new URL(event.senderFrame?.url ?? 'about:blank').origin !== origin) return null;
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
+  mainWindow.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== origin) { event.preventDefault(); if (/^https?:/.test(url)) void shell.openExternal(url); } });
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.on('close', () => writeConfig({ ...readConfig(), bounds: mainWindow.getBounds() }));
+  mainWindow.on('closed', () => { mainWindow = undefined; });
+  void mainWindow.loadURL(panelUrl);
+}
+
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.setName('Language Assistant');
+  app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
+  app.on('activate', () => { if (!mainWindow && panelUrl) createWindow(); });
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  app.on('before-quit', () => { quitting = true; server?.kill(); });
+  app.whenReady().then(boot).then(createWindow).catch(async error => {
+    dialog.showErrorBox('Language Assistant could not start', error instanceof Error ? error.message : String(error));
+    app.quit();
+  });
+}

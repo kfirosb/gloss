@@ -1,0 +1,134 @@
+// tests/runtime/tmux.test.ts
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, rm, symlink, chmod, realpath, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os'; import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { createTmux, ensureSocketDirectory, locateTmux, sessionNameFor, tmuxCandidates, TmuxUnavailable } from '../../src/runtime/tmux.js';
+import type { ProcessOptions } from '../../src/runtime/process-runner.js';
+
+const dirs: string[] = []; const stateDirs: string[] = [];
+afterEach(async () => {
+  for (const state of stateDirs.splice(0)) {
+    // Kill the private server this test may have started; ignore failures when none is running.
+    await new Promise<void>(resolve => execFile('/opt/homebrew/bin/tmux', ['-S', join(state, 'tmux', 'socket'), 'kill-server'], () => resolve()));
+  }
+  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+});
+const temp = async () => { const d = await realpath(await mkdtemp(join(tmpdir(), 'la-tmux-'))); dirs.push(d); return d; };
+const stateTemp = async () => { const d = await temp(); stateDirs.push(d); return d; };
+const available = await locateTmux().then(() => true, () => false);
+
+it('reports tmux unavailable', async () => { await expect(locateTmux(['/nonexistent/tmux'])).rejects.toBeInstanceOf(TmuxUnavailable); });
+it('falls back to the bundled tmux in resourcesPath when the Homebrew paths are absent', async () => {
+  const proc = process as { resourcesPath?: string }; const original = proc.resourcesPath;
+  proc.resourcesPath = '/fake/Resources';
+  const tried: string[] = [];
+  const runner = (executable: string) => (async function* () {
+    tried.push(executable);
+    if (executable === '/fake/Resources/bin/tmux') {
+      yield { type: 'line' as const, line: 'tmux 3.5a' };
+      yield { type: 'exit' as const, outcome: { code: 0, signal: null, reason: 'exited' as const, diagnostics: '' } };
+    } else yield { type: 'exit' as const, outcome: { code: null, signal: null, reason: 'spawn-error' as const, diagnostics: '' } };
+  })();
+  try { await expect(locateTmux(undefined, runner)).resolves.toBe('/fake/Resources/bin/tmux'); }
+  finally { if (original === undefined) delete proc.resourcesPath; else proc.resourcesPath = original; }
+  expect(tried).toEqual(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/fake/Resources/bin/tmux']);
+});
+it('checks the desktop-provided bundled tmux after Homebrew and before resourcesPath', () => {
+  expect(tmuxCandidates({ LANGUAGE_ASSISTANT_TMUX: '/App/Contents/Resources/bin/tmux' }, '/Other/Resources')).toEqual(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/App/Contents/Resources/bin/tmux', '/Other/Resources/bin/tmux']);
+  expect(tmuxCandidates({ LANGUAGE_ASSISTANT_TMUX: 'relative/tmux' }, undefined)).toEqual(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux']);
+  expect(tmuxCandidates({}, undefined)).toEqual(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux']);
+});
+it('runs tmux without the panel capability and never lets tmux shell-parse a one-item command', async () => {
+  const calls: { args: string[]; options?: ProcessOptions }[] = [];
+  const saved = { cap: process.env.LANGUAGE_PANEL_CAPABILITY, node: process.env.ELECTRON_RUN_AS_NODE, tmux: process.env.TMUX };
+  Object.assign(process.env, { LANGUAGE_PANEL_CAPABILITY: 'secret-cap', ELECTRON_RUN_AS_NODE: '1', TMUX: '/x,1,0' });
+  try {
+    const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* (_exe, args, _in, _signal, options) {
+      calls.push({ args, ...(options ? { options } : {}) });
+      if (args.includes('new-session')) yield { type: 'line', line: '4242' };
+      yield { type: 'exit', outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' } };
+    } });
+    await tmux.newSession('la-one', '/tmp', ['/Applications/My Tools/codex']);
+  } finally { for (const [k, v] of [['LANGUAGE_PANEL_CAPABILITY', saved.cap], ['ELECTRON_RUN_AS_NODE', saved.node], ['TMUX', saved.tmux]] as const) if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  const create = calls.find(c => c.args.includes('new-session'))!;
+  expect(create.args.slice(create.args.indexOf('--'))).toEqual(['--', '/usr/bin/env', '-u', 'LANGUAGE_PANEL_CAPABILITY', '-u', 'ELECTRON_RUN_AS_NODE', '/Applications/My Tools/codex']);
+  for (const call of calls) { expect(call.options?.env).toBeDefined(); expect(call.options!.env).not.toHaveProperty('LANGUAGE_PANEL_CAPABILITY'); expect(call.options!.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE'); expect(call.options!.env).not.toHaveProperty('TMUX'); }
+  expect(calls.map(c => c.args.slice(4, 8).join(' '))).toEqual(expect.arrayContaining(['set-environment -g -u LANGUAGE_PANEL_CAPABILITY', 'set-environment -g -u ELECTRON_RUN_AS_NODE']));
+});
+it('rejects unsafe socket directories', async () => {
+  const d = await temp(); const loose = join(d, 'loose'); await mkdir(loose); await chmod(loose, 0o755);
+  await expect(ensureSocketDirectory(loose)).rejects.toThrow('Unsafe tmux directory');
+  const link = join(d, 'link'); await symlink(d, link);
+  await expect(ensureSocketDirectory(link)).rejects.toThrow('Unsafe tmux directory');
+  await ensureSocketDirectory(join(d, 'fresh'));
+});
+it('names sessions', () => { expect(sessionNameFor('abc')).toBe('la-abc'); });
+describe.skipIf(!available)('with real tmux on a private socket', () => {
+  it('creates, captures, resizes and kills a session in a path with spaces and Hebrew', async () => {
+    const state = await stateTemp(); const folder = join(state, 'פרויקט with "quotes"'); await mkdir(folder);
+    const tmux = await createTmux({ stateDir: state });
+    const { panePid } = await tmux.newSession('la-t1', folder, ['sh', '-c', 'pwd; sleep 30']);
+    expect(panePid).toBeGreaterThan(1);
+    await new Promise(r => setTimeout(r, 300));
+    expect(await tmux.capturePane('la-t1')).toContain('פרויקט with "quotes"');
+    expect((await tmux.listSessions()).map(s => s.name)).toEqual(['la-t1']);
+    await tmux.resizeWindow('la-t1', 90, 30);
+    await tmux.killSession('la-t1');
+    expect(await tmux.hasSession('la-t1')).toBe(false);
+  });
+  it('runs a one-item command whose path has a space, scrubs the capability and configures the popup terminal', async () => {
+    const state = await stateTemp(); const bin = join(state, 'my tools'); await mkdir(bin);
+    const script = join(bin, 'agent'); await writeFile(script, '#!/bin/sh\necho "agent-ran cap=[$LANGUAGE_PANEL_CAPABILITY] node=[$ELECTRON_RUN_AS_NODE]"\nsleep 30\n'); await chmod(script, 0o755);
+    const socket = join(state, 'tmux', 'socket'); const tmuxBin = '/opt/homebrew/bin/tmux';
+    const tmuxCmd = (args: string[], env: NodeJS.ProcessEnv = process.env) => new Promise<string>((resolve, reject) => execFile(tmuxBin, ['-S', socket, ...args], { env }, (e, out) => e ? reject(e) : resolve(out)));
+    const tmux = await createTmux({ stateDir: state });
+    // A server started earlier by a process that still carried the capability.
+    await tmuxCmd(['-f', '/dev/null', 'new-session', '-d', '-s', 'la-old', 'sleep 30'], { ...process.env, LANGUAGE_PANEL_CAPABILITY: 'leaked', ELECTRON_RUN_AS_NODE: '1' });
+    expect(await tmuxCmd(['show-environment', '-g'])).toContain('LANGUAGE_PANEL_CAPABILITY=leaked');
+    await tmux.newSession('la-t2', state, [script]);
+    await new Promise(r => setTimeout(r, 400));
+    expect(await tmux.capturePane('la-t2')).toContain('agent-ran cap=[] node=[]');
+    const globalEnv = await tmuxCmd(['show-environment', '-g']);
+    expect(globalEnv).not.toContain('LANGUAGE_PANEL_CAPABILITY'); expect(globalEnv).not.toMatch(/^ELECTRON_RUN_AS_NODE=/m);
+    expect(await tmuxCmd(['show-options', '-gv', 'prefix'])).toBe('None\n');
+    expect(await tmuxCmd(['show-options', '-gv', 'status'])).toBe('off\n');
+    expect(await tmuxCmd(['show-options', '-sv', 'escape-time'])).toBe('0\n');
+  });
+  it('lists nothing when the private server is not running', async () => {
+    const tmux = await createTmux({ stateDir: await stateTemp() });
+    expect(await tmux.listSessions()).toEqual([]);
+  });
+});
+
+it('distinguishes an absent server from tmux timeouts and other listing failures', async () => {
+  const outcomes = [
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'no server running on /private/socket' },
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'error connecting to /private/socket (No such file or directory)' },
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'permission denied' },
+    { code: null, signal: null, reason: 'timeout' as const, diagnostics: '' },
+  ];
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* () { yield { type: 'exit', outcome: outcomes.shift()! }; } });
+  expect(await tmux.listSessions()).toEqual([]); expect(await tmux.listSessions()).toEqual([]);
+  await expect(tmux.listSessions()).rejects.toThrow('tmux command failed');
+  await expect(tmux.listSessions()).rejects.toThrow('tmux command failed');
+});
+it('passes leading-dash input as keys rather than tmux options', async () => {
+  let received: string[] = [];
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* (_exe, args) { received = args; yield { type: 'exit', outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' } }; } });
+  await tmux.sendKeys('la-test', ['-evil', 'Enter']);
+  expect(received.slice(-6)).toEqual(['send-keys', '-t', '=la-test:', '--', '-evil', 'Enter']);
+});
+it('does not report a live session absent or ended on tmux command failures', async () => {
+  const outcomes = [
+    { code: null, signal: null, reason: 'timeout' as const, diagnostics: '' },
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'permission denied' },
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: "can't find session: la-test" },
+    { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'no server running on /private/socket' },
+  ];
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* () { yield { type: 'exit', outcome: outcomes.shift()! }; } });
+  await expect(tmux.hasSession('la-test')).rejects.toThrow('tmux command failed');
+  await expect(tmux.killSession('la-test')).rejects.toThrow('tmux command failed');
+  expect(await tmux.hasSession('la-test')).toBe(false);
+  await expect(tmux.killSession('la-test')).resolves.toBeUndefined();
+});

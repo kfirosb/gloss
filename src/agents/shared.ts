@@ -1,0 +1,320 @@
+import type { Attachment } from '../core/contracts.js';
+import { open, realpath } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { canSendWhileWorking, orderAgentMessages } from '../core/contracts.js';
+import type { AgentCapabilities, AgentEvent, AgentMessage, CodingConnection, CodingState, DeliveryState, Target } from '../core/contracts.js';
+import { collectProcess, runProcess, type ProcessRunner } from '../runtime/process-runner.js';
+
+export interface AdapterOptions {
+  runner?: ProcessRunner; pollMs?: number; pageSize?: number;
+  /** Optional host bridge for completed assistant messages only. */
+  sourceSink?: SourceSink;
+  /** A server-owned verified liveness probe. Never trust a browser-provided boolean. */
+  observeLive?: (target: Target) => Promise<boolean>;
+  clock?: { sleep(ms: number, signal: AbortSignal): Promise<void> };
+}
+export interface SourceSink {
+  send(message: { agent: Target['agent']; sourceSessionId: string; sourceId: string; sequence: number; role: 'assistant'; text: string; complete: true; cursor: string; timestamp?: string }): Promise<void>;
+}
+export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export async function projectIdentity(path: string): Promise<string> { return realpath(path); }
+export function validateTarget(target: Target, kind: Target['agent']) {
+  if (target.agent !== kind || !uuid.test(target.sessionRef)) throw new Error('Invalid target identity');
+}
+/** `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, which would clip `claude.exe`. */
+export async function observedOwner(path: string, command: string | readonly string[], runner: ProcessRunner = runProcess, pid?: number): Promise<boolean> {
+  if (process.platform !== 'darwin') return false;
+  const result = await collectProcess(runner('/usr/sbin/lsof', ['-Fpc', '+c', '0', '--', path], '', new AbortController().signal, { timeoutMs: 3000, maxOutputBytes: 32_768 }));
+  if (result.outcome.code !== 0 || result.outcome.reason !== 'exited') return false;
+  let currentPid = 0;
+  return result.lines.some(line => {
+    if (/^p\d+$/.test(line)) currentPid = Number(line.slice(1));
+    const commands = typeof command === 'string' ? [command] : command;
+    return commands.some(name => line === `c${name}`) && (pid === undefined || currentPid === pid);
+  });
+}
+export type Parsed = { message?: AgentMessage; state?: CodingState; delivery?: string };
+export type RecordParser = (value: any, offset: number) => Parsed;
+const CHUNK = 1024 * 1024;
+const MAX_SCAN = 8;
+const sleep = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
+  if (signal.aborted) { resolve(); return; }
+  const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+  const timer = setTimeout(done, ms); signal.addEventListener('abort', done, { once: true });
+});
+
+/** Versioned append-only JSONL reader. Positions are byte offsets, not JS character offsets. */
+export class Transcript {
+  private identity = ''; private offset = 0; private checkpoint = { offset: 0, data: Buffer.alloc(0) };
+  private pending = Buffer.alloc(0); private pendingStart = 0; private broken = false;
+  private seen = new Map<string, { signature: string; revision: number }>(); private initial: AgentEvent[] = [];
+  private cursorScope = randomUUID();
+  private fullyRead = false;
+  state: CodingState = 'disconnected';
+  /** A missing lifecycle marker is only safe to interpret after a complete, valid read. */
+  get caughtUp(): boolean { return !this.broken && this.fullyRead && this.pending.length === 0; }
+  constructor(readonly path: string, readonly parse: RecordParser, private readonly pageSize = 100) {}
+  private failure(reason: string): never { this.broken = true; this.state = 'disconnected'; throw new Error(reason); }
+  private async checkedFile() {
+    if (this.broken) throw new Error('Transcript changed or has a gap; reattach required');
+    const file = await open(this.path, 'r');
+    try {
+      const stat = await file.stat(); const id = `${stat.dev}:${stat.ino}`;
+      if (!stat.isFile() || (this.identity && (id !== this.identity || stat.size < this.offset))) this.failure('Transcript changed');
+      const checkpoint = this.checkpoint;
+      if (checkpoint.data.length) {
+        const buffer = Buffer.alloc(checkpoint.data.length); await file.read(buffer, 0, buffer.length, checkpoint.offset - buffer.length);
+        if (!buffer.equals(checkpoint.data)) this.failure('Transcript changed');
+      }
+      this.identity = id; return { file, size: stat.size };
+    } catch (error) { await file.close(); throw error; }
+  }
+  async initialize() {
+    const { file, size } = await this.checkedFile();
+    try {
+      if (size > CHUNK) {
+        const first = Buffer.alloc(CHUNK); const start = size - CHUNK; await file.read(first, 0, CHUNK, start);
+        const newline = first.indexOf(10);
+        if (newline < 0) this.failure('Transcript record exceeds read bound');
+        this.offset = start + newline + 1;
+        this.initial.push({ type: 'gap', reason: 'Live replay starts in a bounded tail; older messages are available through history.' });
+      }
+      this.pendingStart = this.offset;
+    } finally { await file.close(); }
+    this.initial.push(...await this.poll());
+  }
+  /** History reads old, bounded windows; their failures must not end the live tail. */
+  private lookbackFailure(reason: string): never { throw new Error(reason); }
+  private decode(line: Buffer, position: number, fail: (reason: string) => never = reason => this.failure(reason)): Parsed {
+    if (!line.toString('utf8').trim()) return {};
+    let record: unknown;
+    try { record = JSON.parse(line.toString('utf8')); } catch { return fail('Malformed transcript record'); }
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return fail('Malformed transcript record');
+    try { return this.parse(record, position); } catch { return fail('Malformed record or transcript identity mismatch'); }
+  }
+  private canonicalMessage(message: AgentMessage, index: Map<string, { signature: string; revision: number }>): AgentMessage {
+    const signature = JSON.stringify([message.role, message.text, message.complete]);
+    const previous = index.get(message.sourceId);
+    // Reuse only the current uninterrupted content revision, never an earlier X in X -> Y -> X.
+    const revision = previous?.signature === signature && previous.revision <= message.revision ? previous.revision : message.revision;
+    index.set(message.sourceId, { signature, revision });
+    if (index.size > 10_000) index.delete(index.keys().next().value!);
+    return { ...message, revision };
+  }
+  takeInitial(): AgentEvent[] { return this.initial.splice(0); }
+  async poll(): Promise<AgentEvent[]> {
+    const events: AgentEvent[] = [];
+    const { file, size } = await this.checkedFile();
+    try {
+      const count = Math.min(CHUNK, size - this.offset); const chunk = Buffer.alloc(count);
+      if (count) {
+        const { bytesRead } = await file.read(chunk, 0, count, this.offset); this.offset += bytesRead;
+        this.pending = Buffer.concat([this.pending, chunk.subarray(0, bytesRead)]);
+      }
+      let end: number;
+      while ((end = this.pending.indexOf(10)) >= 0) {
+        const line = this.pending.subarray(0, end); const position = this.pendingStart;
+        this.pending = this.pending.subarray(end + 1); this.pendingStart += end + 1;
+        const parsed = this.decode(line, position);
+        if (parsed.state) this.state = parsed.state;
+        if (parsed.message) {
+          const signature = JSON.stringify([parsed.message.role, parsed.message.text, parsed.message.complete]);
+          const previous = this.seen.get(parsed.message.sourceId);
+          if (!previous && this.seen.size === 10_000) events.push({ type: 'gap', reason: 'Live deduplication window exceeded; reconcile source IDs.' });
+          const message = this.canonicalMessage(parsed.message, this.seen);
+          if (previous?.signature !== signature) events.push({ type: 'message', message });
+        }
+        if (parsed.delivery) events.push({ type: 'delivery', requestId: parsed.delivery, state: 'sent' });
+      }
+      if (this.pending.length > CHUNK) this.failure('Transcript record exceeds read bound');
+      this.fullyRead = this.offset === size;
+      if (!this.fullyRead || this.pending.length) this.state = 'disconnected';
+      const checkpoint = Buffer.alloc(Math.min(64, this.offset));
+      await file.read(checkpoint, 0, checkpoint.length, this.offset - checkpoint.length);
+      this.checkpoint = { offset: this.offset, data: checkpoint };
+      return events;
+    } finally { await file.close(); }
+  }
+  async history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }> {
+    const { file, size } = await this.checkedFile();
+    try {
+      let end = size;
+      if (cursor !== undefined) {
+        const parts = cursor.split(':');
+        if (parts[0] !== this.cursorScope || !/^\d+$/.test(parts[1] ?? '')) throw new Error('Invalid history cursor');
+        end = Number(parts[1]); if (!Number.isSafeInteger(end) || end > size) throw new Error('Invalid history cursor');
+      }
+      const found = new Map<string, AgentMessage>(); let scans = 0;
+      const revisions = new Map(this.seen);
+      while (end > 0 && scans++ < MAX_SCAN) {
+        const previousEnd = end;
+        let window = CHUNK;
+        let start: number; let chunk: Buffer; let first: number;
+        // A record larger than the normal window can leave only its trailing
+        // newline in view. Expand the lookback until a complete row is present;
+        // returning the same cursor here would make replay loop forever.
+        for (;;) {
+          start = Math.max(0, end - window);
+          chunk = Buffer.alloc(end - start); await file.read(chunk, 0, chunk.length, start);
+          first = start > 0 ? chunk.indexOf(10) + 1 : 0;
+          if (!start || (first > 0 && first < chunk.length)) break;
+          if (window >= CHUNK * MAX_SCAN) this.lookbackFailure('Transcript record exceeds read bound');
+          window *= 2;
+        }
+        const rows: { start: number; line: Buffer }[] = []; let at = first; let newline: number;
+        while ((newline = chunk.indexOf(10, at)) >= 0) { rows.push({ start: start + at, line: chunk.subarray(at, newline) }); at = newline + 1; }
+        // Normalize this bounded window forward before selecting the latest records backward.
+        // Otherwise the last identical physical row would invent a newer semantic revision.
+        const normalized = rows.map(row => {
+          const message = this.decode(row.line, row.start, reason => this.lookbackFailure(reason)).message;
+          return { start: row.start, message: message ? this.canonicalMessage(message, revisions) : undefined };
+        });
+        // An unfinished final line is intentionally left to the next live poll.
+        for (const row of normalized.reverse()) {
+          const message = row.message;
+          if (message && !found.has(message.sourceId)) found.set(message.sourceId, message);
+          end = row.start;
+          if (found.size >= this.pageSize) break;
+        }
+        if (found.size >= this.pageSize) break;
+        end = start + first;
+        if (!start) end = 0;
+        if (end >= previousEnd) this.lookbackFailure('Transcript history did not advance');
+      }
+      return { messages: [...found.values()].reverse(), ...(end > 0 ? { next: `${this.cursorScope}:${end}` } : {}) };
+    } finally { await file.close(); }
+  }
+}
+
+export async function verifyFirstRecord(path: string, accept: (record: any) => boolean = () => true): Promise<any> {
+  const file = await open(path, 'r');
+  try {
+    const buffer = Buffer.alloc(CHUNK); const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    let start = 0; let newline: number;
+    while ((newline = buffer.subarray(0, bytesRead).indexOf(10, start)) >= 0) {
+      const record = JSON.parse(buffer.subarray(start, newline).toString('utf8'));
+      if (accept(record)) return record;
+      start = newline + 1;
+    }
+    throw new Error('Transcript identity unavailable within bounded header');
+  } finally { await file.close(); }
+}
+
+export async function transcriptConnection(spec: {
+  target: Target; transcript: Pick<Transcript, 'initialize' | 'takeInitial' | 'poll' | 'history' | 'caughtUp'>; capabilities: AgentCapabilities; options: AdapterOptions;
+  status(): Promise<CodingState>;
+  beforeSend?(): Promise<string | undefined>;
+  dispatch: CodingConnection['send'];
+}): Promise<CodingConnection> {
+  const { transcript, options } = spec;
+  const bridged = new Map<string, number>();
+  let bridgePending: AgentEvent[] = [];
+  const bridge = async (events: AgentEvent[]) => {
+    if (!options.sourceSink) return;
+    const queue = [...bridgePending, ...events];
+    bridgePending = [];
+    for (const [index, event] of queue.entries()) {
+      if (event.type !== 'message' || event.message.role !== 'assistant' || !event.message.complete) continue;
+      const prior = bridged.get(event.message.sourceId);
+      if (prior !== undefined && prior >= event.message.revision) continue;
+      try {
+        await options.sourceSink.send({
+          agent: spec.target.agent,
+          sourceSessionId: spec.target.sessionRef,
+          sourceId: event.message.sourceId,
+          sequence: event.message.revision,
+          role: 'assistant',
+          text: event.message.text,
+          complete: true,
+          cursor: String(event.message.revision),
+          ...(event.message.timestamp ? { timestamp: event.message.timestamp } : {}),
+        });
+        bridged.set(event.message.sourceId, event.message.revision);
+      } catch {
+        bridgePending = queue.slice(index);
+        break;
+      }
+    }
+  };
+  await transcript.initialize();
+  let detached = false; let watching = false; let lastState: CodingState | undefined;
+  const stop = new AbortController(); let serial = Promise.resolve<AgentEvent[]>([]);
+  let bridgeTail = Promise.resolve();
+  const enqueueBridge = (events: AgentEvent[]) => { bridgeTail = bridgeTail.then(() => bridge(events)); };
+  const refresh = () => {
+    serial = serial.then(async () => {
+      let events: AgentEvent[];
+      try { events = await transcript.poll(); }
+      catch { lastState = 'disconnected'; return [{ type: 'gap', reason: 'Transcript unavailable, malformed, or changed; reattach required.' }, { type: 'status', state: 'disconnected' }]; }
+      try {
+        const state = await spec.status();
+        if (state !== lastState) { events.push({ type: 'status', state }); lastState = state; }
+      } catch {
+        // Poll already consumed these native messages and receipts. Publish them even when
+        // independent registry/liveness metadata is temporarily unavailable.
+        lastState = 'disconnected';
+        events.push({ type: 'gap', reason: 'Agent status temporarily unavailable; source messages retained.' }, { type: 'status', state: 'disconnected' });
+      }
+      return events;
+    });
+    return serial;
+  };
+  const pendingEvents: AgentEvent[] = [];
+  return {
+    target: structuredClone(spec.target), capabilities: spec.capabilities,
+    history: cursor => transcript.history(cursor),
+    async *events(signal) {
+      if (watching) throw new Error('Only one live subscription is supported'); watching = true;
+      const abort = () => stop.abort(); signal.addEventListener('abort', abort, { once: true });
+      try {
+        if (signal.aborted || detached) return;
+        // Consumers may reconcile historical delivery receipts while handling
+        // replayed messages. Establish liveness first so discovery does not
+        // repeatedly tear down a healthy connection during that work.
+        try { lastState = await spec.status(); }
+        catch { lastState = 'disconnected'; }
+        if (signal.aborted || detached) return;
+        yield { type: 'status', state: lastState };
+        const initial = transcript.takeInitial();
+        if (options.sourceSink) {
+          void (async () => {
+            const recovered = new Map<string, AgentMessage>();
+            let cursor: string | undefined;
+            do {
+              const page = await transcript.history(cursor);
+              for (const message of page.messages) if (!recovered.has(message.sourceId)) recovered.set(message.sourceId, message);
+              // An optional source may retain a retryable cursor during an outage.
+              // Finish this bootstrap pass; live polling will recover that source.
+              if (page.next && page.next === cursor) break;
+              cursor = page.next;
+            } while (cursor && !stop.signal.aborted);
+            if (!stop.signal.aborted) enqueueBridge(orderAgentMessages([...recovered.values()], spec.target.agent).map(message => ({ type: 'message', message })));
+          })().catch(() => {});
+        }
+        enqueueBridge(initial);
+        for (const event of initial) yield event;
+        while (!stop.signal.aborted && !detached) {
+          const events = [...pendingEvents.splice(0), ...await refresh()];
+          enqueueBridge(events);
+          for (const event of events) { if (stop.signal.aborted || detached) return; yield event; }
+          await (options.clock?.sleep ?? sleep)(options.pollMs ?? 750, stop.signal);
+        }
+      } finally { signal.removeEventListener('abort', abort); watching = false; }
+    },
+    async send(requestId, englishText, attachments, context) {
+      if (attachments?.some(file => file.kind === 'file' ? !spec.capabilities.fileReferences : !spec.capabilities.imageAttachments && !spec.capabilities.fileReferences)) return {state:'failed',reason:'File references are unsupported; instruction preserved'};
+      if (detached || stop.signal.aborted) return { state: 'failed', reason: 'Connection detached' };
+      if (!requestId.trim() || !englishText.trim() || englishText.length > 240_000) return { state: 'failed', reason: 'Invalid delivery payload' };
+      if (spec.beforeSend) {
+        try { const reason = await spec.beforeSend(); if (reason) return { state: 'failed', reason }; }
+        catch { return { state: 'failed', reason: 'Send capability could not be verified' }; }
+      }
+      pendingEvents.push(...await refresh());
+      if (!transcript.caughtUp) return { state: 'failed', reason: 'Transcript is still syncing; instruction preserved' };
+      if (lastState !== 'idle' && !(lastState === 'working' && canSendWhileWorking(spec.capabilities, context?.transport))) return { state: 'failed', reason: 'Agent is disconnected, busy, or requires native approval' };
+      if (detached || stop.signal.aborted) return { state: 'failed', reason: 'Connection detached' };
+      return spec.dispatch(requestId, englishText, attachments, context);
+    },
+    async detach() { detached = true; stop.abort(); pendingEvents.length = 0; },
+  };
+}
