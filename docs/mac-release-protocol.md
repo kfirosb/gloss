@@ -22,7 +22,7 @@ Work on the release branch or a dedicated release worktree. The desktop packagin
 
 Preserve tracked and untracked work before merging. If a temporary stash is needed, name it, record its object ID, and restore that exact stash after integration. Keep it until restoration has been checked. Do not reset, clean, or overwrite another session's edits. Leave unrelated DMGs and artifacts alone.
 
-There is currently no remote. Integrate the **local** branch:
+Integrate the **local** `main` branch (it tracks `origin/main`; never merge or push `private-history`):
 
 ```sh
 git merge --ff-only main
