@@ -385,3 +385,16 @@ it('run validates the command and the folder', async () => {
  await expect(launcher.run({ folder: '/nope', command: 'ls' })).rejects.toThrow('Choose a project folder');
  expect(validateCommand('  ls -la \n\n')).toBe('  ls -la ');
 });
+it('run rejects when the new terminal disappears while waiting for its shell', async () => {
+ let launcher!: SessionLauncher; let name = '';
+ const ctx = await setup({ sleep: async () => { ctx.t.live.delete(name); await launcher.reconcile(); } });
+ launcher = ctx.launcher;
+ ctx.t.tmux.newSession = async (n, cwd, argv) => { name = n; ctx.t.live.set(n, { cwd, argv, panePid: 7, currentCommand: 'login' }); return { panePid: 7 }; };
+ await expect(launcher.run({ folder: ctx.folder, command: 'make' })).rejects.toThrow('Terminal is no longer running');
+});
+it('run reports typed: false with a defined launch when typing into a ready shell fails', async () => {
+ const { launcher, folder, t } = await setup();
+ t.tmux.typeText = async () => { throw new Error('no pane'); };
+ const result = await launcher.run({ folder, command: 'make' });
+ expect(result.typed).toBe(false); expect(result.launch).toMatchObject({ agent: 'shell', folder });
+});

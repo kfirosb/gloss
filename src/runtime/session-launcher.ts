@@ -297,13 +297,19 @@ export function createSessionLauncher(options: {
       const launch = await startShell(tmux, cwd, origin); const name = sessionNameFor(launch.id);
       let ready = false;
       for (let waited = 0; waited < readyTimeoutMs; waited += 100) {
-        const current = (await tmux.listSessions().catch(() => [])).find(s => s.name === name)?.currentCommand;
-        if (current === shellName) { ready = true; break; }
+        const listed = await tmux.listSessions().catch(() => undefined);
+        if (listed) {
+          const pane = listed.find(s => s.name === name);
+          if (!pane) break; // The pane is gone: no point waiting.
+          if (pane.currentCommand === shellName) { ready = true; break; }
+        }
         await sleep(100);
       }
-      await tmux.typeText(name, text).catch(() => undefined);
+      const typed = await tmux.typeText(name, text).then(() => ready, () => false);
+      const current = list().find(r => r.id === launch.id);
+      if (!current) throw new Error('Terminal is no longer running');
       busy.set(launch.id, true); notify();
-      return { launch: list().find(r => r.id === launch.id)!, reused: false, typed: ready };
+      return { launch: { ...current, busy: true }, reused: false, typed };
     },
     list,
     reconcile: () => reconcile(true),
