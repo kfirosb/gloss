@@ -2,7 +2,7 @@
 
 Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
 
-As of 2026-10-14, version 0.6.0 is installed and in use. Its source is tagged `v0.6.0` at `9f6c9a8` on branch `release/0.6.0`; it includes local `main` through `dcf2737` (0.5.1), and `main` was then fast-forwarded to the release. The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/Gloss-backups/2026-10-14-before-0.6.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
+As of 2026-10-14, version 0.6.0 is installed and in use. Its source is tagged `v0.6.0` at `9f6c9a8` on branch `release/0.6.0`; it includes local `main` through `dcf2737` (0.5.1). While it was being released, `main` gained the unreleased attention-cues work (schema 23), so the release was merged into `main` with merge commit `fce1c3d`; `main` therefore holds 0.6.0 plus that unreleased work, and the next release should get a new version. The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/Gloss-backups/2026-10-14-before-0.6.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
 
 ## 1. Establish the source and protect current work
 
@@ -111,7 +111,7 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 2. Create a new annotated tag `v<version>` at that commit.
 3. Record the commit, included `main` revision, requirements, release changes, verification results, and known limitations in `release/RELEASE-NOTES-<version>.txt`.
 4. Provide clickable local links to the DMG and, when useful, its checksum and release notes. If the user asks for the release to be delivered, move the DMG, its `.sha256` and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
-5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
+5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires Apple Silicon and macOS 13+, and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
