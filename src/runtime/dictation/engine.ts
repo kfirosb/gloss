@@ -6,12 +6,16 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOOPBACK_HOST } from '../loopback.js';
 import { packageRoot } from '../package-root.js';
-import { DictationFailure, ENGINE_IDLE_MS, type DictationLanguage } from '../../core/dictation-contracts.js';
+import { DictationFailure, ENGINE_IDLE_MS, NO_SPEECH_PROBABILITY, type DictationLanguage } from '../../core/dictation-contracts.js';
 import type { ModelProgress, ModelStore } from './model.js';
 import { encodeWav } from './wav.js';
 
 export interface EngineProcess { pid?: number; kill(): void; onExit(cb: (code: number | null) => void): void; /** Raw stderr chunks, kept only for diagnosing a failed start or crash. */ onStderr?(cb: (text: string) => void): void }
-const STDERR_LINES = 20, STDERR_BYTES = 8 * 1024;
+export const STDERR_LINES = 20; const STDERR_BYTES = 8 * 1024;
+/** How long a starting whisper-server may take to answer its readiness probe (model load included), and how often it is probed. */
+const START_TIMEOUT_MS = 60_000, READY_POLL_MS = 250;
+/** Default inference threads: half the cores, kept within these bounds. */
+const MIN_THREADS = 2, MAX_THREADS = 8;
 /** Keeps the last STDERR_LINES lines (at most STDERR_BYTES characters in all) of a child's stderr. */
 function stderrTail() {
   let lines: string[] = []; let partial = '';
@@ -56,11 +60,12 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export function createDictationEngine(options: DictationEngineOptions): DictationEngine {
   const spawn = options.spawn ?? nodeEngineSpawn, doFetch = options.fetch ?? fetch, freePort = options.freePort ?? freeLoopbackPort;
-  const idleMs = options.idleMs ?? ENGINE_IDLE_MS, startTimeout = options.startTimeoutMs ?? 60_000, pollMs = options.pollMs ?? 250;
-  const threads = options.threads ?? Math.max(2, Math.min(8, Math.ceil(cpus().length / 2))), log = options.log ?? (() => undefined);
+  const idleMs = options.idleMs ?? ENGINE_IDLE_MS, startTimeout = options.startTimeoutMs ?? START_TIMEOUT_MS, pollMs = options.pollMs ?? READY_POLL_MS;
+  const threads = options.threads ?? Math.max(MIN_THREADS, Math.min(MAX_THREADS, Math.ceil(cpus().length / 2))), log = options.log ?? (() => undefined);
   let state: 'stopped' | 'starting' | 'running' = 'stopped'; let proc: EngineProcess | undefined; let base = ''; let generation = 0;
   let starting: Promise<void> | undefined; let idle: NodeJS.Timeout | undefined; let queue: Promise<unknown> = Promise.resolve();
   const missing = () => new DictationFailure('engine-missing', 'Speech engine not built');
+  const stopped = () => new DictationFailure('engine-failed', 'Speech engine stopped unexpectedly');
   const stop = (why: string) => { if (idle) clearTimeout(idle); idle = undefined; const p = proc; proc = undefined; base = ''; state = 'stopped'; generation++; starting = undefined; p?.kill(); log('dictation-engine ' + why); };
   const touch = () => { if (state !== 'running') return; if (idle) clearTimeout(idle); idle = setTimeout(() => stop('idle-exit'), idleMs); };
   async function start(onProgress: ModelProgress, signal?: AbortSignal): Promise<void> {
@@ -75,7 +80,7 @@ export function createDictationEngine(options: DictationEngineOptions): Dictatio
     const dumpStderr = () => { for (const line of tail.lines()) log('dictation-engine stderr: ' + line); };
     let exited = false; proc.onExit(code => { exited = true; if (generation === gen) { log('dictation-engine exit ' + code); dumpStderr(); stop('exit'); } });
     for (;;) {
-      if (exited || generation !== gen) throw new DictationFailure('engine-failed', 'Speech engine stopped unexpectedly');
+      if (exited || generation !== gen) throw stopped();
       if (Date.now() - started > startTimeout) { options.model.invalidate(); dumpStderr(); stop('start-timeout'); throw new DictationFailure('engine-failed', 'Speech engine did not start'); }
       try { const r = await doFetch(base + '/', { method: 'GET' }); if (r.ok) break; } catch { /* not listening yet */ }
       await sleep(pollMs);
@@ -102,14 +107,14 @@ export function createDictationEngine(options: DictationEngineOptions): Dictatio
         if (prompt) form.set('prompt', prompt);
         let response: Response;
         try { response = await doFetch(base + '/inference', { method: 'POST', body: form }); }
-        catch (e) { if (generation !== gen || state !== 'running') throw new DictationFailure('engine-failed', 'Speech engine stopped unexpectedly'); throw e instanceof Error ? e : new Error('Transcription request failed'); }
-        if (generation !== gen || state !== 'running') throw new DictationFailure('engine-failed', 'Speech engine stopped unexpectedly');
+        catch (e) { if (generation !== gen || state !== 'running') throw stopped(); throw e instanceof Error ? e : new Error('Transcription request failed'); }
+        if (generation !== gen || state !== 'running') throw stopped();
         if (!response.ok) throw new Error('Transcription failed (' + response.status + ')');
         const body = await response.json() as { text?: unknown; segments?: { no_speech_prob?: unknown }[] };
         const text = typeof body.text === 'string' ? body.text : '';
         const probs = (body.segments ?? []).map(s => typeof s.no_speech_prob === 'number' ? s.no_speech_prob : 0);
         touch();
-        return { text, noSpeech: probs.length > 0 && probs.every(p => p > 0.6) };
+        return { text, noSpeech: probs.length > 0 && probs.every(p => p > NO_SPEECH_PROBABILITY) };
       };
       const result = queue.then(job, job); queue = result.catch(() => undefined); return result;
     },

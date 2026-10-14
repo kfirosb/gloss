@@ -4,7 +4,8 @@ import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DictationFailure, MODEL_FILE } from '../../core/dictation-contracts.js';
 
-export const MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin';
+export const MODEL_REPO_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
+export const MODEL_URL = `${MODEL_REPO_URL}/${MODEL_FILE}`;
 export const MODEL_SHA256 = '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2';
 export type ModelProgress = (received: number, total: number | null) => void;
 export interface ModelStore {
@@ -17,6 +18,7 @@ export interface ModelStore {
   cancel(): void;
 }
 const failure = (message: string) => new DictationFailure('download-failed', message);
+const cancelled = () => failure('Download cancelled');
 
 export function createModelStore(options: { directory: string; url?: string; sha256?: string; fetch?: typeof fetch; file?: string }): ModelStore {
   const url = options.url ?? MODEL_URL, expected = (options.sha256 ?? MODEL_SHA256).toLowerCase(), doFetch = options.fetch ?? fetch;
@@ -29,7 +31,7 @@ export function createModelStore(options: { directory: string; url?: string; sha
     await mkdir(options.directory, { recursive: true, mode: 0o700 });
     await rm(partial, { force: true });
     let response: Response;
-    try { response = await doFetch(url, { signal, redirect: 'follow' }); } catch (e) { throw failure(signal.aborted ? 'Download cancelled' : 'Network error'); }
+    try { response = await doFetch(url, { signal, redirect: 'follow' }); } catch (e) { throw signal.aborted ? cancelled() : failure('Network error'); }
     if (!response.ok || !response.body) throw failure('Download failed (' + response.status + ')');
     const header = Number(response.headers.get('content-length')); const total = Number.isFinite(header) && header > 0 ? header : null;
     const hash = createHash('sha256'); const out = createWriteStream(partial, { mode: 0o600 }); let received = 0;
@@ -49,7 +51,7 @@ export function createModelStore(options: { directory: string; url?: string; sha
       if (!out.closed) await new Promise<void>(r => { out.once('close', r); out.destroy(); });
       await rm(partial, { force: true }).catch(() => undefined);
       const text = (writeError ?? e) instanceof Error ? ((writeError ?? e) as Error).message : '';
-      throw failure(signal.aborted ? 'Download cancelled' : /ENOSPC/.test(text) ? 'Not enough disk space' : writeError ? 'Could not write the model file' : 'Download interrupted');
+      throw signal.aborted ? cancelled() : failure(/ENOSPC/.test(text) ? 'Not enough disk space' : writeError ? 'Could not write the model file' : 'Download interrupted');
     }
     if (hash.digest('hex') !== expected) { await rm(partial, { force: true }); throw failure('Downloaded file failed verification'); }
     await rename(partial, path); return path;

@@ -13,6 +13,8 @@ export const MAX_AUDIO_MESSAGE_BYTES = 64 * 1024;
 export const PROMPT_CONTEXT_CHARS = 200;
 /** Transcription errors in a row after which the recording ends with engine-failed; fewer are reported as a lost segment. */
 export const MAX_CONSECUTIVE_FAILURES = 3;
+/** A transcription counts as silence when whisper rates every one of its segments above this no-speech probability. */
+export const NO_SPEECH_PROBABILITY = 0.6;
 export const MODEL_FILE = 'ggml-large-v3-turbo-q5_0.bin';
 export type DictationErrorCode = 'engine-missing' | 'microphone-denied' | 'download-failed' | 'engine-failed' | 'connection-lost' | 'busy';
 export type DictationNoticeCode = 'segment-lost' | 'max-duration';

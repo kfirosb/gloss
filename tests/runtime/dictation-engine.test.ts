@@ -1,9 +1,9 @@
-// tests/runtime/dictation-engine.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDictationEngine, whisperCandidates, type EngineProcess } from '../../src/runtime/dictation/engine.js';
+import { createDictationEngine, STDERR_LINES, whisperCandidates, type EngineProcess } from '../../src/runtime/dictation/engine.js';
 import type { ModelStore } from '../../src/runtime/dictation/model.js';
+import { WAV_HEADER_BYTES } from '../../src/runtime/dictation/wav.js';
 
 const model = (overrides: Partial<ModelStore> = {}): ModelStore => ({ path: '/m/model.bin', present: async () => ({ present: true, bytes: 1 }), ensure: async () => '/m/model.bin', invalidate: vi.fn(), cancel: vi.fn(), ...overrides });
 function fakeSpawn() {
@@ -19,14 +19,13 @@ function fakeSpawn() {
 /** Ready after `readyAfter` polls; records inference requests and answers with `reply`. */
 function fakeFetch(opts: { readyAfter?: number; reply?: (form: FormData) => unknown; fail?: boolean } = {}) {
   const requests: FormData[] = []; let polls = 0;
-  const f = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+  const f = (async (_input: string | URL | Request, init?: RequestInit) => {
     if (!init?.method || init.method === 'GET') { polls++; return new Response(polls > (opts.readyAfter ?? 0) ? 'ok' : null, { status: polls > (opts.readyAfter ?? 0) ? 200 : 503 }); }
     if (opts.fail) return new Response('boom', { status: 500 });
     const form = init.body as FormData; requests.push(form);
     return new Response(JSON.stringify(opts.reply?.(form) ?? { text: ' שלום ', segments: [{ no_speech_prob: 0.1 }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
-  return { fetch: f, requests, polls: () => polls, url: () => '' };
+  return { fetch: f, requests, polls: () => polls };
 }
 beforeEach(() => vi.useFakeTimers()); afterEach(() => vi.useRealTimers());
 
@@ -70,7 +69,7 @@ describe('createDictationEngine', () => {
     expect(await a).toEqual({ text: ' שלום ', noSpeech: false }); await b;
     expect(net.requests).toHaveLength(2);
     expect(net.requests[0]!.get('language')).toBe('he'); expect(net.requests[0]!.get('prompt')).toBe('קודם'); expect(net.requests[0]!.get('response_format')).toBe('verbose_json'); expect(net.requests[0]!.get('no_language_probabilities')).toBe('true');
-    expect((net.requests[0]!.get('file') as File).size).toBe(44 + 6);
+    expect((net.requests[0]!.get('file') as File).size).toBe(WAV_HEADER_BYTES + 6);
     expect(net.requests[1]!.get('language')).toBe('en'); expect(net.requests[1]!.has('prompt')).toBe(false);
   });
   it('flags no-speech when every segment is improbable', async () => {
@@ -91,11 +90,12 @@ describe('createDictationEngine', () => {
     const engine = createDictationEngine({ binary: '/b', model: model(), spawn, fetch: net.fetch, freePort: async () => 1, pollMs: 100, startTimeoutMs: 1000, log });
     const outcome = engine.ensureReady(() => undefined).catch(e => e);
     await vi.advanceTimersByTimeAsync(0);
-    procs[0]!.stderr(Array.from({ length: 30 }, (_, i) => 'line ' + i).join('\n') + '\nload'); procs[0]!.stderr('ing model failed\n');
+    const written = STDERR_LINES + 10; // plus the final 'loading model failed' line
+    procs[0]!.stderr(Array.from({ length: written }, (_, i) => 'line ' + i).join('\n') + '\nload'); procs[0]!.stderr('ing model failed\n');
     expect(log.mock.calls.flat().filter(l => String(l).startsWith('dictation-engine stderr:'))).toEqual([]);
     await vi.advanceTimersByTimeAsync(1500); await outcome;
     const lines = log.mock.calls.flat().filter(l => String(l).startsWith('dictation-engine stderr:'));
-    expect(lines).toHaveLength(20); expect(lines[0]).toBe('dictation-engine stderr: line 11'); expect(lines.at(-1)).toBe('dictation-engine stderr: loading model failed');
+    expect(lines).toHaveLength(STDERR_LINES); expect(lines[0]).toBe('dictation-engine stderr: line ' + (written + 1 - STDERR_LINES)); expect(lines.at(-1)).toBe('dictation-engine stderr: loading model failed');
   });
   it('logs stderr on an unexpected exit but never on a clean idle exit', async () => {
     const { spawn, procs } = fakeSpawn(); const log = vi.fn();
