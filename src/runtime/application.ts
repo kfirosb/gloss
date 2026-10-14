@@ -19,7 +19,6 @@ import type { AgentAdapter, AgentKind, HostAdapter, LanguageBackend, Conversatio
 import type { SessionRecord, SessionStore, WorkspaceData, WorkspaceRecord } from '../core/session-contracts.js';
 import { createWorkflow, type Workflow } from '../core/workflow.js';
 import { buildProjectContext } from '../core/project-context.js';
-import { catalogFrom } from '../core/invocations.js';
 import { SqliteStore } from '../storage/sqlite-store.js';
 import type { Action, RuntimeSnapshot, SourcePayload, DiscoveredTarget } from './protocol.js';
 import { createSessionManager, type SessionManager } from './session-manager.js';
@@ -153,7 +152,6 @@ export function createApplication(options: ApplicationOptions): Application {
       let workflow: Workflow | undefined;
       try {
         workflow = createWorkflow({ files, readFileContext,
-          invocations: async () => catalogFrom((await inventoryService.read(record.target.agent, sessionInventoryRoot(record))).entries),
           conversationId: record.id, language: current?.language ?? options.language ?? 'he', languageModel: selectedModel, languageSession: session,
           projectContext: () => buildProjectContext({ notes: options.store.readContext(project) ?? '', messages: workflow?.snapshot().codingMessages ?? [], maxCharacters: 12000 }), agents: options.agents, store: options.store, onUsage: value => usage.tracker.observe(value),
           ...(readDefaults() ? { languageSettings: () => effectiveLanguageSettings(readDefaults()!, readOverride(record.id)) } : {}) });
