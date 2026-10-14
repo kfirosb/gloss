@@ -519,6 +519,8 @@ function App() {
     const e = id ? allEntries.find(x => x.launchId === id) : undefined;
     if (id && e && !e.sessionId) void retryLaunch(id).catch(err => setSelectionError(err instanceof Error ? err.message : 'Could not retry the connection'));
   };
+  const waitingCount = (catalog?.entries ?? []).filter(e => e.open && (e.attention === 'response' || e.attention === 'approval')).length;
+  useEffect(() => { window.languageAssistant?.setAttentionCount?.(waitingCount); }, [waitingCount]);
   const approvalToasts = popupMode === 'auto' ? allEntries.filter(e => e.launchId && e.activity === 'approval-required' && e.sessionId && e.sessionId !== selected && !dismissedToasts.includes(e.launchId)) : [];
   const waitingLaunches = allEntries.filter(e => e.launchId && e.activity === 'approval-required').map(e => e.launchId!).join(',');
   useEffect(() => { setDismissedToasts(list => { const keep = list.filter(id => waitingLaunches.split(',').includes(id)); return keep.length === list.length ? list : keep; }); }, [waitingLaunches]);

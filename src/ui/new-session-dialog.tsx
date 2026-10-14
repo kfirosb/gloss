@@ -3,7 +3,7 @@ import { PanelDialog } from './composer-dialogs.js';
 import { sessionRequest } from './session-client.js';
 import { LANGUAGE_FIELDS, SUPPORTED_LANGUAGES, languageName, type LanguageOverride, type LanguageSettings } from '../core/language-settings.js';
 
-declare global { interface Window { languageAssistant?: { pickFolder(): Promise<string | null> } } }
+declare global { interface Window { languageAssistant?: { pickFolder(): Promise<string | null>; setAttentionCount?(count: number): void } } }
 const labels = { write: 'I write in', send: 'Send to the agent in', reply: 'Show agent replies in', assist: 'Language Assistant speaks' } as const;
 type FolderOption = { key: string; name: string };
 

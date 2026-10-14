@@ -1,5 +1,6 @@
 // Native macOS shell: runs the local server on Electron's bundled Node and shows the UI in an app window.
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { createBadgeController } from './attention-badge.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -61,11 +62,16 @@ function createWindow() {
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
+  const badge = createBadgeController({ setBadge: text => app.dock?.setBadge(text), isFocused: () => !!mainWindow && mainWindow.isFocused() });
+  ipcMain.removeAllListeners('attention-count');
+  // Only the app's own page may set the badge; the count is validated by the controller.
+  ipcMain.on('attention-count', (event, count) => { if (mainWindow && event.sender === mainWindow.webContents && new URL(event.senderFrame?.url ?? 'about:blank').origin === origin) badge.setCount(count); });
+  mainWindow.on('focus', () => badge.refresh()); mainWindow.on('blur', () => badge.refresh());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   mainWindow.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== origin) { event.preventDefault(); if (/^https?:/.test(url)) void shell.openExternal(url); } });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('close', () => writeConfig({ ...readConfig(), bounds: mainWindow.getBounds() }));
-  mainWindow.on('closed', () => { mainWindow = undefined; });
+  mainWindow.on('closed', () => { badge.clear(); mainWindow = undefined; });
   void mainWindow.loadURL(panelUrl);
 }
 
