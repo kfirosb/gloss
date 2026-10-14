@@ -22,13 +22,17 @@ test('a status request failure leaves the button disabled rather than broken', a
   await expect(page.getByRole('button', { name: /Dictation unavailable/ })).toBeDisabled();
   await expect(page.getByRole('textbox', { name: 'Discuss with language assistant' })).toBeEditable();
 });
-async function recordingFixture(page: import('@playwright/test').Page, answerStop = true) {
-  const snapshot = base(); await mockSession(page, () => snapshot); const actions: any[] = []; const stops: number[] = [];
+async function mockDictationPage(page: import('@playwright/test').Page) {
+  const snapshot = base(); await mockSession(page, () => snapshot); const actions: any[] = [];
   await page.route('**/api/dictation', route => route.fulfill({ json: { available: true, model: { present: true, bytes: 1 }, engine: 'running' } }));
   await page.route('**/api/sessions/*/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence: 1, snapshot }) + '\n\n' }));
   await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { sessionId: snapshot.id, sequence: 2, snapshot } }); });
   // A synthetic tone stands in for the microphone; the server side is a scripted socket.
   await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const dest = ctx.createMediaStreamDestination(); osc.connect(dest); osc.start(); return dest.stream; }; });
+  return actions;
+}
+async function recordingFixture(page: import('@playwright/test').Page, answerStop = true) {
+  const actions = await mockDictationPage(page); const stops: number[] = [];
   await page.routeWebSocket('**/api/dictation/audio**', ws => {
     expect(new URL(ws.url()).searchParams.get('language')).toBe('he');
     ws.send(JSON.stringify({ type: 'state', state: 'starting' })); ws.send(JSON.stringify({ type: 'state', state: 'recording' }));
@@ -85,4 +89,24 @@ test('the recording clock advances once a second while recording', async ({ page
   const clock = page.locator('.dictation-elapsed');
   await expect(clock).toHaveText('00:00');
   await expect(clock).toHaveText('00:01', { timeout: 2500 });
+});
+test('audio is captured while the speech engine starts, with a status line saying so', async ({ page }) => {
+  await mockDictationPage(page);
+  let frames = 0; let socket: import('@playwright/test').WebSocketRoute | undefined;
+  await page.routeWebSocket('**/api/dictation/audio**', ws => {
+    socket = ws; ws.send(JSON.stringify({ type: 'state', state: 'starting' }));
+    ws.onMessage(message => { if (typeof message !== 'string') frames++; });
+  });
+  await page.goto('/#capability=test');
+  const composer = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect(page.getByRole('button', { name: 'Starting the speech engine, you can talk now' })).toBeVisible();
+  await expect(page.locator('.dictation-status', { hasText: 'Loading the speech engine, speech is being recorded…' })).toBeVisible();
+  await expect(page.locator('form.composer')).toHaveClass(/composer-recording/);
+  // The engine is still starting: PCM frames already flow so the server can buffer them.
+  await expect.poll(() => frames).toBeGreaterThan(2);
+  socket!.send(JSON.stringify({ type: 'state', state: 'recording' })); socket!.send(JSON.stringify({ type: 'segment', sequence: 1, text: 'שלום' }));
+  await expect(page.getByRole('button', { name: 'Stop dictation' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.dictation-status', { hasText: 'speech is being recorded' })).toHaveCount(0);
+  await expect(composer).toHaveValue('שלום');
 });

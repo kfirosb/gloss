@@ -28,6 +28,8 @@ export function DictationButton({ dictation, language }: { dictation: Dictation;
       {state.phase === 'downloading' && <span className="dictation-progress">{label.progress}</span>}
       {state.phase === 'recording' && <><span className="dictation-elapsed">{elapsed(state.startedAt, Date.now())}</span><DictationLevel read={dictation.readLevel} /></>}
     </button>
+    {state.phase === 'starting' && <span role="status" aria-live="polite" className="dictation-status dictation-loading">Loading the speech engine, speech is being recorded…</span>}
+    {state.phase === 'downloading' && <span role="status" aria-live="polite" className="dictation-status dictation-loading">Downloading the speech model ({label.progress}), speech is being recorded…</span>}
     {state.phase === 'finishing' && <span className="dictation-status" aria-hidden="true">…</span>}
     {state.phase === 'error' && <span role="alert" className="dictation-status">{state.message} <button type="button" onClick={() => dictation.press()}>Retry</button></span>}
     {state.notice && <span role="status" className="dictation-status">{state.notice} <button type="button" onClick={() => dictation.dismissNotice()} aria-label="Dismiss notice">×</button></span>}

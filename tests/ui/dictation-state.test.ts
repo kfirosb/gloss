@@ -14,13 +14,19 @@ describe('appendDictation', () => {
   });
 });
 describe('reduceDictation', () => {
-  it('walks idle → request mic → open socket → recording with a stream', () => {
+  it('walks idle → request mic → open socket and capture → recording', () => {
     const r = run([{ type: 'press', now: 1000 }]); expect(r.state.phase).toBe('starting'); expect(r.effects).toEqual([{ type: 'request-mic' }]);
-    const s = run([{ type: 'mic-ready' }], r.state); expect(s.effects).toEqual([{ type: 'open-socket' }]);
+    const s = run([{ type: 'mic-ready' }], r.state); expect(s.effects).toEqual([{ type: 'open-socket' }, { type: 'start-stream' }]);
     const t = run([{ type: 'server', message: { type: 'state', state: 'downloading', received: 10, total: 100 } }], s.state);
     expect(t.state).toMatchObject({ phase: 'downloading', received: 10, total: 100 });
     const u = run([{ type: 'server', message: { type: 'state', state: 'starting' } }, { type: 'server', message: { type: 'state', state: 'recording' } }], t.state);
-    expect(u.state.phase).toBe('recording'); expect(u.state.startedAt).toBe(1000); expect(u.effects).toEqual([{ type: 'start-stream' }]);
+    expect(u.state.phase).toBe('recording'); expect(u.state.startedAt).toBe(1000); expect(u.effects).toEqual([]);
+  });
+  it('captures while the engine starts: recording after starting only changes the phase', () => {
+    const s = run([{ type: 'press', now: 1000 }, { type: 'mic-ready' }, { type: 'server', message: { type: 'state', state: 'starting' } }]);
+    expect(s.state.phase).toBe('starting'); expect(s.effects.filter(e => e.type === 'start-stream')).toHaveLength(1);
+    const r = reduceDictation(s.state, { type: 'server', message: { type: 'state', state: 'recording' } });
+    expect(r.state.phase).toBe('recording'); expect(r.effects).toEqual([]);
   });
   it('appends segments in order and ignores replays', () => {
     const r = run([{ type: 'server', message: { type: 'segment', sequence: 1, text: 'a' } }, { type: 'server', message: { type: 'segment', sequence: 1, text: 'a' } }, { type: 'server', message: { type: 'segment', sequence: 2, text: 'b' } }], recording());
@@ -89,7 +95,8 @@ describe('reduceDictation', () => {
   });
   it('labels every phase, with indeterminate progress when the total is unknown', () => {
     expect(dictationLabel(initialDictationState, 'he').title).toBe('Dictate in Hebrew'); expect(dictationLabel(initialDictationState, 'en').title).toBe('Dictate in English');
-    expect(dictationLabel({ ...initialDictationState, phase: 'downloading', received: 50 * 1024 * 1024, total: 100 * 1024 * 1024 }, 'he')).toEqual({ title: 'Downloading speech model, click to cancel', progress: '50%' });
+    expect(dictationLabel({ ...initialDictationState, phase: 'downloading', received: 50 * 1024 * 1024, total: 100 * 1024 * 1024 }, 'he')).toEqual({ title: 'Downloading the speech model, you can talk now, click to cancel', progress: '50%' });
+    expect(dictationLabel({ ...initialDictationState, phase: 'starting' }, 'he').title).toBe('Starting the speech engine, you can talk now');
     expect(dictationLabel({ ...initialDictationState, phase: 'downloading', received: 50 * 1024 * 1024, total: null }, 'he').progress).toBe('50 MB');
     expect(dictationLabel({ ...initialDictationState, phase: 'recording' }, 'he').title).toBe('Stop dictation');
     expect(dictationLabel({ ...initialDictationState, phase: 'unavailable', reason: 'x' }, 'he').title).toBe('Dictation unavailable: x');

@@ -38,7 +38,8 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
       if (state.phase === 'downloading') return out(idle(state), { type: 'cancel-download' }, { type: 'close-socket' });
       if (state.phase === 'starting' || state.phase === 'recording') return finishing(state, { type: 'send-stop' }, { type: 'stop-stream' });
       return out(state);
-    case 'mic-ready': return state.phase === 'starting' ? out(state, { type: 'open-socket' }) : out(state);
+    // Capture starts with the socket: the server buffers audio sent while the engine is still downloading or starting.
+    case 'mic-ready': return state.phase === 'starting' ? out(state, { type: 'open-socket' }, { type: 'start-stream' }) : out(state);
     case 'mic-denied': return out({ ...idle(state), phase: 'unavailable', reason: DICTATION_REASON_TEXT['microphone-denied'] });
     case 'escape': return state.phase === 'starting' || state.phase === 'recording' ? finishing({ ...state, sendAfterFinish: false }, { type: 'send-stop' }, { type: 'stop-stream' }) : out(state);
     case 'send-requested':
@@ -58,7 +59,7 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
       if (m.type === 'state') {
         if (m.state === 'downloading') return out({ ...state, phase: active(state.phase) && state.phase !== 'finishing' ? 'downloading' : state.phase, received: m.received, total: m.total });
         if (m.state === 'starting') return out(state.phase === 'downloading' ? { ...state, phase: 'starting' } : state);
-        if (m.state === 'recording') return state.phase === 'starting' || state.phase === 'downloading' ? out({ ...state, phase: 'recording' }, { type: 'start-stream' }) : out(state);
+        if (m.state === 'recording') return state.phase === 'starting' || state.phase === 'downloading' ? out({ ...state, phase: 'recording' }) : out(state);
         // 'finished' can arrive outside 'finishing' (the server ended the recording itself, e.g. the 10-minute cap): accept it from any active phase.
         if (!active(state.phase)) return out(state);
         return out(idle(state), ...(state.sendAfterFinish || state.phase === 'finishing' ? [{ type: 'clear-finish-timer' } as const] : []), ...(state.phase !== 'finishing' ? [{ type: 'stop-stream' } as const] : []), { type: 'close-socket' }, ...(state.sendAfterFinish ? [{ type: 'send-now' } as const] : []));
@@ -84,8 +85,8 @@ export function dictationLabel(state: DictationUiState, language: DictationLangu
   const mb = (n: number) => Math.round(n / (1024 * 1024)) + ' MB';
   switch (state.phase) {
     case 'idle': return { title: 'Dictate in ' + languageName(language) };
-    case 'downloading': return { title: 'Downloading speech model, click to cancel', progress: state.total ? Math.floor((state.received ?? 0) * 100 / state.total) + '%' : mb(state.received ?? 0) };
-    case 'starting': return { title: 'Starting speech engine' };
+    case 'downloading': return { title: 'Downloading the speech model, you can talk now, click to cancel', progress: state.total ? Math.floor((state.received ?? 0) * 100 / state.total) + '%' : mb(state.received ?? 0) };
+    case 'starting': return { title: 'Starting the speech engine, you can talk now' };
     case 'recording': return { title: 'Stop dictation' };
     case 'finishing': return { title: 'Finishing' };
     case 'unavailable': return { title: 'Dictation unavailable: ' + (state.reason ?? '') };
