@@ -83,3 +83,12 @@ test('language defaults dialog edits popup behavior and extra launch arguments',
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => put).toEqual({ extraArgs: { claude: '--model "opus 4"', codex: '' }, popup: 'dot-only' });
 });
+
+test('the popup shows a status and an Expand button when given one', async ({ page }) => {
+  await withLaunch(page);
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
+  await expect(dialog.getByRole('button', { name: 'Expand' })).toHaveCount(0); // agent popups have no Expand
+  await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
+});
