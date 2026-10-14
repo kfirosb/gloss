@@ -281,6 +281,16 @@ export async function startServer(application: Application, options: { port?: nu
         res.setHeader('cache-control', 'no-store');
         return respond(res, 200, catalog.snapshot());
       }
+      if (req.method === 'POST' && url.pathname === '/api/session-catalog/seen') {
+        const catalog = application.catalog;
+        if (!catalog) return respond(res, 501, { error: 'Session catalog unavailable' });
+        const body = await readBody(req, 4096) as { sessionId?: unknown; sequence?: unknown };
+        if (!body || typeof body.sessionId !== 'string' || !Number.isSafeInteger(body.sequence) || (body.sequence as number) < 0) return respond(res, 400, { error: 'Invalid seen request', code: 'bad-request' });
+        const result = catalog.markSeen(body.sessionId, body.sequence as number);
+        if (result === 'unknown') return respond(res, 404, { error: 'Unknown session', code: 'unknown-session' });
+        res.setHeader('cache-control', 'no-store');
+        return respond(res, 200, { result });
+      }
       if (url.pathname === '/api/about' && req.method === 'GET' && application.about) { res.setHeader('cache-control', 'no-store'); return respond(res, 200, application.about()); }
       if (url.pathname === '/api/folders/search' && req.method === 'GET' && application.searchFolders) {
         res.setHeader('cache-control', 'no-store');
