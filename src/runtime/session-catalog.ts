@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import type { AgentAdapter, Target } from '../core/contracts.js';
+import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import { attentionFor, latestResponseSequence } from '../core/attention.js';
 import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SeenStore, SessionCatalog } from '../core/session-catalog.js';
 import { languageShortCode } from '../core/language-settings.js';
-import type { SessionRecord } from '../core/session-contracts.js';
+import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { SessionManager } from './session-manager.js';
 import type { SessionLauncher, LaunchRecord } from './session-launcher.js';
 import type { AttentionMonitor } from './attention-monitor.js';
@@ -39,7 +39,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   const metadata = new Map<string, { at: number; value: ProjectMetadata }>();
   const metadataReads = new Map<string, Promise<ProjectMetadata>>();
   const listeners = new Set<(snapshot: CatalogSnapshot) => void>();
-  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], discovery: { state: 'healthy' } };
+  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], terminals: [], discovery: { state: 'healthy' } };
   let started = false;
   let closed = false;
   let pending: Promise<void> | undefined;
@@ -75,7 +75,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   };
   const launchEntries = (entries: CatalogEntry[]): CatalogEntry[] => {
     if (!options.launcher) return entries;
-    const launches = options.launcher.list().filter(launch => launch.state !== 'ended');
+    const launches = options.launcher.list().filter((launch): launch is LaunchRecord & { agent: AgentKind } => launch.state !== 'ended' && launch.agent !== 'shell');
     const attention = options.attention?.current() ?? new Map();
     // A launch owns the row registered for its panel, or the row discovered under its native session.
     const owner = (entry: CatalogEntry) => launches.find(l => (entry.sessionId !== undefined && l.panelSessionId === entry.sessionId)
@@ -94,6 +94,13 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     return result;
   };
+  const titleNumber = (title: string) => Number(/^Terminal(?: (\d+))?$/.exec(title)?.[1] ?? 1);
+  const terminalEntries = (): TerminalEntry[] => {
+    if (!options.launcher) return [];
+    return options.launcher.list().filter(l => l.agent === 'shell' && l.state !== 'ended')
+      .map(l => ({ key: 'terminal:' + l.id, launchId: l.id, title: l.title ?? 'Terminal', busy: l.busy === true, folder: l.folder, ...launchProject(l.folder), ...(l.originSessionId ? { originSessionId: l.originSessionId } : {}) }))
+      .sort((a, b) => a.projectKey.localeCompare(b.projectKey) || a.folder.localeCompare(b.folder) || titleNumber(a.title) - titleNumber(b.title));
+  };
   const publish = () => {
     if (closed) return;
     const entries = launchEntries([...rows.values()].map(row => {
@@ -107,8 +114,9 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       const attention = attentionFor(entry, entry.sessionId && options.seen ? options.seen.seenSequence(entry.sessionId) : undefined);
       if (attention === 'none') delete entry.attention; else entry.attention = attention;
     }
-    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery)) return;
-    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health } };
+    const terminals = terminalEntries();
+    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(terminals, current.terminals ?? []) && isDeepStrictEqual(health, current.discovery)) return;
+    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), terminals: structuredClone(terminals), discovery: { ...health } };
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };

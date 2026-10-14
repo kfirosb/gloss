@@ -27,7 +27,7 @@ it('tab order is first-seen and stable when activity changes',()=>{
  expect(tree[0]!.folders[0]!.open.map(e=>e.key)).toEqual(['B','A','C']);
 });
 it('chooses the last selected open session, else the first open, else none',()=>{
- const folder={key:'/f',name:'f',path:'/f',main:true,git:true,missing:false,open:[at('A','/r/.git','/f'),at('B','/r/.git','/f')],saved:[at('S','/r/.git','/f',false)]};
+ const folder={key:'/f',name:'f',path:'/f',main:true,git:true,missing:false,terminals:[],open:[at('A','/r/.git','/f'),at('B','/r/.git','/f')],saved:[at('S','/r/.git','/f',false)]};
  expect(chooseSessionForFolder(folder,'B')).toBe('B');
  expect(chooseSessionForFolder(folder,'S')).toBe('S');
  expect(chooseSessionForFolder(folder,'gone')).toBe('A');

@@ -132,3 +132,24 @@ it('does not report a live session absent or ended on tmux command failures', as
   expect(await tmux.hasSession('la-test')).toBe(false);
   await expect(tmux.killSession('la-test')).resolves.toBeUndefined();
 });
+it('treats a server that exits while answering (the last session was just killed) as absent', async () => {
+  // Seen with tmux 3.5a: kill-session of the last session with a client attached, then has-session, prints this ~1 in 10 times.
+  const exited = { code: 1, signal: null, reason: 'exited' as const, diagnostics: 'server exited unexpectedly' };
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* () { yield { type: 'exit', outcome: exited }; } });
+  expect(await tmux.hasSession('la-test')).toBe(false);
+  await expect(tmux.killSession('la-test')).resolves.toBeUndefined();
+  expect(await tmux.listSessions()).toEqual([]);
+});
+it('lists the current command of each pane', async () => {
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* (_exe, args) {
+    if (args.includes('list-sessions')) { yield { type: 'line', line: 'la-one\t41\tzsh' }; yield { type: 'line', line: 'la-two\t42\tnode' }; yield { type: 'line', line: 'other\t43\tzsh' }; }
+    yield { type: 'exit', outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' } };
+  } });
+  expect(await tmux.listSessions()).toEqual([{ name: 'la-one', panePid: 41, currentCommand: 'zsh' }, { name: 'la-two', panePid: 42, currentCommand: 'node' }]);
+});
+it('types text literally and then presses Enter as two commands', async () => {
+  const calls: string[][] = [];
+  const tmux = await createTmux({ stateDir: await temp(), executable: '/stub/tmux', runner: async function* (_exe, args) { calls.push(args); yield { type: 'exit', outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' } }; } });
+  await tmux.typeText('la-one', '-n "C-c" && echo done');
+  expect(calls.map(c => c.slice(4))).toEqual([['send-keys', '-t', '=la-one:', '-l', '--', '-n "C-c" && echo done'], ['send-keys', '-t', '=la-one:', '--', 'Enter']]);
+});

@@ -177,13 +177,13 @@ import { DEFAULT_SIDEBAR_SETTINGS, validateSidebarSettings, type ConnectedFolder
 import type { LaunchRecord, LaunchSettings, LaunchStore } from '../runtime/session-launcher.js';
 function validateLaunchSettings(value: unknown): LaunchSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid launch settings');
-  const { popup, extraArgs } = value as LaunchSettings;
-  if (!['auto', 'current-tab', 'dot-only'].includes(popup) || !extraArgs || typeof extraArgs !== 'object' || Array.isArray(extraArgs)) throw new Error('Invalid launch settings');
+  const { popup, extraArgs, terminalView = 'popup' } = value as LaunchSettings;
+  if (!['auto', 'current-tab', 'dot-only'].includes(popup) || !['popup', 'workspace'].includes(terminalView) || !extraArgs || typeof extraArgs !== 'object' || Array.isArray(extraArgs)) throw new Error('Invalid launch settings');
   for (const agent of ['claude', 'codex'] as const) {
     const args = extraArgs[agent];
     if (!Array.isArray(args) || args.length > 32 || args.some(arg => typeof arg !== 'string' || arg.length > 512)) throw new Error('Invalid launch settings');
   }
-  return { popup, extraArgs: { claude: [...extraArgs.claude], codex: [...extraArgs.codex] } };
+  return { popup, terminalView, extraArgs: { claude: [...extraArgs.claude], codex: [...extraArgs.codex] } };
 }
 export class SqliteStore implements ConversationStore, SessionStore, FileReferenceStore, LanguageSettingsStore, LaunchStore, ConnectedFolderStore, SeenStore {
   seenSequence(sessionId: string): number | undefined {
@@ -215,10 +215,11 @@ export class SqliteStore implements ConversationStore, SessionStore, FileReferen
   putLaunch(record: LaunchRecord): void {
     this.database.prepare('INSERT INTO session_launches(id,data_json) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json').run(record.id, json(record));
   }
+  deleteLaunch(id: string): void { this.database.prepare('DELETE FROM session_launches WHERE id = ?').run(id); }
   readLaunchSettings(): LaunchSettings {
     const row = this.database.prepare("SELECT value_json FROM app_settings WHERE key = 'launch.settings'").get() as Row | undefined;
     if (row) { try { return validateLaunchSettings(parse(row.value_json)); } catch { /* Invalid saved settings fall back to defaults. */ } }
-    return { extraArgs: { claude: [], codex: [] }, popup: 'auto' };
+    return { extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' };
   }
   writeLaunchSettings(settings: LaunchSettings): void {
     const valid = validateLaunchSettings(settings);

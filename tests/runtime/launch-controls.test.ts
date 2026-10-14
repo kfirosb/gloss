@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { chunkInput, shouldAutoOpen, shouldAutoOpenLaunch, MAX_INPUT_CHUNK, noteKeystroke, lastKeystrokeAt } from '../../src/ui/launch-controls.js';
+import { chunkInput, shouldAutoOpen, shouldAutoOpenLaunch, MAX_INPUT_CHUNK, noteKeystroke, lastKeystrokeAt, terminalTitle } from '../../src/ui/launch-controls.js';
 
 const entry = { key: 'k', sessionId: 'S', launchId: 'L1', activity: 'approval-required' } as any;
 it('never opens in dot-only mode', () => { expect(shouldAutoOpen(entry, 'S', 'dot-only', 0, 10_000)).toBe(false); });
@@ -41,4 +41,9 @@ it('shares one last-keystroke time between the session and launch auto-open path
   expect(shouldAutoOpen(entry, 'S', 'auto', lastKeystrokeAt(), 10_000)).toBe(false);
   expect(shouldAutoOpenLaunch({ ...entry, sessionId: undefined }, 'other', 'auto', lastKeystrokeAt(), 10_000)).toBe(false);
   expect(shouldAutoOpen(entry, 'S', 'auto', lastKeystrokeAt(), 11_000)).toBe(true);
+});
+
+it('names a terminal by its title, project and folder', () => {
+  expect(terminalTitle({ title: 'Terminal', projectName: 'gloss', folder: '/Users/k/gloss/.worktrees/terminal' })).toBe('Terminal · gloss / terminal');
+  expect(terminalTitle({ title: 'Terminal 2', projectName: 'gloss', folder: '/Users/k/gloss' })).toBe('Terminal 2 · gloss / gloss');
 });
