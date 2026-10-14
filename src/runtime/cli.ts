@@ -37,14 +37,9 @@ export async function launch(args: string[]) {
   let application: ReturnType<typeof createApplication>;
   const launchServices = createLaunchServices({ store, codex: codexAdapter, application: () => application });
   launchedCodex = launchServices.launchedCodexLive;
-  const { createModelStore } = await import('./dictation/model.js'); const { createDictationEngine, locateWhisper } = await import('./dictation/engine.js'); const { createDictationBridge } = await import('./dictation/bridge.js');
-  const dictationLog = (line: string) => process.stdout.write(JSON.stringify({ event: 'dictation', line }) + '\n');
-  const dictationModel = createModelStore({ directory: join(root, 'models') });
-  const dictation = createDictationBridge({ engine: createDictationEngine({ binary: locateWhisper(), model: dictationModel, log: dictationLog }), model: dictationModel, capability: () => application.capability, log: dictationLog });
-  // The detached whisper-server must not outlive the CLI. Only dictation stops here; tmux-backed sessions are left running on purpose.
-  // 'exit' covers a crash or a normal exit too; close() is synchronous (it signals the engine's process group), so it is safe there.
-  if (isEntry()) { let stopped = false; const stopDictation = () => { if (stopped) return; stopped = true; dictation.close(); };
-    for (const [signal, code] of [['SIGTERM', 143], ['SIGINT', 130], ['SIGHUP', 129]] as const) process.once(signal, () => { stopDictation(); process.exit(code); }); process.once('exit', stopDictation); }
+  // The detached whisper-server must not outlive the CLI, so only the real entry attaches the signal handlers.
+  const { createDictationServices } = await import('./dictation/services.js');
+  const dictation = createDictationServices({ root, capability: () => application.capability, log: line => process.stdout.write(JSON.stringify({ event: 'dictation', line }) + '\n'), attachSignals: isEntry() });
   application = createApplication({ launcher: launchServices.launcher, terminals: launchServices.terminals, attention: launchServices.attention, approveLaunchFolder: launchServices.approveFolder, endLaunchesInFolder: launchServices.endLaunchesInFolder, dictation, ...(process.env.LANGUAGE_PANEL_CAPABILITY ? { capability: process.env.LANGUAGE_PANEL_CAPABILITY } : {}), store, projectPath: flags.project ?? process.cwd(), conversationId: flags.conversation ?? (flags.session ? `${flags.agent}:${flags.session}` : 'language-default'), language, ...(flags.model ? { model: flags.model } : {}), agents: [claudeAdapter, codexAdapter], languageBackends: { claude: new ClaudeLanguageBackend(), codex: new CodexLanguageBackend() } });
   const server = await startServer(application, { port: Number(flags.port ?? 0) });
   localSink = createHttpSourceSink({ endpoint: new URL('/api/source/messages', server.url).href, capability: application.capability, onDelivered: message => process.stdout.write(JSON.stringify({ event: 'source-delivered', session: message.sourceSessionId, id: message.sourceId, sequence: message.sequence }) + '\n') });

@@ -3,12 +3,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os'; import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDictationEngine, locateWhisper } from '../../src/runtime/dictation/engine.js';
+import { modelsDirectory } from '../../src/runtime/dictation/services.js';
 import { WAV_HEADER_BYTES } from '../../src/runtime/dictation/wav.js';
 import { createModelStore } from '../../src/runtime/dictation/model.js';
 import { createSegmenter } from '../../src/core/dictation-segmenter.js';
 import { acceptTranscription, FRAME_SAMPLES, MODEL_FILE } from '../../src/core/dictation-contracts.js';
 
-const binary = locateWhisper(); const modelDir = join(homedir(), '.language-assistant', 'models'); const fixture = fileURLToPath(new URL('../fixtures/dictation-he.wav', import.meta.url));
+const binary = locateWhisper(); const modelDir = modelsDirectory(join(homedir(), '.language-assistant')); const fixture = fileURLToPath(new URL('../fixtures/dictation-he.wav', import.meta.url));
 const ready = !!binary && existsSync(join(modelDir, MODEL_FILE)) && existsSync(fixture);
 describe.skipIf(!ready)('dictation with the real engine', () => {
   // The fixture is a free-form Hebrew test recording about "הקלטה" (recording) and "בדיקה" (test).
