@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SAMPLE_RATE, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
 import { authHeaders } from './session-client.js';
 import { initialDictationState, reduceDictation, type DictationEffect, type DictationUiEvent, type DictationUiState } from './dictation-state.js';
-import { workletUrl } from './pcm-worklet.js';
+import { PCM_PROCESSOR_NAME, workletUrl } from './pcm-worklet.js';
 
 export interface UseDictationOptions { sessionId: string; language: 'he' | 'en'; appendText(text: string): void; sendNow(): void; enabled: boolean }
 export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; requestSend(): void; dismissNotice(): void }
@@ -46,7 +46,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
         context.current = ctx;
         void ctx.audioWorklet.addModule(workletUrl()).then(() => {
           if (context.current !== ctx) return;
-          const node = new AudioWorkletNode(ctx, 'pcm-capture', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
+          const node = new AudioWorkletNode(ctx, PCM_PROCESSOR_NAME, { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
           node.port.onmessage = e => { if (context.current !== ctx) return; const { pcm, level: frameLevel } = e.data as { pcm: Int16Array<ArrayBuffer>; level: number }; const ws = socket.current; if (ws?.readyState === WebSocket.OPEN) ws.send(pcm.buffer); level.current = frameLevel; };
           ctx.createMediaStreamSource(s).connect(node);
         }).catch(() => { if (context.current === ctx) dispatch({ type: 'server', message: { type: 'error', code: 'engine-failed', message: 'Audio capture could not start' } }); });
