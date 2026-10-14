@@ -112,6 +112,10 @@ export function LaunchSettingsFields({ value, onChange }: { value: LaunchSetting
       <select id={id + 'popup'} value={value.popup} onChange={e => onChange({ ...value, popup: e.target.value as PopupMode })}>
         <option value="auto">Open the terminal automatically</option><option value="current-tab">Only on the current tab</option><option value="dot-only">Only show the red dot</option>
       </select><small>Applies to sessions started from Gloss</small></div>
+    <div className="language-field"><label htmlFor={id + 'view'}>Terminal tabs open as</label>
+      <select id={id + 'view'} value={value.terminalView} onChange={e => onChange({ ...value, terminalView: e.target.value as TerminalView })}>
+        <option value="popup">Popup over the conversation</option><option value="workspace">Full workspace</option>
+      </select><small>Run and terminal tabs use this view. Expand and Shrink in the terminal update it.</small></div>
     {(['claude', 'codex'] as const).map(agent => <div className="language-field" key={agent}><label htmlFor={id + agent}>Extra {agent === 'claude' ? 'Claude' : 'Codex'} launch arguments</label>
       <input id={id + agent} type="text" dir="ltr" value={value.extraArgs[agent]} placeholder={agent === 'claude' ? '--model opus' : '--model gpt-5'} onChange={e => onChange({ ...value, extraArgs: { ...value.extraArgs, [agent]: e.target.value } })} /></div>)}
   </section>;

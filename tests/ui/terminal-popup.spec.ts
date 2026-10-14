@@ -9,7 +9,7 @@ async function withLaunch(page: Page, activity = 'idle', popup = 'auto', extra: 
   await page.unroute('**/api/session-catalog**');
   await page.route('**/api/session-catalog', r => r.fulfill({ json: catalog }));
   await page.route('**/api/session-catalog/events', r => r.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify(catalog) + '\n\n' }));
-  await page.route('**/api/settings/launch', r => r.fulfill({ json: { extraArgs: { claude: [], codex: [] }, popup } }));
+  await page.route('**/api/settings/launch', r => r.fulfill({ json: { extraArgs: { claude: [], codex: [] }, popup, terminalView: 'popup' } }));
   const tickets: string[] = []; const received: any[] = [];
   await page.route('**/api/launches/L1/terminal-ticket', r => { tickets.push('x'); return r.fulfill({ json: { ticket: 'tk', expiresAt: Date.now() + 30000 } }); });
   await page.routeWebSocket(/\/api\/launches\/L1\/terminal\?ticket=tk/, ws => { ws.send('Allow this command? (y/n)'); ws.onMessage(m => { received.push(JSON.parse(String(m))); }); });
@@ -73,15 +73,16 @@ test('language defaults dialog edits popup behavior and extra launch arguments',
   await withLaunch(page);
   let put: any;
   await page.route('**/api/settings/language', r => r.fulfill({ json: { write: 'he', send: 'en', reply: 'he', assist: 'he' } }));
-  await page.route('**/api/settings/launch', r => { if (r.request().method() === 'PUT') { put = r.request().postDataJSON(); return r.fulfill({ json: { extraArgs: { claude: [], codex: [] }, popup: put.popup } }); } return r.fallback(); });
+  await page.route('**/api/settings/launch', r => { if (r.request().method() === 'PUT') { put = r.request().postDataJSON(); return r.fulfill({ json: { extraArgs: { claude: [], codex: [] }, popup: put.popup, terminalView: put.terminalView } }); } return r.fallback(); });
   await page.goto('/#capability=test');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(dialog.getByRole('heading', { name: 'Sessions' })).toBeVisible();
   await dialog.getByLabel('When a session needs approval').selectOption('dot-only');
   await dialog.getByLabel('Extra Claude launch arguments').fill('--model "opus 4"');
+  await dialog.getByLabel('Terminal tabs open as').selectOption('workspace');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect.poll(() => put).toEqual({ extraArgs: { claude: '--model "opus 4"', codex: '' }, popup: 'dot-only' });
+  await expect.poll(() => put).toEqual({ extraArgs: { claude: '--model "opus 4"', codex: '' }, popup: 'dot-only', terminalView: 'workspace' });
 });
 
 test('the popup shows a status and an Expand button when given one', async ({ page }) => {
