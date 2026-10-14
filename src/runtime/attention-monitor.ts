@@ -26,6 +26,7 @@ export function createAttentionMonitor(options: { tmux: () => Promise<Tmux>; lau
     const value = options.agentVersion(a).catch(() => undefined); versions.set(a, { at: now(), value }); return value;
   };
   async function inspect(launch: LaunchRecord): Promise<Attention> {
+    if (launch.agent === 'shell') return { launchId: launch.id, state: 'clear' };
     const table = markersFor(launch.agent, (await version(launch.agent)) ?? '');
     if (!table) return { launchId: launch.id, state: 'unknown-version', reason: `Approval detection unavailable for this ${agentLabel(launch.agent)} version` };
     const failed = captureFailedAt.get(launch.id);

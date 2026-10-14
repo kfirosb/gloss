@@ -4,20 +4,23 @@ import { isAbsolute } from 'node:path';
 import type { AgentKind, Target } from '../core/contracts.js';
 import { validateLanguageOverride, type LanguageOverride } from '../core/language-settings.js';
 import type { SessionManager } from './session-manager.js';
-import { CLAUDE_SETUP_PROMPT } from './claude-channel-setup.js';
 import { sessionNameFor, type Tmux } from './tmux.js';
 
-import type { LaunchState } from '../core/session-contracts.js';
+import { CLAUDE_SETUP_PROMPT, CODEX_SETUP_PROMPT, type LaunchAgent, type LaunchState, type TerminalView } from '../core/session-contracts.js';
 export type { LaunchState } from '../core/session-contracts.js';
 const MISSING_REASON = 'Session is no longer running';
 export interface LaunchRecord {
-  id: string; agent: AgentKind; folder: string; panePid: number;
+  id: string; agent: LaunchAgent; folder: string; panePid: number;
   sessionRef?: string; panelSessionId?: string; languageOverride?: LanguageOverride;
   state: LaunchState; reason?: string; createdAt: number;
+  /** Shell launches only. */
+  title?: string; originSessionId?: string;
+  /** Shell launches only; in-memory, filled by list(). */
+  busy?: boolean;
 }
-export interface LaunchSettings { extraArgs: Record<AgentKind, string[]>; popup: 'auto' | 'current-tab' | 'dot-only' }
+export interface LaunchSettings { extraArgs: Record<AgentKind, string[]>; popup: 'auto' | 'current-tab' | 'dot-only'; terminalView: TerminalView }
 export interface LaunchStore {
-  listLaunches(): LaunchRecord[]; putLaunch(record: LaunchRecord): void;
+  listLaunches(): LaunchRecord[]; putLaunch(record: LaunchRecord): void; deleteLaunch(id: string): void;
   readLaunchSettings(): LaunchSettings; writeLaunchSettings(settings: LaunchSettings): void;
 }
 export interface SessionLauncher {
@@ -35,7 +38,7 @@ export interface SessionLauncher {
  * Disclosed setup prompt for a new Codex launch. Codex creates its thread only on the first prompt, so without it the
  * app could not connect until the user typed in the terminal. It costs one model request.
  */
-export const CODEX_SETUP_PROMPT = 'Reply with READY only. Do not run commands.';
+export { CODEX_SETUP_PROMPT } from '../core/session-contracts.js';
 /** Identification attempts back off (1 s, 5 s, 15 s) and then stop instead of polling. */
 export const IDENTIFY_RETRY_DELAYS_MS = [1000, 5000, 15000];
 export function splitArgs(text: string): string[] {
@@ -135,7 +138,7 @@ export function createSessionLauncher(options: {
         while (active(id, controller)) {
           const record = get(id);
           let target: Target | undefined;
-          if (record.sessionRef) target = { agent: record.agent, sessionRef: record.sessionRef, projectId: record.folder };
+          if (record.agent !== 'shell' && record.sessionRef) target = { agent: record.agent, sessionRef: record.sessionRef, projectId: record.folder };
           else target = await cancellable(options.findCodex(record, controller.signal), controller.signal).catch(() => undefined);
           if (!active(id, controller)) break;
           if (target) {

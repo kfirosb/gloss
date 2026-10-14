@@ -57,8 +57,8 @@ it('maps tmux-unavailable to a clear 400', async () => {
 it('reads and replaces launch settings', async () => {
   const { request } = await setup(fakeLauncher());
   expect((await request('settings/launch', 'GET', undefined, false)).status).toBe(401);
-  expect(await (await request('settings/launch')).json()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto' });
-  const next = { extraArgs: { claude: ['--x'], codex: [] }, popup: 'dot-only' };
+  expect(await (await request('settings/launch')).json()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' });
+  const next = { extraArgs: { claude: ['--x'], codex: [] }, popup: 'dot-only', terminalView: 'popup' };
   expect(await (await request('settings/launch', 'PUT', next)).json()).toEqual(next);
   expect((await request('settings/launch', 'PUT', { popup: 'nope', extraArgs: {} })).status).toBe(400);
   expect(await (await request('settings/launch')).json()).toEqual(next);
@@ -66,7 +66,7 @@ it('reads and replaces launch settings', async () => {
 it('splits extra-argument strings per agent with the launcher quoting rules', async () => {
   const { request } = await setup(fakeLauncher());
   const put = await request('settings/launch', 'PUT', { extraArgs: { claude: '--model "opus 4" --x', codex: '' }, popup: 'auto' });
-  expect(await put.json()).toEqual({ extraArgs: { claude: ['--model', 'opus 4', '--x'], codex: [] }, popup: 'auto' });
+  expect(await put.json()).toEqual({ extraArgs: { claude: ['--model', 'opus 4', '--x'], codex: [] }, popup: 'auto', terminalView: 'popup' });
   expect((await request('settings/launch', 'PUT', { extraArgs: { claude: '"open', codex: '' }, popup: 'auto' })).status).toBe(400);
 });
 it('routes only loopback /api/launches upgrades to the terminal bridge', async () => {

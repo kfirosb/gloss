@@ -27,8 +27,8 @@ function fakeTmux() {
 }
 function memoryStore(settings?: Partial<LaunchSettings>) {
  const launches = new Map<string, LaunchRecord>();
- let s: LaunchSettings = { extraArgs: { claude: [], codex: [] }, popup: 'auto', ...settings };
- return { launches, listLaunches: () => structuredClone([...launches.values()]), putLaunch: (r: LaunchRecord) => { launches.set(r.id, structuredClone(r)); }, readLaunchSettings: () => s, writeLaunchSettings: (n: LaunchSettings) => { s = n; } };
+ let s: LaunchSettings = { extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup', ...settings };
+ return { launches, listLaunches: () => structuredClone([...launches.values()]), putLaunch: (r: LaunchRecord) => { launches.set(r.id, structuredClone(r)); }, deleteLaunch: (id: string) => { launches.delete(id); }, readLaunchSettings: () => s, writeLaunchSettings: (n: LaunchSettings) => { s = n; } };
 }
 async function setup(overrides: { settings?: Partial<LaunchSettings>; findCodex?: (pid: number, signal: AbortSignal) => Promise<Target | undefined>; register?: (...args: any[]) => Promise<any>; applyLanguage?: (...args: any[]) => void | Promise<void>; timeout?: number; retryDelaysMs?: number[]; sleep?: (ms: number) => Promise<void> } = {}) {
  const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-launch-'))); dirs.push(folder);
@@ -172,12 +172,22 @@ it('round-trips launches in stable insertion order and validates settings', () =
  try {
   const a: LaunchRecord = { id: 'a', agent: 'claude', folder: '/project', panePid: 12, state: 'starting', createdAt: 1 };
   const b: LaunchRecord = { ...a, id: 'b', agent: 'codex', panePid: 13, languageOverride: { reply: 'en' } };
-  store.putLaunch(a); store.putLaunch(b); store.putLaunch({ ...a, state: 'ended' });
-  expect(store.listLaunches()).toEqual([{ ...a, state: 'ended' }, b]);
-  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto' });
-  const settings: LaunchSettings = { extraArgs: { claude: ['--model', 'opus 5'], codex: ['$HOME'] }, popup: 'dot-only' }; store.writeLaunchSettings(settings); expect(store.readLaunchSettings()).toEqual(settings);
-  for (const bad of [{ ...settings, popup: 'always' }, { ...settings, extraArgs: { claude: [], codex: Array(33).fill('x') } }, { ...settings, extraArgs: { claude: ['x'.repeat(513)], codex: [] } }, { ...settings, extraArgs: { claude: [1], codex: [] } }]) expect(() => store.writeLaunchSettings(bad as any)).toThrow('Invalid launch settings');
+  const shell: LaunchRecord = { id: 's', agent: 'shell', folder: '/project', panePid: 14, state: 'running', createdAt: 2, title: 'Terminal 2', originSessionId: 'panel-1' };
+  store.putLaunch(a); store.putLaunch(b); store.putLaunch({ ...a, state: 'ended' }); store.putLaunch(shell);
+  expect(store.listLaunches()).toEqual([{ ...a, state: 'ended' }, b, shell]);
+  store.deleteLaunch('s'); store.deleteLaunch('missing');
+  expect(store.listLaunches().map(r => r.id)).toEqual(['a', 'b']);
+  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' });
+  const settings: LaunchSettings = { extraArgs: { claude: ['--model', 'opus 5'], codex: ['$HOME'] }, popup: 'dot-only', terminalView: 'workspace' }; store.writeLaunchSettings(settings); expect(store.readLaunchSettings()).toEqual(settings);
+  for (const bad of [{ ...settings, popup: 'always' }, { ...settings, terminalView: 'tab' }, { ...settings, extraArgs: { claude: [], codex: Array(33).fill('x') } }, { ...settings, extraArgs: { claude: ['x'.repeat(513)], codex: [] } }, { ...settings, extraArgs: { claude: [1], codex: [] } }]) expect(() => store.writeLaunchSettings(bad as any)).toThrow('Invalid launch settings');
   expect(store.readLaunchSettings()).toEqual(settings);
+ } finally { store.close(); }
+});
+it('reads launch settings saved before terminalView existed with the popup default', () => {
+ const store = new SqliteStore(':memory:');
+ try {
+  (store as any).database.prepare("INSERT OR REPLACE INTO app_settings(key,value_json) VALUES ('launch.settings',?)").run(JSON.stringify({ extraArgs: { claude: ['--model', 'opus'], codex: [] }, popup: 'dot-only' }));
+  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: ['--model', 'opus'], codex: [] }, popup: 'dot-only', terminalView: 'popup' });
  } finally { store.close(); }
 });
 it('prepares distinct private MCP files for concurrent new sessions and preserves exact resume status', async () => {

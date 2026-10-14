@@ -1,11 +1,12 @@
 import { useEffect, useId, useState } from 'react';
 import type { CatalogEntry } from '../core/session-catalog.js';
+import type { TerminalView } from '../core/session-contracts.js';
 import { sessionRequest } from './session-client.js';
 
 export type PopupMode = 'auto' | 'current-tab' | 'dot-only';
-export interface LaunchSettings { extraArgs: { claude: string[]; codex: string[] }; popup: PopupMode }
+export interface LaunchSettings { extraArgs: { claude: string[]; codex: string[] }; popup: PopupMode; terminalView: TerminalView }
 /** The editable form: extra arguments are plain text; the server splits them with its one quoting rule. */
-export interface LaunchSettingsInput { extraArgs: { claude: string; codex: string }; popup: PopupMode }
+export interface LaunchSettingsInput { extraArgs: { claude: string; codex: string }; popup: PopupMode; terminalView: TerminalView }
 export const readLaunchSettings = () => sessionRequest<LaunchSettings>('/api/settings/launch');
 export const writeLaunchSettings = (s: LaunchSettingsInput) => sessionRequest<LaunchSettings>('/api/settings/launch', { method: 'PUT', body: JSON.stringify(s) });
 export const terminalTicket = (launchId: string) => sessionRequest<{ ticket: string; expiresAt: number }>(`/api/launches/${encodeURIComponent(launchId)}/terminal-ticket`, { method: 'POST', body: '{}' });
@@ -86,7 +87,7 @@ export function usePopupMode(): PopupMode {
 export const saveLaunchSettings = async (input: LaunchSettingsInput) => { const saved = await writeLaunchSettings(input); publish(saved); return saved; };
 
 const quote = (arg: string) => /[\s"']/.test(arg) ? (arg.includes('"') ? `'${arg}'` : `"${arg}"`) : arg;
-export const toInput = (s: LaunchSettings): LaunchSettingsInput => ({ popup: s.popup, extraArgs: { claude: s.extraArgs.claude.map(quote).join(' '), codex: s.extraArgs.codex.map(quote).join(' ') } });
+export const toInput = (s: LaunchSettings): LaunchSettingsInput => ({ popup: s.popup, terminalView: s.terminalView, extraArgs: { claude: s.extraArgs.claude.map(quote).join(' '), codex: s.extraArgs.codex.map(quote).join(' ') } });
 
 export function LaunchSettingsFields({ value, onChange }: { value: LaunchSettingsInput; onChange(next: LaunchSettingsInput): void }) {
   const id = useId();

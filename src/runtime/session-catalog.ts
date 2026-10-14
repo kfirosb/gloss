@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import type { AgentAdapter, Target } from '../core/contracts.js';
+import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SessionCatalog } from '../core/session-catalog.js';
 import { languageShortCode } from '../core/language-settings.js';
 import type { SessionRecord } from '../core/session-contracts.js';
@@ -73,7 +73,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   };
   const launchEntries = (entries: CatalogEntry[]): CatalogEntry[] => {
     if (!options.launcher) return entries;
-    const launches = options.launcher.list().filter(launch => launch.state !== 'ended');
+    const launches = options.launcher.list().filter((launch): launch is LaunchRecord & { agent: AgentKind } => launch.state !== 'ended' && launch.agent !== 'shell');
     const attention = options.attention?.current() ?? new Map();
     // A launch owns the row registered for its panel, or the row discovered under its native session.
     const owner = (entry: CatalogEntry) => launches.find(l => (entry.sessionId !== undefined && l.panelSessionId === entry.sessionId)
