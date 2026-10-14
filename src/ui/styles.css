@@ -177,6 +177,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 /* The discussion column now contains a single pane; delivery lives in the review. */
 .conversation-sections > .pane-assistant { flex:1 1 auto; }
 .review-body { direction:rtl; }
+.review-body[dir="ltr"] { direction:ltr; }
 .review-body textarea { direction:rtl; font-family:inherit; font-size:1.1rem; }
 .selection-count { margin-inline-end:auto; text-decoration:underline; }
 .composer-actions { display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0; margin-top:0; }

@@ -119,3 +119,12 @@ test('a terminal popup closes when its shell exits', async ({ page }) => {
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ })).toHaveCount(0);
 });
+test('the End terminal dialog lays out its English text left to right', async ({ page }) => {
+  await withSession(page, [terminal()], 'workspace');
+  await page.goto('/#capability=test');
+  await page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ }).click();
+  await page.getByRole('button', { name: 'End terminal…' }).click();
+  const text = page.getByRole('dialog', { name: 'End terminal' }).getByText('Terminal and anything running in it will be closed.');
+  await expect(text).toBeVisible();
+  expect(await text.evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+});
