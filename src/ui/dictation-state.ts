@@ -1,4 +1,4 @@
-import { FINISH_TIMEOUT_MS, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
+import { DICTATION_REASON_TEXT, FINISH_TIMEOUT_MS, MAX_RECORDING_MS, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
 import { languageName } from '../core/language-settings.js';
 
 export type DictationPhase = 'idle' | 'downloading' | 'starting' | 'recording' | 'finishing' | 'unavailable' | 'error';
@@ -15,11 +15,10 @@ export type DictationEffect =
   | { type: 'append-text'; text: string } | { type: 'send-now' } | { type: 'start-finish-timer'; ms: number } | { type: 'clear-finish-timer' };
 /** How long a plain Stop/Escape waits for the server's 'finished' before giving up (send-initiated stops use FINISH_TIMEOUT_MS). */
 export const STOP_TIMEOUT_MS = 15_000;
-export const microphoneHint = 'Enable Gloss under System Settings → Privacy & Security → Microphone';
 export const initialDictationState: DictationUiState = { phase: 'idle', sendAfterFinish: false, lastSequence: 0 };
-const reasons: Record<string, string> = { 'engine-missing': 'Speech engine not built', 'microphone-denied': 'Microphone access denied. ' + microphoneHint };
+const NOTICE_TEXT = { 'segment-lost': 'One segment could not be transcribed', 'max-duration': 'Recording stopped after ' + Math.round(MAX_RECORDING_MS / 60_000) + ' minutes' } as const;
 const active = (p: DictationPhase) => p === 'downloading' || p === 'starting' || p === 'recording' || p === 'finishing';
-const idle = (s: DictationUiState, extra: Partial<DictationUiState> = {}): DictationUiState => ({ phase: 'idle', sendAfterFinish: false, lastSequence: 0, ...(s.notice ? { notice: s.notice } : {}), ...extra });
+const idle = (s: DictationUiState, extra: Partial<DictationUiState> = {}): DictationUiState => ({ ...initialDictationState, ...(s.notice ? { notice: s.notice } : {}), ...extra });
 
 export function appendDictation(existing: string, text: string): string {
   if (!existing) return text;
@@ -32,7 +31,7 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
   // Every entry into 'finishing' arms a timer so a server that never answers cannot leave the button stuck.
   const finishing = (next: DictationUiState, ...effects: DictationEffect[]) => out({ ...next, phase: 'finishing' }, ...effects, { type: 'start-finish-timer', ms: next.sendAfterFinish ? FINISH_TIMEOUT_MS : STOP_TIMEOUT_MS });
   switch (event.type) {
-    case 'status': return event.status.available ? out(state.phase === 'unavailable' ? idle(state) : state) : out({ ...state, phase: 'unavailable', reason: reasons[event.status.reason ?? ''] ?? 'Dictation unavailable' });
+    case 'status': return event.status.available ? out(state.phase === 'unavailable' ? idle(state) : state) : out({ ...state, phase: 'unavailable', reason: event.status.reason ? DICTATION_REASON_TEXT[event.status.reason] : 'Dictation unavailable' });
     case 'status-failed': return out({ ...state, phase: 'unavailable', reason: 'Dictation status unavailable' });
     case 'press':
       if (state.phase === 'idle' || state.phase === 'error') return out({ ...idle(state), phase: 'starting', startedAt: event.now }, { type: 'request-mic' });
@@ -40,7 +39,7 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
       if (state.phase === 'starting' || state.phase === 'recording') return finishing(state, { type: 'send-stop' }, { type: 'stop-stream' });
       return out(state);
     case 'mic-ready': return state.phase === 'starting' ? out(state, { type: 'open-socket' }) : out(state);
-    case 'mic-denied': return out({ ...idle(state), phase: 'unavailable', reason: reasons['microphone-denied']! });
+    case 'mic-denied': return out({ ...idle(state), phase: 'unavailable', reason: DICTATION_REASON_TEXT['microphone-denied'] });
     case 'escape': return state.phase === 'starting' || state.phase === 'recording' ? finishing({ ...state, sendAfterFinish: false }, { type: 'send-stop' }, { type: 'stop-stream' }) : out(state);
     case 'send-requested':
       if (state.phase === 'starting' || state.phase === 'recording') return finishing({ ...state, sendAfterFinish: true }, { type: 'send-stop' }, { type: 'stop-stream' });
@@ -53,7 +52,7 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
     case 'socket-closed':
       if (!active(state.phase)) return out(state);
       if (event.clean && state.phase === 'finishing') return out(idle(state), ...pendingSend);
-      return out({ ...state, phase: 'error', message: 'Connection to the speech service was lost', sendAfterFinish: false }, { type: 'stop-stream' }, ...pendingSend);
+      return out({ ...state, phase: 'error', message: 'Connection to the dictation server was lost', sendAfterFinish: false }, { type: 'stop-stream' }, ...pendingSend);
     case 'server': {
       const m = event.message;
       if (m.type === 'state') {
@@ -66,13 +65,13 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
       }
       if (m.type === 'segment') return m.sequence <= state.lastSequence ? out(state) : out({ ...state, lastSequence: m.sequence }, { type: 'append-text', text: m.text });
       if (m.type === 'notice') {
-        const notice = m.code === 'segment-lost' ? 'One segment could not be transcribed' : 'Recording stopped after 10 minutes';
+        const notice = NOTICE_TEXT[m.code];
         // The server is already stopping at the cap: stop capturing and wait for the remaining segments and 'finished'.
         if (m.code === 'max-duration' && (state.phase === 'starting' || state.phase === 'recording')) return finishing({ ...state, notice }, { type: 'stop-stream' });
         return out({ ...state, notice });
       }
-      const unavailable = m.code === 'engine-missing' || m.code === 'microphone-denied';
-      return out(unavailable ? { ...idle(state), phase: 'unavailable', reason: reasons[m.code] ?? m.message } : { ...idle(state), phase: 'error', message: m.message }, { type: 'stop-stream' }, ...pendingSend);
+      const reason = m.code === 'engine-missing' || m.code === 'microphone-denied' ? DICTATION_REASON_TEXT[m.code] : undefined;
+      return out(reason ? { ...idle(state), phase: 'unavailable', reason } : { ...idle(state), phase: 'error', message: m.message }, { type: 'stop-stream' }, ...pendingSend);
     }
   }
 }

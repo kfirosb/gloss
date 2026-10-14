@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOOPBACK_HOST } from '../loopback.js';
 import { packageRoot } from '../package-root.js';
-import { DictationFailure, ENGINE_IDLE_MS, NO_SPEECH_PROBABILITY, type DictationLanguage } from '../../core/dictation-contracts.js';
+import { DICTATION_REASON_TEXT, DictationFailure, ENGINE_IDLE_MS, NO_SPEECH_PROBABILITY, type DictationLanguage } from '../../core/dictation-contracts.js';
 import type { ModelProgress, ModelStore } from './model.js';
 import { encodeWav } from './wav.js';
 
@@ -64,7 +64,7 @@ export function createDictationEngine(options: DictationEngineOptions): Dictatio
   const threads = options.threads ?? Math.max(MIN_THREADS, Math.min(MAX_THREADS, Math.ceil(cpus().length / 2))), log = options.log ?? (() => undefined);
   let state: 'stopped' | 'starting' | 'running' = 'stopped'; let proc: EngineProcess | undefined; let base = ''; let generation = 0;
   let starting: Promise<void> | undefined; let idle: NodeJS.Timeout | undefined; let queue: Promise<unknown> = Promise.resolve();
-  const missing = () => new DictationFailure('engine-missing', 'Speech engine not built');
+  const missing = () => new DictationFailure('engine-missing', DICTATION_REASON_TEXT['engine-missing']);
   const stopped = () => new DictationFailure('engine-failed', 'Speech engine stopped unexpectedly');
   const stop = (why: string) => { if (idle) clearTimeout(idle); idle = undefined; const p = proc; proc = undefined; base = ''; state = 'stopped'; generation++; starting = undefined; p?.kill(); log('dictation-engine ' + why); };
   const touch = () => { if (state !== 'running') return; if (idle) clearTimeout(idle); idle = setTimeout(() => stop('idle-exit'), idleMs); };

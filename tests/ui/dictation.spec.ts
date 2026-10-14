@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { mockSession } from './session-fixture.js';
+import { DICTATION_REASON_TEXT } from '../../src/core/dictation-contracts.js';
 const base = () => ({ id: 'dict', target: { agent: 'codex', sessionRef: 's', projectId: 'p' }, codingState: 'idle', codingMessages: [], discussion: [], deliveries: [], language: 'he', languageSessionId: 'l', languageModel: 'm', sourceRevision: 1 });
 test('mic button is disabled with a reason when the engine is not built', async ({ page }) => {
   const snapshot = base(); await mockSession(page, () => snapshot);
   await page.route('**/api/dictation', route => route.fulfill({ json: { available: false, reason: 'engine-missing', model: { present: false }, engine: 'stopped' } }));
   await page.goto('/#capability=test');
-  const button = page.getByRole('button', { name: 'Dictation unavailable: Speech engine not built' });
+  const button = page.getByRole('button', { name: 'Dictation unavailable: ' + DICTATION_REASON_TEXT['engine-missing'] });
   await expect(button).toBeDisabled();
 });
 test('mic button is enabled and labelled with the write language when available', async ({ page }) => {

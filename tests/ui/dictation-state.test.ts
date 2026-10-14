@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { appendDictation, dictationLabel, initialDictationState, reduceDictation, type DictationUiState } from '../../src/ui/dictation-state.js';
+import { appendDictation, dictationLabel, initialDictationState, reduceDictation, STOP_TIMEOUT_MS, type DictationUiState } from '../../src/ui/dictation-state.js';
 import { REFERENCE_MARK } from '../../src/ui/session-client.js';
-import { FINISH_TIMEOUT_MS } from '../../src/core/dictation-contracts.js';
-import { STOP_TIMEOUT_MS } from '../../src/ui/dictation-state.js';
+import { DICTATION_REASON_TEXT, FINISH_TIMEOUT_MS } from '../../src/core/dictation-contracts.js';
 
 const run = (events: Parameters<typeof reduceDictation>[1][], start: DictationUiState = initialDictationState) => events.reduce((acc, e) => { const r = reduceDictation(acc.state, e); return { state: r.state, effects: [...acc.effects, ...r.effects] }; }, { state: start, effects: [] as ReturnType<typeof reduceDictation>['effects'] });
 const recording = () => run([{ type: 'press', now: 1000 }, { type: 'mic-ready' }, { type: 'server', message: { type: 'state', state: 'recording' } }]).state;
@@ -48,7 +47,6 @@ describe('reduceDictation', () => {
     expect(reduceDictation(initialDictationState, { type: 'send-requested' }).effects).toEqual([{ type: 'send-now' }]);
   });
   it('a plain stop has its own timeout that never sends; a send-initiated stop times out into sending', () => {
-    expect(STOP_TIMEOUT_MS).toBe(15_000);
     const e = reduceDictation(recording(), { type: 'escape' }); expect(e.effects).toEqual([{ type: 'send-stop' }, { type: 'stop-stream' }, { type: 'start-finish-timer', ms: STOP_TIMEOUT_MS }]);
     const t = reduceDictation(e.state, { type: 'finish-timeout' }); expect(t.state.phase).toBe('idle'); expect(t.effects).toEqual([{ type: 'close-socket' }]);
     const s = reduceDictation(recording(), { type: 'send-requested' });
@@ -59,7 +57,7 @@ describe('reduceDictation', () => {
     const e = reduceDictation(recording(), { type: 'server', message: { type: 'error', code: 'engine-failed', message: 'Speech engine did not start' } });
     expect(e.state).toMatchObject({ phase: 'error', message: 'Speech engine did not start' }); expect(e.effects).toEqual([{ type: 'stop-stream' }]);
     expect(reduceDictation(e.state, { type: 'retry' }).state.phase).toBe('idle');
-    const m = reduceDictation(recording(), { type: 'server', message: { type: 'error', code: 'engine-missing', message: 'Speech engine not built' } }); expect(m.state.phase).toBe('unavailable');
+    const m = reduceDictation(recording(), { type: 'server', message: { type: 'error', code: 'engine-missing', message: DICTATION_REASON_TEXT['engine-missing'] } }); expect(m.state.phase).toBe('unavailable');
   });
   it('an unclean close mid-recording is connection-lost and still honours a pending send', () => {
     const r = reduceDictation(recording(), { type: 'socket-closed', clean: false }); expect(r.state).toMatchObject({ phase: 'error', message: expect.stringMatching(/connection/i) });
@@ -84,7 +82,7 @@ describe('reduceDictation', () => {
     expect(reduceDictation(pending, { type: 'server', message: { type: 'state', state: 'finished' } }).effects).toEqual([{ type: 'clear-finish-timer' }, { type: 'stop-stream' }, { type: 'close-socket' }, { type: 'send-now' }]);
   });
   it('status gates availability and a session change abandons the recording without sending', () => {
-    expect(reduceDictation(initialDictationState, { type: 'status', status: { available: false, reason: 'engine-missing', model: { present: false }, engine: 'stopped' } }).state).toMatchObject({ phase: 'unavailable', reason: 'Speech engine not built' });
+    expect(reduceDictation(initialDictationState, { type: 'status', status: { available: false, reason: 'engine-missing', model: { present: false }, engine: 'stopped' } }).state).toMatchObject({ phase: 'unavailable', reason: DICTATION_REASON_TEXT['engine-missing'] });
     expect(reduceDictation(initialDictationState, { type: 'status-failed' }).state.phase).toBe('unavailable');
     const pending = reduceDictation(recording(), { type: 'send-requested' }).state;
     const s = reduceDictation(pending, { type: 'session-changed' }); expect(s.state.phase).toBe('idle'); expect(s.effects).toEqual([{ type: 'close-socket' }, { type: 'stop-stream' }]);

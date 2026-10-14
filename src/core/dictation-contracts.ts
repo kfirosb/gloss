@@ -25,6 +25,11 @@ export type DictationServerMessage =
   | { type: 'notice'; code: DictationNoticeCode }
   | { type: 'error'; code: DictationErrorCode; message: string };
 export type DictationClientMessage = { type: 'stop' };
+/** Why dictation is unavailable, as shown to the user; the engine's engine-missing failure carries the same text. */
+export const DICTATION_REASON_TEXT: Record<'engine-missing' | 'microphone-denied', string> = {
+  'engine-missing': 'Speech engine not built',
+  'microphone-denied': 'Microphone access denied. Enable Gloss under System Settings → Privacy & Security → Microphone',
+};
 export interface DictationStatus { available: boolean; reason?: 'engine-missing'; model: { present: boolean; bytes?: number }; engine: 'stopped' | 'starting' | 'running' }
 export class DictationFailure extends Error { constructor(readonly code: DictationErrorCode, message?: string) { super(message ?? code); this.name = 'DictationFailure'; } }
 /** Outputs whisper produces on near-silence; compared after trimming and stripping trailing punctuation. */
