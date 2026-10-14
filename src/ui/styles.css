@@ -458,6 +458,20 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .activity-dot.connecting,.activity-dot.unknown{background:#9aa4b8}.activity-dot.disconnected{background:transparent;border:1.5px solid #9aa4b8}
 @keyframes activity-pulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.activity-dot.working{animation:none}}
+/* Attention cues: red = needs you, amber = working, blue = arriving now, green = just completed. */
+.attn-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#e5372b;color:#fff;font-size:10.5px;font-weight:700;line-height:1;box-shadow:0 0 0 2px #fff;flex:none}
+.attn-badge.small{min-width:15px;height:15px;font-size:9px}
+.attn-dot{width:8px;height:8px;border-radius:50%;background:#e5372b;flex:none;display:inline-block}
+.attn-spinner{width:12px;height:12px;border-radius:50%;border:2px solid #d9c38f;border-top-color:#e0a23a;animation:attn-spin .9s linear infinite;flex:none;display:inline-block}
+.attn-ring{animation:attn-ring 1.6s ease-in-out infinite}
+.attn-flash{animation:attn-flash 1.4s ease-out 1}
+@keyframes attn-spin{to{transform:rotate(360deg)}}
+@keyframes attn-ring{0%,100%{box-shadow:0 0 0 2px #3b82f633}50%{box-shadow:0 0 0 3px #3b82f6aa,0 0 22px #3b82f680}}
+@keyframes attn-flash{0%{background:#dcf5e6;box-shadow:0 0 0 3px #1bb76880}100%{box-shadow:none}}
+.project-folder .attn-badge,.project-toggle .attn-badge{margin-left:4px}
+.session-rail button .attn-badge{position:absolute;top:-6px;right:-6px}
+.session-rail button .attn-spinner{position:absolute;left:-4px;bottom:-4px}
+@media (prefers-reduced-motion:reduce){.attn-spinner,.attn-ring,.attn-flash{animation:none}.attn-ring{box-shadow:0 0 0 3px #3b82f6aa}}
 .session-tabs-empty{margin:0 0 8px;color:#647089;font-size:.85rem}
 .session-saved{position:relative;margin-bottom:5px;flex:none}.session-saved>button{font-size:.78rem;padding:5px 9px}
 .session-saved-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid #d9deea;border-radius:10px;box-shadow:0 14px 40px #17203324;padding:6px;min-width:220px;display:flex;flex-direction:column}
