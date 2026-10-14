@@ -21,10 +21,13 @@ import {ResponseSummaries} from './response-summaries.js';
 import type {SummarySource,ResponseSummary} from './summary-contracts.js';
 import { languageName, legacyLanguageSettings, needsReplyTranslation, needsSendTranslation, type LanguageSettings } from './language-settings.js';
 import { translateMessageResult } from './translations.js';
+import { assembleInstruction, findInvocations, type InvocationCatalog } from './invocations.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
 
 export interface WorkflowDependencies {
   files?: FileRegistry;
+  /** Skill and MCP names the session's agent can use; when absent or failing, instructions are sent as written. */
+  invocations?: () => Promise<InvocationCatalog>;
   readFileContext?: (files: FileReference[]) => Promise<NonNullable<LanguageInput['fileContext']>>;
   conversationId: string;
   language: string;
@@ -805,6 +808,11 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       }
       const deliveryConnection = connection;
       const attachments = draft.attachments?.length ? await resolveReferences(draft.attachments) : [];
+      let englishText = draft.englishText;
+      if (deps.invocations) {
+        try { englishText = assembleInstruction(draft.target.agent, findInvocations(draft.localizedText, await deps.invocations()), englishText); }
+        catch { /* Inventory unavailable: deliver the reviewed instruction as written. */ }
+      }
       requireOpen();
       if (connection !== deliveryConnection || !state.target || !sameTarget(draft.target,state.target)) throw new Error('Target changed');
       if (state.currentDraft?.id === id ? state.currentDraft.revision !== revision : state.composerDraft?.id !== id || state.composerDraft.revision !== revision) throw new Error('Draft changed');
@@ -814,7 +822,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         draftId: draft.id,
         revision: draft.revision,
         target: copy(draft.target),
-        englishText: draft.englishText,
+        englishText,
         ...(attachments.length ? { attachments: copy(attachments), ...(attachments.every(isFileReference) ? {referenceFormat:'manifest-v1' as const} : {}) } : {}),
         state: 'sending',
         ...(draft.target.agent === 'claude' ? { transport: transport ?? 'channel' } : {}),
