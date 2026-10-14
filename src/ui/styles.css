@@ -479,6 +479,13 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .session-rail button .attn-badge{position:absolute;top:-4px;right:-6px}
 .session-rail button .attn-spinner{position:absolute;left:-4px;bottom:-4px}
 @media (prefers-reduced-motion:reduce){.attn-spinner,.attn-ring,.attn-flash{animation:none}.attn-ring{box-shadow:0 0 0 3px #3b82f6aa}}
+.attn-toasts{position:fixed;top:12px;right:16px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(380px,calc(100vw - 32px))}
+.attn-toast{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e3e3e8;box-shadow:0 6px 24px #0002;font-size:13px;animation:attn-toast-in .18s ease-out}
+.attn-toast-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attn-toast button{flex:none}
+.attn-toast-close{border:none;background:none;font-size:16px;line-height:1;padding:0 2px;cursor:pointer}
+@keyframes attn-toast-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.attn-toast{animation:none}}
 .session-tabs-empty{margin:0 0 8px;color:#647089;font-size:.85rem}
 .session-saved{position:relative;margin-bottom:5px;flex:none}.session-saved>button{font-size:.78rem;padding:5px 9px}
 .session-saved-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid #d9deea;border-radius:10px;box-shadow:0 14px 40px #17203324;padding:6px;min-width:220px;display:flex;flex-direction:column}
