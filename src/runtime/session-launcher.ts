@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { AgentKind, Target } from '../core/contracts.js';
 import { validateLanguageOverride, type LanguageOverride } from '../core/language-settings.js';
+import { UNSAFE_COMMAND_CHARACTER } from '../core/command-text.js';
 import type { SessionManager } from './session-manager.js';
 import { sessionNameFor, type Tmux } from './tmux.js';
 
@@ -69,7 +70,7 @@ export const MAX_RUN_COMMAND_LENGTH = 8192;
 export function validateCommand(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Invalid command');
   const text = value.replace(/[\r\n]+$/, '');
-  if (!text.trim() || text.length > MAX_RUN_COMMAND_LENGTH) throw new Error('Invalid command');
+  if (!text.trim() || text.length > MAX_RUN_COMMAND_LENGTH || UNSAFE_COMMAND_CHARACTER.test(text)) throw new Error('Invalid command');
   return text;
 }
 export function defaultShell(env: NodeJS.ProcessEnv = process.env): string {
@@ -109,6 +110,8 @@ export function createSessionLauncher(options: {
   const listeners = new Set<(records: LaunchRecord[]) => void>();
   const identification = new Map<string, AbortController>();
   const ending = new Map<string, Promise<void>>();
+  /** One set per reconcile in flight: the shells started since its tmux listing began. */
+  const listings = new Set<Set<string>>();
   let closed = false; let watcher: ReturnType<typeof setInterval> | undefined;
   const requireOpen = () => { if (closed) throw new Error('Session launcher is closed'); };
   const get = (id: string) => {
@@ -205,13 +208,18 @@ export function createSessionLauncher(options: {
   // the periodic watch only notices sessions that ended).
   async function reconcile(retry: boolean) {
     requireOpen();
+    // Shells started while this listing is in flight may be missing from it: they are skipped, never deleted.
+    const startedSince = new Set<string>(); listings.add(startedSince);
+    try { await reconcileListed(retry, startedSince); } finally { listings.delete(startedSince); }
+  }
+  async function reconcileListed(retry: boolean, startedSince: Set<string>) {
     let live: Map<string, { panePid: number; currentCommand: string }>;
     try { live = new Map((await (await options.tmux()).listSessions()).map(s => [s.name, { panePid: s.panePid, currentCommand: s.currentCommand }])); }
     catch { return; } // A failed listing gives no evidence that sessions ended.
     if (closed) return;
     let busyChanged = false;
     for (const record of options.store.listLaunches()) {
-      if (ending.has(record.id)) continue;
+      if (ending.has(record.id) || startedSince.has(record.id)) continue;
       const pane = live.get(sessionNameFor(record.id)); const panePid = pane?.panePid;
       if (record.state === 'ended') {
         // A launch marked missing while its tmux session lives on (a listing gap around a restart) is adopted back;
@@ -246,9 +254,10 @@ export function createSessionLauncher(options: {
   async function askToExit(tmux: Tmux, name: string) {
     await tmux.sendKeys(name, ['C-c']); await sleep(300); await tmux.sendKeys(name, ['C-c']);
   }
-  const liveShells = (folder: string) => list().filter(r => r.agent === 'shell' && r.state !== 'ended' && r.folder === folder);
+  const liveShells = (folder: string) => list().filter(r => r.agent === 'shell' && r.state !== 'ended' && !ending.has(r.id) && r.folder === folder);
   async function startShell(tmux: Tmux, cwd: string, originSessionId?: string): Promise<LaunchRecord> {
     const id = randomUUID(); const title = nextTerminalTitle(liveShells(cwd).map(r => r.title ?? 'Terminal'));
+    for (const startedSince of listings) startedSince.add(id);
     const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, [shell, '-l'], { ELECTRON_RUN_AS_NODE: '' });
     busy.set(id, false);
     put({ id, agent: 'shell', folder: cwd, panePid, state: 'running', createdAt: now(), title, ...(originSessionId ? { originSessionId } : {}) });
@@ -267,11 +276,12 @@ export function createSessionLauncher(options: {
       const id = randomUUID(); let sessionRef: string | undefined; let argv: string[];
       if (agent === 'claude') {
         const { claude, mcpConfigPath } = await options.prepareClaude(cwd); sessionRef = randomUUID();
-        // The prompt must come first: --mcp-config and --dangerously-load-development-channels are variadic, so a trailing positional would be parsed as another option value. Extra args may be variadic too, so they go last.
-        argv = [claude, firstMessage ?? CLAUDE_SETUP_PROMPT, '--session-id', sessionRef, '--mcp-config', mcpConfigPath, '--dangerously-load-development-channels', 'server:language-assistant', ...extra];
+        // The prompt goes last, after `--`: that ends option parsing, so neither a variadic option (--mcp-config,
+        // --dangerously-load-development-channels, or an extra one) nor a prompt starting with "-" is misread.
+        argv = [claude, '--session-id', sessionRef, '--mcp-config', mcpConfigPath, '--dangerously-load-development-channels', 'server:language-assistant', ...extra, '--', firstMessage ?? CLAUDE_SETUP_PROMPT];
       } else {
-        // `codex [OPTIONS] [PROMPT]`: the prompt goes first so an extra option that takes a value cannot swallow it.
-        argv = [await options.resolveExecutable('codex'), firstMessage ?? CODEX_SETUP_PROMPT, ...extra];
+        // `codex [OPTIONS] -- [PROMPT]`: after `--` an extra option that takes a value cannot swallow the prompt, and a prompt starting with "-" is not read as an option.
+        argv = [await options.resolveExecutable('codex'), ...extra, '--', firstMessage ?? CODEX_SETUP_PROMPT];
       }
       requireOpen();
       const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, argv, { ELECTRON_RUN_AS_NODE: '' });

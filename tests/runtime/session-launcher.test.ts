@@ -57,7 +57,7 @@ it('launches Claude with a preassigned identity and immediate panel registration
  const record = await launcher.launch({ agent: 'claude', folder });
  const [name, session] = [...t.live][0]!;
  expect(name).toBe('la-' + record.id); expect(session!.cwd).toBe(folder);
- expect(session!.argv).toEqual(['/bin/claude', CLAUDE_SETUP_PROMPT, '--session-id', record.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--model', 'opus 5']);
+ expect(session!.argv).toEqual(['/bin/claude', '--session-id', record.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--model', 'opus 5', '--', CLAUDE_SETUP_PROMPT]);
  expect(session!.env).toEqual({ ELECTRON_RUN_AS_NODE: '' });
  expect(register.mock.calls[0]![0]).toEqual({ agent: 'claude', sessionRef: record.sessionRef, projectId: folder });
  // Running once the panel is registered; the catalog shows Starting only for launches without a panel.
@@ -65,14 +65,14 @@ it('launches Claude with a preassigned identity and immediate panel registration
 });
 it('identifies Codex by pane ancestry and persists the registered target', async () => {
  const { launcher, folder, t } = await setup(); const record = await launcher.launch({ agent: 'codex', folder });
- // The disclosed setup prompt comes first so Codex creates its thread at once.
- expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', CODEX_SETUP_PROMPT]);
+ // The disclosed setup prompt is passed so Codex creates its thread at once.
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', '--', CODEX_SETUP_PROMPT]);
  await vi.waitFor(() => expect(launcher.list()[0]).toMatchObject({ id: record.id, state: 'running', sessionRef: 'codex-1', panelSessionId: 'panel-codex-1' }));
 });
-it('puts the Codex setup prompt before extra options so a value-taking option cannot swallow it', async () => {
+it('puts the Codex setup prompt after `--` so a value-taking extra option cannot swallow it', async () => {
  const { launcher, folder, t } = await setup({ settings: { extraArgs: { claude: [], codex: ['-m', 'gpt 5', '--add-dir'] } } });
  await launcher.launch({ agent: 'codex', folder });
- expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', CODEX_SETUP_PROMPT, '-m', 'gpt 5', '--add-dir']);
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', '-m', 'gpt 5', '--add-dir', '--', CODEX_SETUP_PROMPT]);
  expect(CODEX_SETUP_PROMPT).toBe('Reply with READY only. Do not run commands.');
 });
 it('times out with a constant clock and an immediate sleep', async () => {
@@ -348,14 +348,22 @@ it('adopts a terminal back as running after a restart and deletes one whose shel
 it('passes a custom first message as the launch prompt and validates it', async () => {
  const { launcher, folder, t } = await setup();
  await launcher.launch({ agent: 'claude', folder, prompt: '  Fix the tests, then explain.\nKeep it short.  ' });
- expect([...t.live.values()][0]!.argv[1]).toBe('Fix the tests, then explain.\nKeep it short.');
+ expect([...t.live.values()][0]!.argv.slice(-2)).toEqual(['--', 'Fix the tests, then explain.\nKeep it short.']);
  await launcher.launch({ agent: 'codex', folder, prompt: 'Review the diff' });
- expect([...t.live.values()][1]!.argv).toEqual(['/bin/codex', 'Review the diff']);
+ expect([...t.live.values()][1]!.argv).toEqual(['/bin/codex', '--', 'Review the diff']);
  await launcher.launch({ agent: 'shell', folder, prompt: 'ignored' });
  expect([...t.live.values()][2]!.argv).toEqual(['/bin/zsh', '-l']);
  for (const bad of ['', '   ', 'x'.repeat(4001), 5]) await expect(launcher.launch({ agent: 'claude', folder, prompt: bad as any })).rejects.toThrow('Invalid first message');
  expect(nextTerminalTitle([])).toBe('Terminal'); expect(nextTerminalTitle(['Terminal'])).toBe('Terminal 2'); expect(nextTerminalTitle(['Terminal 2', 'Terminal 3'])).toBe('Terminal');
  expect(defaultShell({ SHELL: '/opt/homebrew/bin/fish' })).toBe('/opt/homebrew/bin/fish'); expect(defaultShell({ SHELL: 'fish' })).toBe('/bin/zsh'); expect(defaultShell({})).toBe('/bin/zsh');
+});
+it('passes a first message starting with "-" after `--`, so neither CLI reads it as an option', async () => {
+ const { launcher, folder, t } = await setup({ settings: { extraArgs: { claude: ['--add-dir', 'a', 'b'], codex: ['-m', 'gpt 5'] } } });
+ const prompt = '- fix the login bug\n- then explain';
+ const claude = await launcher.launch({ agent: 'claude', folder, prompt });
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/claude', '--session-id', claude.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--add-dir', 'a', 'b', '--', prompt]);
+ await launcher.launch({ agent: 'codex', folder, prompt });
+ expect([...t.live.values()][1]!.argv).toEqual(['/bin/codex', '-m', 'gpt 5', '--', prompt]);
 });
 it('run reuses the folder’s idle terminal, skips busy ones, and starts a second when all are busy', async () => {
  const { launcher, folder, t } = await setup();
@@ -382,6 +390,9 @@ it('run still types when the new shell is not ready in time, and reports typed: 
 it('run validates the command and the folder', async () => {
  const { launcher, folder } = await setup();
  for (const bad of ['', '\n\n', 'x'.repeat(8193), 3]) await expect(launcher.run({ folder, command: bad as any })).rejects.toThrow('Invalid command');
+ // Control and invisible characters: a tab, ESC, a C1 control, CR inside, bidi overrides and marks, zero-width characters.
+ for (const bad of ['ls\t-la', 'echo \u001b[31m', 'ls\u0085', 'a\rb', 'rm \u202Eexe.txt', 'ls\u2066', 'ls\u200E', 'ls\u061C', 'ls\u200B', 'ls\u2060', '\uFEFFls', 'ls\u007F']) await expect(launcher.run({ folder, command: bad })).rejects.toThrow('Invalid command');
+ expect(validateCommand('echo "שלום"\nls\n')).toBe('echo "שלום"\nls');
  await expect(launcher.run({ folder: '/nope', command: 'ls' })).rejects.toThrow('Choose a project folder');
  expect(validateCommand('  ls -la \n\n')).toBe('  ls -la ');
 });
@@ -391,6 +402,31 @@ it('run rejects when the new terminal disappears while waiting for its shell', a
  launcher = ctx.launcher;
  ctx.t.tmux.newSession = async (n, cwd, argv) => { name = n; ctx.t.live.set(n, { cwd, argv, panePid: 7, currentCommand: 'login' }); return { panePid: 7 }; };
  await expect(launcher.run({ folder: ctx.folder, command: 'make' })).rejects.toThrow('Terminal is no longer running');
+});
+it('reconcile does not delete a shell started while its tmux listing was in flight', async () => {
+ const { launcher, folder, t, store } = await setup();
+ const listed = deferred<Awaited<ReturnType<Tmux['listSessions']>>>();
+ const realList = t.tmux.listSessions.bind(t.tmux);
+ t.tmux.listSessions = () => listed.promise; // a listing taken before the shell exists
+ const pending = launcher.reconcile(); await tick();
+ t.tmux.listSessions = realList;
+ const shell = await launcher.launch({ agent: 'shell', folder });
+ listed.resolve([]); await pending;
+ expect(store.listLaunches().map(r => r.id)).toEqual([shell.id]);
+ await launcher.reconcile(); // a later listing that includes it keeps it as well
+ expect(launcher.list()).toMatchObject([{ id: shell.id, state: 'running' }]);
+});
+it('run never picks a terminal that is being ended', async () => {
+ const { launcher, folder, t } = await setup();
+ const first = await launcher.launch({ agent: 'shell', folder });
+ const killed = deferred<void>();
+ t.tmux.killSession = async n => { await killed.promise; t.live.delete(n); };
+ t.tmux.sendKeys = async (n, k) => { t.keys.push([n, k]); };
+ const ended = launcher.end(first.id); await tick();
+ const result = await launcher.run({ folder, command: 'ls' });
+ expect(result.reused).toBe(false); expect(result.launch.id).not.toBe(first.id);
+ expect(t.typed).toEqual([['la-' + result.launch.id, 'ls']]);
+ killed.resolve(); await ended;
 });
 it('run reports typed: false with a defined launch when typing into a ready shell fails', async () => {
  const { launcher, folder, t } = await setup();
