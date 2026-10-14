@@ -92,3 +92,15 @@ test('the popup shows a status and an Expand button when given one', async ({ pa
   await expect(dialog.getByRole('button', { name: 'Expand' })).toHaveCount(0); // agent popups have no Expand
   await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
 });
+
+test('the terminal has keyboard focus as soon as the popup opens', async ({ page }) => {
+  const { received } = await withLaunch(page);
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
+  await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
+  await expect.poll(() => received.some(m => m.type === 'resize' && m.cols > 0)).toBe(true);
+  await expect(dialog.locator(".xterm-helper-textarea")).toBeFocused();
+  await page.keyboard.type("y");
+  await expect.poll(() => received.filter(m => m.type === "input").map(m => m.data).join("")).toBe("y");
+});
