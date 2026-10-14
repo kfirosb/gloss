@@ -63,13 +63,13 @@ export function useMarkSeen(entry: CatalogEntry | undefined) {
   }, [sessionId, attention, sequence]);
 }
 type StripState = 'waiting' | 'queued' | 'sending' | 'unconfirmed' | 'failed' | 'delivered' | 'received';
-/** Shows "Response received" for a moment after the last awaited channel reply lands, unless a newer delivery failed. */
-function useReceivedFlash(awaiting: number): boolean {
-  const previous = useRef(awaiting); const [flash, setFlash] = useState(false);
+/** Flashes "Response received" when the number of answered channel deliveries grows, i.e. only when a reply lands. */
+function useReceivedFlash(replied: number): boolean {
+  const previous = useRef(replied); const [flash, setFlash] = useState(false);
   useEffect(() => {
-    if (previous.current > 0 && awaiting === 0) { setFlash(true); const timer = setTimeout(() => setFlash(false), 8000); previous.current = awaiting; return () => clearTimeout(timer); }
-    previous.current = awaiting; return undefined;
-  }, [awaiting]);
+    if (replied > previous.current) { previous.current = replied; setFlash(true); const timer = setTimeout(() => setFlash(false), 4600); return () => clearTimeout(timer); }
+    previous.current = replied; return undefined;
+  }, [replied]);
   return flash;
 }
 /** Marks the strip as fading 4 s after a completed state appears; the text stays in the DOM for assistive technology. */
@@ -195,9 +195,10 @@ function SessionWorkspace({ initial, record, entry }: { initial: SessionEnvelope
   };
   const composerDelivery = composerAttempt && snapshot.deliveries.find(d => d.draftId === `composer-${composerAttempt.requestId}`);
   const awaitingClaudeReplies = snapshot.deliveries.filter(isChannelAwaitingReply).length;
-  const received = useReceivedFlash(awaitingClaudeReplies);
-  const stripState: StripState | undefined = awaitingClaudeReplies > 0 ? 'waiting' : composerDelivery && !isChannelAwaitingReply(composerDelivery) ? (composerDelivery.state === 'unconfirmed' ? 'unconfirmed' : composerDelivery.state === 'queued' ? 'queued' : composerDelivery.state === 'sending' ? 'sending' : composerDelivery.state === 'failed' ? 'failed' : received ? 'received' : 'delivered') : received ? 'received' : undefined;
-  const stripText = stripState === 'waiting' ? `Waiting for Claude’s response${awaitingClaudeReplies > 1 ? ` (${awaitingClaudeReplies} messages)` : ''}` : stripState === 'unconfirmed' ? (isClaude ? 'Awaiting Claude confirmation' : 'Delivery uncertain') : stripState === 'queued' ? 'Queued' : stripState === 'sending' ? 'Sending' : stripState === 'failed' ? 'Failed' + (composerDelivery?.reason ? ': ' + composerDelivery.reason : '') : stripState === 'received' ? 'Response received' : 'Delivered';
+  const received = useReceivedFlash(snapshot.deliveries.filter(d => d.transport === 'channel' && d.state === 'sent').length);
+  const stripState: StripState | undefined = awaitingClaudeReplies > 0 ? 'waiting' : composerDelivery && !isChannelAwaitingReply(composerDelivery) ? (composerDelivery.transport === 'channel' && composerDelivery.state === 'sent' ? (received ? 'received' : undefined) : composerDelivery.state === 'unconfirmed' ? 'unconfirmed' : composerDelivery.state === 'queued' ? 'queued' : composerDelivery.state === 'sending' ? 'sending' : composerDelivery.state === 'failed' ? 'failed' : received ? 'received' : 'delivered') : received ? 'received' : undefined;
+  const stripReason = composerDelivery?.reason ? ': ' + composerDelivery.reason : '';
+  const stripText = stripState === 'waiting' ? `Waiting for Claude’s response${awaitingClaudeReplies > 1 ? ` (${awaitingClaudeReplies} messages)` : ''}` : stripState === 'unconfirmed' ? (isClaude ? 'Awaiting Claude confirmation' : 'Delivery uncertain') + stripReason : stripState === 'queued' ? 'Queued' + stripReason : stripState === 'sending' ? 'Sending' + stripReason : stripState === 'failed' ? 'Failed' + stripReason : stripState === 'received' ? 'Response received' : 'Delivered' + stripReason;
   const stripFading = useFading(stripState);
   const releaseComposer = async () => {
     if (!composerAttempt || !window.confirm('The previous message may still arrive. Release the composer without resending? Sending the same text again could duplicate it.')) return;
