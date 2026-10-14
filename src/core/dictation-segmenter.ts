@@ -11,6 +11,15 @@ export interface Segmenter {
   stop(): Int16Array | null;
 }
 interface Frame { samples: Int16Array; rms: number; speech: boolean }
+/** Tuning used for every option the caller leaves out; durations in ms, levels on the 0..1 RMS scale. */
+export const SEGMENTER_DEFAULTS: Required<SegmenterOptions> = {
+  pauseMs: 600, minSpeechMs: 1000, stopMinSpeechMs: 300, maxSegmentMs: 8_000, cutWindowMs: 3000,
+  leadingSilenceMs: 300, trailingSilenceMs: 200, floorInitFrames: 3, speechRatio: 3, minSpeechRms: 0.01, maxFloor: 0.02,
+};
+/** Weight the noise floor keeps on each quiet frame when it adapts upward; the frame gets FLOOR_RISE (1 - FLOOR_DECAY, written out so the sum stays exact in floating point). */
+export const FLOOR_DECAY = 0.95, FLOOR_RISE = 0.05;
+/** A forced cut lands only on a frame quieter than this fraction of the cut window's median level. */
+export const CUT_QUIET_RATIO = 0.5;
 
 /** Root mean square on a 0..1 scale. */
 export function rms(frame: Int16Array): number {
@@ -25,10 +34,8 @@ const concat = (frames: Frame[]): Int16Array => {
 };
 
 export function createSegmenter(options: SegmenterOptions = {}): Segmenter {
-  const pause = options.pauseMs ?? 600, minSpeech = options.minSpeechMs ?? 1000, stopMin = options.stopMinSpeechMs ?? 300;
-  const maxSegment = options.maxSegmentMs ?? 8_000, cutWindow = options.cutWindowMs ?? 3000;
-  const leading = options.leadingSilenceMs ?? 300, trailing = options.trailingSilenceMs ?? 200;
-  const floorInit = options.floorInitFrames ?? 3, ratio = options.speechRatio ?? 3, minRms = options.minSpeechRms ?? 0.01, maxFloor = options.maxFloor ?? 0.02;
+  const { pauseMs: pause, minSpeechMs: minSpeech, stopMinSpeechMs: stopMin, maxSegmentMs: maxSegment, cutWindowMs: cutWindow,
+    leadingSilenceMs: leading, trailingSilenceMs: trailing, floorInitFrames: floorInit, speechRatio: ratio, minSpeechRms: minRms, maxFloor } = { ...SEGMENTER_DEFAULTS, ...options };
   const toFrames = (ms: number) => Math.round(ms / FRAME_MS);
   let floor: number | undefined; let seen = 0;
   let carry: Frame[] = []; let buffer: Frame[] = [];
@@ -39,7 +46,7 @@ export function createSegmenter(options: SegmenterOptions = {}): Segmenter {
     const r = rms(samples); seen++;
     if (floor === undefined || seen <= floorInit) floor = Math.min(floor ?? maxFloor, r, maxFloor);
     const speech = r > Math.max(floor * ratio, minRms);
-    if (!speech && seen > floorInit) floor = r < floor ? r : floor * 0.95 + r * 0.05;
+    if (!speech && seen > floorInit) floor = r < floor ? r : floor * FLOOR_DECAY + r * FLOOR_RISE;
     return { samples, rms: r, speech };
   };
   return {
@@ -54,7 +61,7 @@ export function createSegmenter(options: SegmenterOptions = {}): Segmenter {
         const sorted = window.map(f => f.rms).sort((a, b) => a - b); const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
         // Cut only at a frame clearly quieter than its neighbours; a uniformly loud window falls back to the hard boundary.
         let best = -1; let bestRms = Infinity;
-        window.forEach((f, i) => { if (f.rms < median * 0.5 && f.rms < bestRms) { bestRms = f.rms; best = i; } });
+        window.forEach((f, i) => { if (f.rms < median * CUT_QUIET_RATIO && f.rms < bestRms) { bestRms = f.rms; best = i; } });
         const cutAt = best >= 0 ? frames.length - window.length + best : frames.length;
         out.push(concat(frames.slice(0, cutAt))); carry = []; buffer = frames.slice(cutAt);
         return out;
