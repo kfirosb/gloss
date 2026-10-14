@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import * as pty from 'node-pty';
 import { WebSocketServer } from 'ws';
+import { isLoopbackOrigin, rejectUpgrade } from './loopback.js';
 import type { LaunchRecord } from './session-launcher.js';
 import { sessionNameFor, tmuxEnvironment, type Tmux } from './tmux.js';
 
@@ -32,7 +33,6 @@ export function createTerminalBridge(options: { tmux: () => Promise<Tmux>; launc
   const now = options.now ?? Date.now; const tickets = new Map<string, { launchId: string; expiresAt: number }>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const live = (id: string) => options.launches().find(r => r.id === id && r.state !== 'ended');
-  const reject = (socket: Duplex, status = 401) => { socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : 'Forbidden'}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
   return {
     issueTicket(launchId) {
       if (!live(launchId)) throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' });
@@ -42,9 +42,9 @@ export function createTerminalBridge(options: { tmux: () => Promise<Tmux>; launc
     handleUpgrade(req, socket, head) {
       const url = new URL(req.url ?? '/', 'http://localhost'); const match = PATH.exec(url.pathname);
       const origin = req.headers.origin;
-      if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return reject(socket, 403);
+      if (origin && !isLoopbackOrigin(origin)) return rejectUpgrade(socket, 403);
       const ticket = url.searchParams.get('ticket') ?? ''; const entry = tickets.get(ticket); tickets.delete(ticket);
-      if (!match || !entry || entry.launchId !== match[1] || entry.expiresAt <= now() || !live(entry.launchId)) return reject(socket);
+      if (!match || !entry || entry.launchId !== match[1] || entry.expiresAt <= now() || !live(entry.launchId)) return rejectUpgrade(socket, 401);
       const launchId = entry.launchId;
       wss.handleUpgrade(req, socket, head, async ws => {
         let closed = false; let proc: PtyProcess | undefined;

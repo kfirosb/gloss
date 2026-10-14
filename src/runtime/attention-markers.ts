@@ -6,14 +6,16 @@ export interface MarkerTable { agent: AgentKind; versions: string[]; approval: R
 // a question does not match.
 export const MARKER_TABLES: MarkerTable[] = [
   {
-    agent: 'claude', versions: ['2.1.296'],
+    // 2.1.299 was re-captured (claude-2.1.299-*.txt): both consent screens are byte-identical to 2.1.296 and the
+    // permission prompt's question and option lines are unchanged, so the same patterns cover both versions.
+    agent: 'claude', versions: ['2.1.296', '2.1.299'],
     consent: [
-      // claude-2.1.296-consent.txt: development channel warning shown at startup.
+      // claude-2.1.296-consent.txt, claude-2.1.299-consent.txt: development channel warning shown at startup.
       /^ {0,4}WARNING: Loading development channels$[\s\S]*^ {0,4}(?:❯ )? *\d\. I am using this for local development$/m,
-      // claude-2.1.296-consent-trust.txt: workspace trust check for a folder Claude has not seen.
+      // claude-2.1.296-consent-trust.txt, claude-2.1.299-consent-trust.txt: workspace trust check for a folder Claude has not seen.
       /^ {0,4}Quick safety check: Is this a project you created or one you trust\?[\s\S]*^ {0,4}(?:❯ )? *(?:\d\. )?Yes, I trust this folder$/m,
     ],
-    // claude-2.1.296-permission.txt: tool permission prompt.
+    // claude-2.1.296-permission.txt, claude-2.1.299-permission.txt: tool permission prompt.
     approval: [/^ {0,4}Do you want to proceed\?\n {0,4}(?:❯ )? *1\. Yes$/m],
   },
   {

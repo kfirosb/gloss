@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+function isEntry() { return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]!).href; }
 export function parseArgs(args: string[]) { const out: Record<string, string> = {}; for (let i = 0; i < args.length; i += 1) { const value = args[i]!; if (!value.startsWith('--')) continue; const key = value.slice(2); const next = args[i + 1]; if (next && !next.startsWith('--')) { out[key] = next; i += 1; } else out[key] = 'true'; } return out; }
 export async function launch(args: string[]) {
   const flags = parseArgs(args);
@@ -36,7 +37,10 @@ export async function launch(args: string[]) {
   let application: ReturnType<typeof createApplication>;
   const launchServices = createLaunchServices({ store, codex: codexAdapter, application: () => application });
   launchedCodex = launchServices.launchedCodexLive;
-  application = createApplication({ launcher: launchServices.launcher, terminals: launchServices.terminals, attention: launchServices.attention, approveLaunchFolder: launchServices.approveFolder, endLaunchesInFolder: launchServices.endLaunchesInFolder,  ...(process.env.LANGUAGE_PANEL_CAPABILITY ? { capability: process.env.LANGUAGE_PANEL_CAPABILITY } : {}), store, projectPath: flags.project ?? process.cwd(), conversationId: flags.conversation ?? (flags.session ? `${flags.agent}:${flags.session}` : 'language-default'), language, ...(flags.model ? { model: flags.model } : {}), agents: [claudeAdapter, codexAdapter], languageBackends: { claude: new ClaudeLanguageBackend(), codex: new CodexLanguageBackend() } });
+  // The detached whisper-server must not outlive the CLI, so only the real entry attaches the signal handlers.
+  const { createDictationServices } = await import('./dictation/services.js');
+  const dictation = createDictationServices({ root, capability: () => application.capability, log: line => process.stdout.write(JSON.stringify({ event: 'dictation', line }) + '\n'), attachSignals: isEntry() });
+  application = createApplication({ launcher: launchServices.launcher, terminals: launchServices.terminals, attention: launchServices.attention, approveLaunchFolder: launchServices.approveFolder, endLaunchesInFolder: launchServices.endLaunchesInFolder, dictation, ...(process.env.LANGUAGE_PANEL_CAPABILITY ? { capability: process.env.LANGUAGE_PANEL_CAPABILITY } : {}), store, projectPath: flags.project ?? process.cwd(), conversationId: flags.conversation ?? (flags.session ? `${flags.agent}:${flags.session}` : 'language-default'), language, ...(flags.model ? { model: flags.model } : {}), agents: [claudeAdapter, codexAdapter], languageBackends: { claude: new ClaudeLanguageBackend(), codex: new CodexLanguageBackend() } });
   const server = await startServer(application, { port: Number(flags.port ?? 0) });
   localSink = createHttpSourceSink({ endpoint: new URL('/api/source/messages', server.url).href, capability: application.capability, onDelivered: message => process.stdout.write(JSON.stringify({ event: 'source-delivered', session: message.sourceSessionId, id: message.sourceId, sequence: message.sequence }) + '\n') });
   // The sink must exist before registration/restoration starts adapter source replay.
@@ -44,4 +48,4 @@ export async function launch(args: string[]) {
   await application.restore?.(application.snapshot().snapshot.id);
   process.stdout.write(server.url + '\n'); return { application, server };
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void launch(process.argv.slice(2)).catch(error => { process.stderr.write((error instanceof Error ? error.message : 'Launch failed') + '\n'); process.exitCode = 1; });
+if (isEntry()) void launch(process.argv.slice(2)).catch(error => { process.stderr.write((error instanceof Error ? error.message : 'Launch failed') + '\n'); process.exitCode = 1; });
