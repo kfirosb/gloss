@@ -15,15 +15,16 @@ afterEach(async () => { for (const l of launchers.splice(0)) l.close(); for (con
 const screen = (name: string) => readFileSync(join(import.meta.dirname, '../fixtures/screens', name), 'utf8');
 const IDLE = screen('claude-2.1.296-idle.txt'); const PERMISSION = screen('claude-2.1.296-permission.txt');
 function fakeTmux() {
- const live = new Map<string, { cwd: string; argv: string[]; panePid: number; env?: Record<string,string> }>();
- const keys: [string, string[]][] = []; let pid = 1000; const view = { screen: IDLE }; const captures = { count: 0 };
+ const live = new Map<string, { cwd: string; argv: string[]; panePid: number; env?: Record<string,string>; currentCommand: string }>();
+ const keys: [string, string[]][] = []; const typed: [string, string][] = []; let pid = 1000; const view = { screen: IDLE }; const captures = { count: 0 };
  const tmux: Tmux = { executable: '/t', socket: '/s',
-  async newSession(name, cwd, argv, env) { const panePid = ++pid; live.set(name, { cwd, argv, panePid, ...(env ? { env } : {}) }); return { panePid }; },
-  async listSessions() { return [...live].map(([name, s]) => ({ name, panePid: s.panePid })); },
+  async newSession(name, cwd, argv, env) { const panePid = ++pid; live.set(name, { cwd, argv, panePid, currentCommand: 'zsh', ...(env ? { env } : {}) }); return { panePid }; },
+  async listSessions() { return [...live].map(([name, s]) => ({ name, panePid: s.panePid, currentCommand: s.currentCommand })); },
+  async typeText(n, text) { typed.push([n, text]); },
   async hasSession(n) { return live.has(n); }, async capturePane() { captures.count++; return view.screen; },
   async sendKeys(n, k) { keys.push([n, k]); if (k.includes('C-c')) live.delete(n); },
   async resizeWindow() {}, async killSession(n) { live.delete(n); }, attachArgv: n => ['/t', 'attach', n] };
- return { tmux, live, keys, view, captures };
+ return { tmux, live, keys, typed, view, captures };
 }
 function memoryStore(settings?: Partial<LaunchSettings>) {
  const launches = new Map<string, LaunchRecord>();
@@ -244,9 +245,9 @@ it('skips a watch tick while the previous reconcile is still running', async () 
  const { launcher, folder, t } = await setup(); const record = await launcher.launch({ agent: 'claude', folder });
  vi.useFakeTimers();
  try {
-  const slow = deferred<{ name: string; panePid: number }[]>(); const list = vi.fn(() => slow.promise); t.tmux.listSessions = list;
+  const slow = deferred<{ name: string; panePid: number; currentCommand: string }[]>(); const list = vi.fn(() => slow.promise); t.tmux.listSessions = list;
   launcher.watch(); await vi.advanceTimersByTimeAsync(9000); expect(list).toHaveBeenCalledTimes(1);
-  slow.resolve([{ name: 'la-' + record.id, panePid: record.panePid }]); await vi.advanceTimersByTimeAsync(3000); expect(list).toHaveBeenCalledTimes(2);
+  slow.resolve([{ name: 'la-' + record.id, panePid: record.panePid, currentCommand: 'zsh' }]); await vi.advanceTimersByTimeAsync(3000); expect(list).toHaveBeenCalledTimes(2);
  } finally { vi.useRealTimers(); }
 });
 it('retries identification on request and rejects unknown or ended launches', async () => {

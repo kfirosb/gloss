@@ -39,10 +39,12 @@ export async function ensureSocketDirectory(dir: string) {
 export interface Tmux {
   readonly executable: string; readonly socket: string;
   newSession(name: string, cwd: string, argv: string[], env?: Record<string, string>): Promise<{ panePid: number }>;
-  listSessions(): Promise<{ name: string; panePid: number }[]>;
+  listSessions(): Promise<{ name: string; panePid: number; currentCommand: string }[]>;
   hasSession(name: string): Promise<boolean>;
   capturePane(name: string): Promise<string>;
   sendKeys(name: string, keys: string[]): Promise<void>;
+  /** Types text literally (no key-name parsing), then presses Enter. */
+  typeText(name: string, text: string): Promise<void>;
   resizeWindow(name: string, cols: number, rows: number): Promise<void>;
   killSession(name: string): Promise<void>;
   attachArgv(name: string): string[];
@@ -84,12 +86,12 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
       return { panePid };
     },
     async listSessions() {
-      const result = await run(['list-sessions', '-F', '#{session_name}\t#{pane_pid}'], true);
+      const result = await run(['list-sessions', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}'], true);
       if (result.outcome.reason !== 'exited' || result.outcome.code !== 0) {
         if (serverAbsent(result.outcome)) return [];
         throw new Error('tmux command failed');
       }
-      return result.lines.map(line => line.split('\t')).filter(([n, p]) => n && NAME.test(n) && Number(p) > 1).map(([name, pid]) => ({ name: name!, panePid: Number(pid) }));
+      return result.lines.map(line => line.split('\t')).filter(([n, p]) => n && NAME.test(n) && Number(p) > 1).map(([name, pid, command]) => ({ name: name!, panePid: Number(pid), currentCommand: command ?? '' }));
     },
     async hasSession(name) {
       check(name); const { outcome } = await run(['has-session', '-t', '=' + name], true);
@@ -99,6 +101,11 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
     },
     async capturePane(name) { check(name); return (await run(['capture-pane', '-p', '-t', '=' + name + ':'])).lines.join('\n'); },
     async sendKeys(name, keys) { check(name); await run(['send-keys', '-t', '=' + name + ':', '--', ...keys]); },
+    async typeText(name, text) {
+      check(name);
+      await run(['send-keys', '-t', '=' + name + ':', '-l', '--', text]);
+      await run(['send-keys', '-t', '=' + name + ':', '--', 'Enter']);
+    },
     async resizeWindow(name, cols, rows) {
       check(name); if (![cols, rows].every(n => Number.isSafeInteger(n) && n >= 10 && n <= 1000)) throw new Error('Invalid size');
       await run(['resize-window', '-t', '=' + name + ':', '-x', String(cols), '-y', String(rows)]);
