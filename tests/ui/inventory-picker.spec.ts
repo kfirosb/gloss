@@ -12,6 +12,8 @@ for (const [width, height] of [[1280, 800], [390, 700]]) test(`skills and MCP pi
   await page.setViewportSize({ width: width!, height: height! });
   const snapshot = basicSnapshot(); await mockSession(page, () => snapshot);
   await page.route('**/api/sessions/*/events', r => r.fulfill({ contentType: 'text/event-stream', body: '' }));
+  const calls: any[] = [];
+  await page.route('**/actions', r => { calls.push(r.request().postDataJSON()); return r.fulfill({ json: { sessionId: snapshot.id, sequence: 2, snapshot } }); });
   let requests = 0;
   await page.route('**/api/sessions/*/inventory', r => { requests++; return r.fulfill({ json: inventory }); });
   await page.goto('/#capability=test');
@@ -27,6 +29,7 @@ for (const [width, height] of [[1280, 800], [390, 700]]) test(`skills and MCP pi
   await input.press('Enter');
   await expect(input).toHaveValue('תבנה ‎/frontend-design ');
   await expect(skills).toHaveCount(0);
+  expect(await input.evaluate(e => (e as HTMLTextAreaElement).selectionStart)).toBe('תבנה \u200E/frontend-design '.length);
 
   await input.pressSequentially('$pl');
   const servers = page.getByRole('listbox', { name: 'MCP servers' });
@@ -36,6 +39,8 @@ for (const [width, height] of [[1280, 800], [390, 700]]) test(`skills and MCP pi
   await expect(input).toHaveValue('תבנה ‎/frontend-design ‎$playwright ');
 
   await input.fill('/zzz'); await expect(page.getByRole('status').filter({ hasText: 'No matching skills' })).toBeVisible();
+  await input.press('Enter'); await expect(page.getByRole('listbox', { name: 'Skills' })).toHaveCount(0); await expect(input).toHaveValue('/zzz'); expect(calls.filter(c => c.type === 'send-composer')).toHaveLength(0);
+  await input.fill(''); await input.fill('/zzz'); await expect(page.getByRole('status').filter({ hasText: 'No matching skills' })).toBeVisible();
   await input.press('Escape'); await expect(page.getByRole('listbox', { name: 'Skills' })).toHaveCount(0);
   for (const text of ['costs $5', 'a/b', '/front ']) { await input.fill(text); await expect(page.locator('.inventory-picker')).toHaveCount(0); }
   expect(requests).toBeGreaterThan(0);
