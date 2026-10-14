@@ -50,7 +50,8 @@ export interface Tmux {
   attachArgv(name: string): string[];
 }
 
-const serverAbsent = (outcome: ProcessOutcome) => outcome.reason === 'exited' && outcome.code === 1 && /^(?:no server running on .+|error connecting to .+ \(No such file or directory\))\s*$/.test(outcome.diagnostics);
+// "server exited unexpectedly": the server was shutting down as it answered, e.g. right after its last session was killed.
+const serverAbsent = (outcome: ProcessOutcome) => outcome.reason === 'exited' && outcome.code === 1 && /^(?:no server running on .+|error connecting to .+ \(No such file or directory\)|server exited unexpectedly)\s*$/.test(outcome.diagnostics);
 const sessionAbsent = (outcome: ProcessOutcome) => serverAbsent(outcome) || (outcome.reason === 'exited' && outcome.code === 1 && /^can't find session: .+\s*$/.test(outcome.diagnostics));
 
 const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
