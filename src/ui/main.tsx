@@ -21,6 +21,7 @@ import { ReadingPane } from './reading-pane.js';
 import { REFERENCE_MARK, SessionClient, capabilityToken, sessionRequest, markSessionSeen, forgetFolder, type SessionEnvelope } from './session-client.js';
 import { useWorkspace, workspaceFor } from './use-workspace.js';
 import { useSessionCatalog } from './use-session-catalog.js';
+import { AttentionToasts, useAttentionAlerts } from './attention-toast.js';
 import { SessionsSidebar as SessionSwitcher } from './sessions-sidebar.js';
 import { TerminalPopup } from './terminal-popup.js';
 import { usePopupMode, useAutoOpenTerminal, useAutoOpenWaitingLaunch, useKeystrokeTracker, lastKeystrokeAt, noteKeystroke, retryLaunch, useTerminalView, saveTerminalView, runCommand, terminalTitle, endLaunch, type TerminalView } from './launch-controls.js';
@@ -576,6 +577,7 @@ function App() {
   };
   const waitingCount = (catalog?.entries ?? []).filter(e => e.open && (e.attention === 'response' || e.attention === 'approval')).length;
   useEffect(() => { window.languageAssistant?.setAttentionCount?.(waitingCount); }, [waitingCount]);
+  const alerts = useAttentionAlerts(catalog?.entries, selected);
   // Plain shell terminals: shown as a popup over the session, or filling the workspace (the terminalView setting).
   const terminalView = useTerminalView();
   const shownTerminalFolder = useRef<string | undefined>(undefined);
@@ -641,7 +643,7 @@ function App() {
   const approvalToasts = popupMode === 'auto' ? allEntries.filter(e => e.launchId && e.activity === 'approval-required' && e.sessionId && e.sessionId !== selected && !dismissedToasts.includes(e.launchId)) : [];
   const waitingLaunches = allEntries.filter(e => e.launchId && e.activity === 'approval-required').map(e => e.launchId!).join(',');
   useEffect(() => { setDismissedToasts(list => { const keep = list.filter(id => waitingLaunches.split(',').includes(id)); return keep.length === list.length ? list : keep; }); }, [waitingLaunches]);
-  return <><div className="session-brand" dir="ltr">Gloss</div><SessionSwitcher catalog={catalog} catalogError={catalogError} tree={sidebarTree.visible} hidden={sidebarTree.hidden} missingFolders={missingFolders}
+  return <><AttentionToasts banners={alerts.banners} onOpen={chooseSession} onDismiss={alerts.dismiss} /><div className="session-brand" dir="ltr">Gloss</div><SessionSwitcher catalog={catalog} catalogError={catalogError} tree={sidebarTree.visible} hidden={sidebarTree.hidden} missingFolders={missingFolders}
     settings={projects.settings}
     onToggleCollapse={key => projects.saveSettings(s => ({ ...s, collapsed: s.collapsed.includes(key) ? s.collapsed.filter(k => k !== key) : [...s.collapsed, key] }))}
     onReorder={keys => projects.saveSettings(s => ({ ...s, order: reorderVisible(s.order, keys) }))}

@@ -4,7 +4,7 @@ import { sessionRequest } from './session-client.js';
 import { LANGUAGE_FIELDS, SUPPORTED_LANGUAGES, languageName, type LanguageOverride, type LanguageSettings } from '../core/language-settings.js';
 import { CLAUDE_SETUP_PROMPT, CODEX_SETUP_PROMPT, type LaunchAgent } from '../core/session-contracts.js';
 
-declare global { interface Window { languageAssistant?: { pickFolder(): Promise<string | null>; setAttentionCount?(count: number): void } } }
+declare global { interface Window { languageAssistant?: { pickFolder(): Promise<string | null>; setAttentionCount?(count: number): void; alert?(payload: { sound?: string; bounce: boolean }): void } } }
 const labels = { write: 'I write in', send: 'Send to the agent in', reply: 'Show agent replies in', assist: 'Language Assistant speaks' } as const;
 const defaultPrompt = (agent: LaunchAgent) => agent === 'claude' ? CLAUDE_SETUP_PROMPT : agent === 'codex' ? CODEX_SETUP_PROMPT : '';
 const agentLabel = (agent: LaunchAgent) => agent === 'claude' ? 'Claude' : 'Codex';
