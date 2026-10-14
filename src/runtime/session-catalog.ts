@@ -115,8 +115,9 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   const updateActivity = (record: SessionRecord) => {
     const row = rows.get(nativeKey(record.target));
     if (!row || closed || candidates.get(row.key)?.support === 'unsupported') return;
-    const state = sessions.snapshot(record.id).snapshot.codingState;
-    const latest = latestResponseSequence(sessions.snapshot(record.id).snapshot.codingMessages);
+    const live = sessions.snapshot(record.id).snapshot; // `current` is the published catalog snapshot
+    const state = live.codingState;
+    const latest = latestResponseSequence(live.codingMessages);
     if (latest === undefined) delete row.latestResponseSequence; else row.latestResponseSequence = latest;
     // A session never seen before starts seen at whatever history was present when Gloss first connected it (0 when none), so only responses arriving after that count.
     if (options.seen && state !== 'disconnected' && options.seen.seenSequence(record.id) === undefined) options.seen.markSeen(record.id, latest ?? 0);

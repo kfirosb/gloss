@@ -376,3 +376,14 @@ it('approval wins over an unseen response and an unavailable folder shows no res
   await vi.advanceTimersByTimeAsync(30000); await settle(() => f.catalog.snapshot().entries[0]?.availability === 'unavailable');
   expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
 });
+
+it('baselines a session with no history at 0 so its first live completed reply is flagged', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true }); f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  expect(f.store.seenSequence(id)).toBe(0);
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  f.agent.emit(reply('m1', 1)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.snapshot().entries[0]!.latestResponseSequence).toBe(1);
+});
