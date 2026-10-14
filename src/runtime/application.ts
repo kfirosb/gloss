@@ -7,6 +7,7 @@ import { createFileRegistry } from './file-registry.js';
 import { splitArgs } from './session-launcher.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
+import { PACKAGE_NAME, packageRoot } from './package-root.js';
 import { realpath, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -25,6 +26,7 @@ import { readProjectMetadata } from './project-metadata.js';
 import { effectiveLanguageSettings, validateLanguageOverride, validateLanguageSettings, type LanguageOverride, type LanguageSettings, type LanguageSettingsStore } from '../core/language-settings.js';
 import type { SessionLauncher, LaunchSettings, LaunchStore } from './session-launcher.js';
 import type { TerminalBridge } from './terminal-bridge.js';
+import type { DictationBridge } from './dictation/bridge.js';
 import type { AttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
 import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, type WorktreeInfo, type WorktreeInspection, type WorktreeService } from './worktrees.js';
@@ -34,6 +36,7 @@ export interface ApplicationOptions {
   capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore> & Partial<SeenStore>; agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>; host?: HostAdapter;
   launcher?: SessionLauncher; terminals?: TerminalBridge; attention?: AttentionMonitor; approveLaunchFolder?(folder: string): void;
+  dictation?: DictationBridge;
   conversationId?: string; language?: string; model?: string; projectPath?: string; attachmentRoot?: string;
   folderSearch?: (query: string) => Promise<FolderSearchResult>;
   /** Ends every live launch whose folder is `folder` (used before deleting a worktree). */
@@ -47,16 +50,14 @@ export interface WorktreeDeletePreview extends WorktreeInspection { launchedSess
 export interface CreatedWorktree { path: string; branch: string; location: string; ignore?: { added: boolean; line: string } }
 export interface FolderListing extends ConnectedFolder { projectName: string; branch?: string; missing: boolean }
 export interface AboutInfo { name: string; version: string; platform: string; arch: string }
-// source runs from src/runtime and the build from dist/server/runtime; walk up to the package.json named language-assistant (bounded).
+/** This package's name and version, read from the package root's package.json (see packageRoot). */
 function readPackage(): { name: string; version: string } {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (let level = 0; level < 4; level += 1, dir = dirname(dir)) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
-      if (pkg.name === 'language-assistant' && typeof pkg.version === 'string') return { name: pkg.name, version: pkg.version };
-    } catch { /* keep walking up */ }
-  }
-  return { name: 'language-assistant', version: '0.0.0' };
+  const root = packageRoot(dirname(fileURLToPath(import.meta.url)));
+  if (root) try {
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof version === 'string') return { name: PACKAGE_NAME, version };
+  } catch { /* fall back */ }
+  return { name: PACKAGE_NAME, version: '0.0.0' };
 }
 export interface SessionLanguage { defaults: LanguageSettings; override: LanguageOverride; effective: LanguageSettings }
 export interface Application {
@@ -68,6 +69,7 @@ export interface Application {
   readonly capability: string;
   readonly launcher?: SessionLauncher;
   readonly terminals?: TerminalBridge;
+  readonly dictation?: DictationBridge;
   approveLaunchFolder?(folder: string): void;
   about?(): AboutInfo;
   listFolders?(): Promise<FolderListing[]>;
@@ -186,7 +188,7 @@ export function createApplication(options: ApplicationOptions): Application {
   };
   return {
     capability: options.capability ?? randomUUID(), sessions, files, catalog,
-    ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.terminals ? { terminals: options.terminals } : {}), ...(options.approveLaunchFolder ? { approveLaunchFolder: options.approveLaunchFolder } : {}),
+    ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.terminals ? { terminals: options.terminals } : {}), ...(options.dictation ? { dictation: options.dictation } : {}), ...(options.approveLaunchFolder ? { approveLaunchFolder: options.approveLaunchFolder } : {}),
     async removeSession(sessionId) {
       requireOpen(); sessions.snapshot(sessionId);
       const conflict = (message: string) => Object.assign(new Error(message), { code: 'session-open' });
@@ -403,7 +405,7 @@ export function createApplication(options: ApplicationOptions): Application {
     close() {
       closing ??= (async () => {
         closed = true;
-        try { options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
+        try { options.dictation?.close(); options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
         finally { (options.store as ConversationStore & { close?: () => void }).close?.(); }
       })();
       return closing;
