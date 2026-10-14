@@ -51,6 +51,8 @@ export interface Tmux {
 }
 
 // "server exited unexpectedly": the server was shutting down as it answered, e.g. right after its last session was killed.
+/** Keeps tmux's own words (or the timeout) in the error so a failure can be diagnosed from the message the user sees. */
+const tmuxFailure = (outcome: ProcessOutcome) => new Error('tmux command failed: ' + (outcome.reason === 'exited' ? outcome.diagnostics.trim().split('\n')[0]!.slice(0, 200) || `exit code ${outcome.code}` : outcome.reason));
 const serverAbsent = (outcome: ProcessOutcome) => outcome.reason === 'exited' && outcome.code === 1 && /^(?:no server running on .+|error connecting to .+ \(No such file or directory\)|server exited unexpectedly)\s*$/.test(outcome.diagnostics);
 const sessionAbsent = (outcome: ProcessOutcome) => serverAbsent(outcome) || (outcome.reason === 'exited' && outcome.code === 1 && /^can't find session: .+\s*$/.test(outcome.diagnostics));
 
@@ -66,7 +68,7 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
   const check = (name: string) => { if (!NAME.test(name)) throw new Error('Invalid tmux session name'); };
   async function run(args: string[], allowFailure = false) {
     const result = await collectProcess(runner(executable, [...base, ...args], '', AbortSignal.timeout(10_000), { timeoutMs: 8000, maxOutputBytes: 1024 * 1024, env: tmuxEnvironment() }));
-    if (!allowFailure && (result.outcome.reason !== 'exited' || result.outcome.code !== 0)) throw new Error('tmux command failed');
+    if (!allowFailure && (result.outcome.reason !== 'exited' || result.outcome.code !== 0)) throw tmuxFailure(result.outcome);
     return result;
   }
   return {
@@ -90,7 +92,7 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
       const result = await run(['list-sessions', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}'], true);
       if (result.outcome.reason !== 'exited' || result.outcome.code !== 0) {
         if (serverAbsent(result.outcome)) return [];
-        throw new Error('tmux command failed');
+        throw tmuxFailure(result.outcome);
       }
       return result.lines.map(line => line.split('\t')).filter(([n, p]) => n && NAME.test(n) && Number(p) > 1).map(([name, pid, command]) => ({ name: name!, panePid: Number(pid), currentCommand: command ?? '' }));
     },
@@ -98,7 +100,7 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
       check(name); const { outcome } = await run(['has-session', '-t', '=' + name], true);
       if (outcome.reason === 'exited' && outcome.code === 0) return true;
       if (sessionAbsent(outcome)) return false;
-      throw new Error('tmux command failed');
+      throw tmuxFailure(outcome);
     },
     async capturePane(name) { check(name); return (await run(['capture-pane', '-p', '-t', '=' + name + ':'])).lines.join('\n'); },
     async sendKeys(name, keys) { check(name); await run(['send-keys', '-t', '=' + name + ':', '--', ...keys]); },
@@ -114,7 +116,7 @@ export async function createTmux(options: { stateDir?: string; executable?: stri
     async killSession(name) {
       check(name); const { outcome } = await run(['kill-session', '-t', '=' + name], true);
       if ((outcome.reason === 'exited' && outcome.code === 0) || sessionAbsent(outcome)) return;
-      throw new Error('tmux command failed');
+      throw tmuxFailure(outcome);
     },
     attachArgv(name) { check(name); return [executable, ...base, 'attach-session', '-t', '=' + name]; },
   };

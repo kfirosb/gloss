@@ -11,7 +11,7 @@ export function TerminalWorkspace({ terminal, originTitle, agentLabel, notice, o
       <span className="launch-terminal">
         {onSendOutput && agentLabel && <button type="button" disabled={!selection.trim()} onClick={() => onSendOutput(selection)}>Send output to {agentLabel}</button>}
         <button type="button" onClick={onShrink}>Shrink to popup</button>
-        <button type="button" onClick={onEnd}>End terminal…</button>
+        <button type="button" onClick={onEnd}>End terminal</button>
       </span></div>
     <div className="terminal-workspace-host"><TerminalView launchId={terminal.launchId} onSelection={setSelection} /></div>
   </div>;

@@ -119,12 +119,30 @@ test('a terminal popup closes when its shell exits', async ({ page }) => {
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ })).toHaveCount(0);
 });
-test('the End terminal dialog lays out its English text left to right', async ({ page }) => {
+test('End terminal closes the terminal at once, with no confirmation dialog', async ({ page }) => {
   await withSession(page, [terminal()], 'workspace');
+  const ended: string[] = [];
+  await page.route('**/api/launches/T1/end', r => { ended.push(r.request().method()); return r.fulfill({ json: {} }); });
   await page.goto('/#capability=test');
   await page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ }).click();
-  await page.getByRole('button', { name: 'End terminal…' }).click();
-  const text = page.getByRole('dialog', { name: 'End terminal' }).getByText('Terminal and anything running in it will be closed.');
-  await expect(text).toBeVisible();
-  expect(await text.evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+  await page.getByRole('button', { name: 'End terminal', exact: true }).click();
+  await expect.poll(() => ended).toEqual(['POST']);
+  await expect(page.getByRole('dialog', { name: 'End terminal' })).toHaveCount(0);
+});
+test('a failed End terminal says why, in the error line', async ({ page }) => {
+  await withSession(page, [terminal()], 'workspace');
+  await page.route('**/api/launches/T1/end', r => r.fulfill({ status: 400, json: { error: 'tmux command failed: lost server' } }));
+  await page.goto('/#capability=test');
+  await page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ }).click();
+  await page.getByRole('button', { name: 'End terminal', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not end Terminal: tmux command failed: lost server' })).toBeVisible();
+});
+test('the New session dialog lays out its English text left to right', async ({ page }) => {
+  await withSession(page, [terminal()]);
+  await page.route('**/api/settings/language', r => r.fulfill({ json: { write: 'he', send: 'en', reply: 'he', assist: 'he' } }));
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'New session' }).click();
+  const hint = page.getByRole('dialog', { name: 'New session' }).getByText(/as its first prompt, in English/);
+  await expect(hint).toBeVisible();
+  expect(await hint.evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
 });

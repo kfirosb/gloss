@@ -108,7 +108,7 @@ Existing conversation IDs and prepared work survive schema migration. Legacy glo
 
 ## Terminals
 
-The "+" dialog offers **Terminal** beside Claude and Codex: a plain login shell in the chosen folder, shown as a `>_` tab named Terminal, Terminal 2 and so on per folder. The tab's dot is green at the prompt and amber while a command runs. A terminal has no conversation and no Saved entry; it disappears when the shell exits or when you choose **End terminal…** from the tab's menu. Terminals run in Gloss's private tmux and come back after an app restart.
+The "+" dialog offers **Terminal** beside Claude and Codex: a plain login shell in the chosen folder, shown as a `>_` tab named Terminal, Terminal 2 and so on per folder. The tab's dot is green at the prompt and amber while a command runs. A terminal has no conversation and no Saved entry; it disappears when the shell exits or when you choose **End terminal** from the tab's menu. Terminals run in Gloss's private tmux and come back after an app restart.
 
 Commands in a reply get a **▶ Run** button beside Copy code when the block is untagged or tagged as shell, bash, zsh, console or terminal. Run types the block's text, exactly as shown and with leading `$ ` prompts removed, into the folder's idle terminal, or opens a new one when all are busy, and then opens that terminal. Nothing runs without the click. A block containing a tab, another control character, or an invisible bidi or zero-width character gets no Run button. If the new terminal is not ready in time, Gloss still types the command, opens the terminal and says: “The terminal may not have been ready. Check whether the command ran before running it again.”
 
