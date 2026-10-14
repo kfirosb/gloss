@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CODEX_SETUP_PROMPT, createSessionLauncher, defaultShell, nextTerminalTitle, splitArgs, type LaunchRecord, type LaunchSettings, type SessionLauncher } from '../../src/runtime/session-launcher.js';
+import { CODEX_SETUP_PROMPT, createSessionLauncher, defaultShell, nextTerminalTitle, splitArgs, validateCommand, type LaunchRecord, type LaunchSettings, type SessionLauncher } from '../../src/runtime/session-launcher.js';
 import type { Tmux } from '../../src/runtime/tmux.js';
 import type { Target } from '../../src/core/contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
@@ -356,4 +356,32 @@ it('passes a custom first message as the launch prompt and validates it', async 
  for (const bad of ['', '   ', 'x'.repeat(4001), 5]) await expect(launcher.launch({ agent: 'claude', folder, prompt: bad as any })).rejects.toThrow('Invalid first message');
  expect(nextTerminalTitle([])).toBe('Terminal'); expect(nextTerminalTitle(['Terminal'])).toBe('Terminal 2'); expect(nextTerminalTitle(['Terminal 2', 'Terminal 3'])).toBe('Terminal');
  expect(defaultShell({ SHELL: '/opt/homebrew/bin/fish' })).toBe('/opt/homebrew/bin/fish'); expect(defaultShell({ SHELL: 'fish' })).toBe('/bin/zsh'); expect(defaultShell({})).toBe('/bin/zsh');
+});
+it('run reuses the folder’s idle terminal, skips busy ones, and starts a second when all are busy', async () => {
+ const { launcher, folder, t } = await setup();
+ const first = await launcher.run({ folder, command: 'npm test\n', originSessionId: 'panel-1' });
+ expect(first).toMatchObject({ reused: false, typed: true, launch: { title: 'Terminal', originSessionId: 'panel-1' } });
+ expect(t.typed).toEqual([['la-' + first.launch.id, 'npm test']]);
+ const again = await launcher.run({ folder, command: 'npm run typecheck' });
+ expect(again).toMatchObject({ reused: true, launch: { id: first.launch.id } });
+ t.live.get('la-' + first.launch.id)!.currentCommand = 'node';
+ const second = await launcher.run({ folder, command: 'git status', originSessionId: 'panel-2' });
+ expect(second).toMatchObject({ reused: false, typed: true, launch: { title: 'Terminal 2', originSessionId: 'panel-2' } });
+ expect(t.typed.at(-1)).toEqual(['la-' + second.launch.id, 'git status']);
+ // A later run marks the reused terminal with the session that used it.
+ t.live.get('la-' + first.launch.id)!.currentCommand = 'zsh';
+ await launcher.run({ folder, command: 'ls', originSessionId: 'panel-3' });
+ expect(launcher.list().find(r => r.id === first.launch.id)!.originSessionId).toBe('panel-3');
+});
+it('run still types when the new shell is not ready in time, and reports typed: false', async () => {
+ const { launcher, folder, t } = await setup({ settings: {} });
+ t.tmux.newSession = async (name, cwd, argv) => { t.live.set(name, { cwd, argv, panePid: 7, currentCommand: 'login' }); return { panePid: 7 }; };
+ const result = await launcher.run({ folder, command: 'make' });
+ expect(result.typed).toBe(false); expect(t.typed).toEqual([['la-' + result.launch.id, 'make']]);
+});
+it('run validates the command and the folder', async () => {
+ const { launcher, folder } = await setup();
+ for (const bad of ['', '\n\n', 'x'.repeat(8193), 3]) await expect(launcher.run({ folder, command: bad as any })).rejects.toThrow('Invalid command');
+ await expect(launcher.run({ folder: '/nope', command: 'ls' })).rejects.toThrow('Choose a project folder');
+ expect(validateCommand('  ls -la \n\n')).toBe('  ls -la ');
 });

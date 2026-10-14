@@ -25,6 +25,8 @@ export interface LaunchStore {
 }
 export interface SessionLauncher {
   launch(input: { agent: LaunchAgent; folder: string; languageOverride?: LanguageOverride; prompt?: string }): Promise<LaunchRecord>;
+  /** Types a command into the folder's idle terminal, starting one when none is free. Never runs anything by itself. */
+  run(input: { folder: string; command: string; originSessionId?: string }): Promise<{ launch: LaunchRecord; reused: boolean; typed: boolean }>;
   list(): LaunchRecord[]; reconcile(): Promise<void>; end(launchId: string): Promise<void>;
   /** Retries connecting a launch that has no panel yet. */
   identify(launchId: string): Promise<void>;
@@ -62,6 +64,14 @@ export function validatePrompt(value: unknown): string | undefined {
   if (!text || text.length > MAX_PROMPT_LENGTH) throw new Error('Invalid first message');
   return text;
 }
+export const MAX_RUN_COMMAND_LENGTH = 8192;
+/** Text typed into a terminal by Run: literal, trailing newlines dropped (Enter is added by tmux). */
+export function validateCommand(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('Invalid command');
+  const text = value.replace(/[\r\n]+$/, '');
+  if (!text.trim() || text.length > MAX_RUN_COMMAND_LENGTH) throw new Error('Invalid command');
+  return text;
+}
 export function defaultShell(env: NodeJS.ProcessEnv = process.env): string {
   const shell = env.SHELL;
   return shell && isAbsolute(shell) ? shell : '/bin/zsh';
@@ -82,12 +92,13 @@ export function createSessionLauncher(options: {
   resolveExecutable(name: 'codex'): Promise<string>; knownFolder(folder: string): Promise<boolean>;
   applyLanguage?(panelId: string, override: LanguageOverride): void | Promise<void>;
   /** The marker table for the installed agent version, used to make sure End never answers a prompt. */
-  shell?: string; now?: () => number; sleep?: (ms: number) => Promise<void>; identifyTimeoutMs?: number; watchIntervalMs?: number;
+  shell?: string; now?: () => number; sleep?: (ms: number) => Promise<void>; identifyTimeoutMs?: number; watchIntervalMs?: number; readyTimeoutMs?: number;
   /** Waits between identification attempts; after the last one the launch shows as not connected until Retry or new discovery. */
   retryDelaysMs?: number[];
 }): SessionLauncher {
   const now = options.now ?? Date.now;
   const shell = options.shell ?? defaultShell(); const shellName = basename(shell);
+  const readyTimeoutMs = options.readyTimeoutMs ?? 5000;
   const busy = new Map<string, boolean>();
   const list = (): LaunchRecord[] => options.store.listLaunches().map(r => r.agent === 'shell' ? { ...r, busy: busy.get(r.id) ?? false } : r);
   const notify = () => { if (!closed) for (const listener of listeners) { try { listener(list()); } catch { /* Subscribers do not control launch lifecycle. */ } } };
@@ -268,6 +279,31 @@ export function createSessionLauncher(options: {
       put(record);
       if (agent === 'claude') await new Promise<void>(done => { void identify(id, done).finally(done); }); else void identify(id);
       return get(id);
+    },
+    async run({ folder, command, originSessionId }) {
+      requireOpen();
+      const text = validateCommand(command);
+      const origin = originSessionId === undefined ? undefined : String(originSessionId).slice(0, 128);
+      const cwd = await validFolder(folder); const tmux = await options.tmux();
+      const titleNumber = (r: LaunchRecord) => Number(TITLE.exec(r.title ?? 'Terminal')?.[1] ?? 1);
+      const panes = new Map((await tmux.listSessions()).map(s => [s.name, s.currentCommand]));
+      const idle = liveShells(cwd).filter(r => panes.get(sessionNameFor(r.id)) === shellName).sort((a, b) => titleNumber(a) - titleNumber(b))[0];
+      if (idle) {
+        busy.set(idle.id, true);
+        await tmux.typeText(sessionNameFor(idle.id), text);
+        if (origin && get(idle.id).originSessionId !== origin) put({ ...get(idle.id), originSessionId: origin }); else notify();
+        return { launch: list().find(r => r.id === idle.id)!, reused: true, typed: true };
+      }
+      const launch = await startShell(tmux, cwd, origin); const name = sessionNameFor(launch.id);
+      let ready = false;
+      for (let waited = 0; waited < readyTimeoutMs; waited += 100) {
+        const current = (await tmux.listSessions().catch(() => [])).find(s => s.name === name)?.currentCommand;
+        if (current === shellName) { ready = true; break; }
+        await sleep(100);
+      }
+      await tmux.typeText(name, text).catch(() => undefined);
+      busy.set(launch.id, true); notify();
+      return { launch: list().find(r => r.id === launch.id)!, reused: false, typed: ready };
     },
     list,
     reconcile: () => reconcile(true),
