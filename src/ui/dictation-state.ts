@@ -1,12 +1,12 @@
 import { FINISH_TIMEOUT_MS, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
 
 export type DictationPhase = 'idle' | 'downloading' | 'starting' | 'recording' | 'finishing' | 'unavailable' | 'error';
-export interface DictationUiState { phase: DictationPhase; reason?: string; message?: string; notice?: string; received?: number; total?: number | null; startedAt?: number; level: number; sendAfterFinish: boolean; lastSequence: number }
+export interface DictationUiState { phase: DictationPhase; reason?: string; message?: string; notice?: string; received?: number; total?: number | null; startedAt?: number; sendAfterFinish: boolean; lastSequence: number }
 export type DictationUiEvent =
   | { type: 'status'; status: DictationStatus } | { type: 'status-failed' }
   | { type: 'press'; now: number } | { type: 'mic-ready' } | { type: 'mic-denied' }
   | { type: 'server'; message: DictationServerMessage } | { type: 'socket-closed'; clean: boolean }
-  | { type: 'escape' } | { type: 'send-requested' } | { type: 'finish-timeout' } | { type: 'level'; level: number }
+  | { type: 'escape' } | { type: 'send-requested' } | { type: 'finish-timeout' }
   | { type: 'session-changed' } | { type: 'retry' } | { type: 'dismiss-notice' };
 export type DictationEffect =
   | { type: 'request-mic' } | { type: 'open-socket' } | { type: 'start-stream' } | { type: 'stop-stream' }
@@ -15,10 +15,10 @@ export type DictationEffect =
 /** How long a plain Stop/Escape waits for the server's 'finished' before giving up (send-initiated stops use FINISH_TIMEOUT_MS). */
 export const STOP_TIMEOUT_MS = 15_000;
 export const microphoneHint = 'Enable Gloss under System Settings → Privacy & Security → Microphone';
-export const initialDictationState: DictationUiState = { phase: 'idle', level: 0, sendAfterFinish: false, lastSequence: 0 };
+export const initialDictationState: DictationUiState = { phase: 'idle', sendAfterFinish: false, lastSequence: 0 };
 const reasons: Record<string, string> = { 'engine-missing': 'Speech engine not built', 'microphone-denied': 'Microphone access denied. ' + microphoneHint };
 const active = (p: DictationPhase) => p === 'downloading' || p === 'starting' || p === 'recording' || p === 'finishing';
-const idle = (s: DictationUiState, extra: Partial<DictationUiState> = {}): DictationUiState => ({ phase: 'idle', level: 0, sendAfterFinish: false, lastSequence: 0, ...(s.notice ? { notice: s.notice } : {}), ...extra });
+const idle = (s: DictationUiState, extra: Partial<DictationUiState> = {}): DictationUiState => ({ phase: 'idle', sendAfterFinish: false, lastSequence: 0, ...(s.notice ? { notice: s.notice } : {}), ...extra });
 
 export function appendDictation(existing: string, text: string): string {
   if (!existing) return text;
@@ -46,7 +46,6 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
       if (state.phase === 'finishing') return finishing({ ...state, sendAfterFinish: true });
       return out(state, { type: 'send-now' });
     case 'finish-timeout': return state.phase === 'finishing' ? out(idle(state), { type: 'close-socket' }, ...(state.sendAfterFinish ? [{ type: 'send-now' } as const] : [])) : out(state);
-    case 'level': return out({ ...state, level: event.level });
     case 'retry': return state.phase === 'error' ? out(idle(state)) : out(state);
     case 'dismiss-notice': { const { notice: _n, ...rest } = state; return out(rest); }
     case 'session-changed': { const { notice: _n, ...rest } = state; return active(state.phase) ? out(idle(rest), { type: 'close-socket' }, { type: 'stop-stream' }) : out(state); }
