@@ -33,3 +33,27 @@ it('leaves the English unchanged without invocations and handles an empty body',
   expect(assembleInstruction('claude', { skills: ['polish'], mcp: [] }, '/polish')).toBe('/polish');
   expect(assembleInstruction('codex', { skills: [], mcp: ['github'] }, '')).toBe('Use the `github` MCP server for this.');
 });
+
+it('does not read a token that is followed by a path segment', () => {
+  expect(findInvocations('open /polish/index.ts and /polish', catalog)).toEqual({ skills: ['polish'], mcp: [] });
+  expect(findInvocations('open /polish/index.ts', catalog)).toEqual({ skills: [], mcp: [] });
+});
+
+it('touches only the tokens, leaving punctuation, paths and indentation alone', () => {
+  expect(assembleInstruction('claude', { skills: ['polish'], mcp: [] }, 'Polish it with /polish.\nupdate the .env file, run ./x.sh\n    indented code'))
+    .toBe('/polish Polish it with.\nupdate the .env file, run ./x.sh\n    indented code');
+});
+
+it('strips only the sigil that matches the kind', () => {
+  expect(assembleInstruction('claude', { skills: [], mcp: ['github'] }, 'cd /github then use $github'))
+    .toBe('cd /github then use\n\nUse the `github` MCP server for this.');
+});
+
+it('strips a $ skill mention for Codex', () => {
+  expect(assembleInstruction('codex', { skills: ['polish'], mcp: [] }, 'run $polish now')).toBe('$polish run now');
+});
+
+it('matches the longest known name', () => {
+  const both = catalogFrom([{ kind: 'skill', name: 'polish' }, { kind: 'skill', name: 'polish-ui' }]);
+  expect(findInvocations('/polish-ui go', both)).toEqual({ skills: ['polish-ui'], mcp: [] });
+});
