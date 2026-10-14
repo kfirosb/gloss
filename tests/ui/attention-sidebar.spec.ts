@@ -20,6 +20,7 @@ test('folder row shows a working spinner and a red count with a breakdown label'
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
   const row = sidebar.locator('.project-folder[data-folder-key="/repo"]');
   await expect(row.getByRole('img', { name: 'Working' })).toBeVisible();
+  await expect(row).toHaveAccessibleName('repo, 2 open, working, 1 session waiting: 1 approval');
   await expect(row.locator('.folder-count')).toHaveText('2');
   await expect(row.getByRole('img', { name: '1 session waiting: 1 approval' })).toHaveText('1');
   await expect(sidebar.locator('.project-toggle').getByRole('img', { name: '1 session waiting: 1 approval' })).toBeVisible();
@@ -36,8 +37,10 @@ test('two waiting sessions count as 2 on the folder, the project and the icon ra
   await expect(sidebar.locator('.project-folder[data-folder-key="/repo"]').getByRole('img', { name: label })).toHaveText('2');
   await expect(sidebar.locator('.project-toggle').getByRole('img', { name: label })).toHaveText('2');
   await expect(sidebar.locator('.project-folder .attn-spinner')).toHaveCount(0);
+  await expect(sidebar.locator('.project-toggle')).toHaveAccessibleName(/, 2 sessions waiting: 1 response, 1 approval$/);
   await page.getByRole('button', { name: 'Collapse sessions' }).click();
   await expect(sidebar.locator('.session-rail button').first().getByRole('img', { name: label })).toHaveText('2');
+  await expect(sidebar.locator('.session-rail button').first()).toHaveAccessibleName(/, 2 sessions waiting: 1 response, 1 approval$/);
 });
 
 test('nothing waiting shows no badge and keeps the grey count', async ({ page, context }) => {
