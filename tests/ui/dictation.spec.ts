@@ -141,3 +141,20 @@ test('no download dialog when the speech model is present', async ({ page }) => 
   await expect.poll(() => sockets).toBe(1);
   await expect(page.getByRole('dialog', { name: 'One-time download for dictation' })).toBeHidden();
 });
+test('closing the download dialog with × or Enter never sends the composer text', async ({ page }) => {
+  const actions = await mockDictationPage(page, false);
+  await page.goto('/#capability=test');
+  const composer = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  await composer.fill('keep me');
+  const mic = page.getByRole('button', { name: 'Dictate in Hebrew' });
+  const dialog = page.getByRole('dialog', { name: 'One-time download for dictation' });
+  await mic.click(); await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close One-time download for dictation' }).click();
+  await expect(dialog).toBeHidden();
+  await mic.click(); await expect(dialog).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await page.waitForTimeout(300);
+  expect(actions.filter(a => a.type === 'send-composer' || a.type === 'discuss')).toHaveLength(0);
+  await expect(composer).toHaveValue('keep me');
+});
