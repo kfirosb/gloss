@@ -303,3 +303,15 @@ test.describe('remove from history', () => {
     expect(deleted.sort()).toEqual(['A', 'B']);
   });
 });
+
+test('tabs show one red needs-you dot for approvals and unseen responses', async ({ page, context }) => {
+  const f = await sessionFixture(context);
+  await page.addInitScript(() => { document.hasFocus = () => false; });
+  await context.route('**/api/session-catalog/seen', r => r.fulfill({ json: { result: 'unchanged' } }));
+  await serve(context, catalogFor(f, { A: { attention: 'response', latestResponseSequence: 4 }, B: { activity: 'approval-required', attention: 'approval' } }));
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await expect(tabs.getByRole('tab', { name: /Session A/ }).getByLabel('New response')).toHaveClass(/needs-you/);
+  await expect(tabs.getByRole('tab', { name: /Session B/ }).getByLabel('Approval required')).toHaveClass(/needs-you/);
+  await expect(page.locator('.session-header')).toContainText('New response');
+});

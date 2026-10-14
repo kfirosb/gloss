@@ -87,7 +87,7 @@ export function chooseSessionForFolder(folder:FolderNode,lastSelected?:string){
 }
 export function activityLabel(entry:CatalogEntry){
  if(entry.activity==='connecting'||entry.activity==='unknown')return entry.activity==='connecting'?'Connecting':'Unknown';
- const label=entry.activity==='approval-required'?'Approval required':entry.activity[0]!.toUpperCase()+entry.activity.slice(1);
+ const label=entry.activity==='approval-required'?'Approval required':entry.attention==='response'?'New response':entry.activity[0]!.toUpperCase()+entry.activity.slice(1);
  return entry.availability==='unavailable'&&entry.activity!=='disconnected'?`${label} · Unavailable`:label;
 }
 export function mergeSavedRecords(entries:CatalogEntry[],records:SessionRecord[]):CatalogEntry[]{

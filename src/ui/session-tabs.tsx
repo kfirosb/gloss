@@ -6,7 +6,7 @@ import { activityLabel, agentName, sessionIdentity, sessionTitle, type FolderNod
 // A launch still waiting for its panel has no session to select yet.
 const launchPending = (entry: CatalogEntry) => !entry.sessionId && (entry.launchState === 'starting' || entry.launchState === 'unidentified');
 const tabTitle = (entry: CatalogEntry) => launchPending(entry) ? (entry.launchState === 'starting' ? 'Starting…' : entry.reason ?? 'Started, not connected') : sessionTitle(entry);
-const dotClass = (entry: CatalogEntry) => entry.activity === 'approval-required' ? 'approval' : entry.activity;
+const dotClass = (entry: CatalogEntry) => entry.attention === 'approval' || entry.attention === 'response' || entry.activity === 'approval-required' ? 'needs-you' : entry.activity;
 export function ActivityDot({ entry }: { entry: CatalogEntry }) {
  const label = activityLabel(entry);
  return <span className={'activity-dot ' + dotClass(entry)} role="img" aria-label={label} title={label} />;

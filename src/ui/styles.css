@@ -454,7 +454,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .session-tab[aria-disabled="true"]{opacity:.6;cursor:default}
 .session-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .activity-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
-.activity-dot.idle{background:#4f9a6b}.activity-dot.working{background:#e0a23a;animation:activity-pulse 1.2s infinite}.activity-dot.approval{background:#d0453a}
+.activity-dot.idle{background:#4f9a6b}.activity-dot.working{background:#e0a23a;animation:activity-pulse 1.2s infinite}.activity-dot.needs-you{background:#e5372b}
 .activity-dot.connecting,.activity-dot.unknown{background:#9aa4b8}.activity-dot.disconnected{background:transparent;border:1.5px solid #9aa4b8}
 @keyframes activity-pulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.activity-dot.working{animation:none}}
