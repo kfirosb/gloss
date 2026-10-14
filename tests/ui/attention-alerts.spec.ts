@@ -67,3 +67,15 @@ test('Settings saves the alert switches and sound at once, and Try plays the cho
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Alert sound' })).toHaveValue('Submarine');
 });
+
+test('a banner for the shown session, queued while away, clears when the window comes back', async ({ page, context }) => {
+  const f = await sessionFixture(context);
+  await page.addInitScript(bridge);
+  await page.addInitScript(() => { (window as any).__focused = false; document.hasFocus = () => (window as any).__focused; });
+  await serve(context, catalogFor(f, 1), catalogFor(f, 2, { A: { attention: 'response', latestResponseSequence: 9 } }));
+  await page.goto('/#capability=test');
+  const banner = page.getByRole('status').filter({ hasText: 'New reply' });
+  await expect(banner).toContainText('Session A');
+  await page.evaluate(() => { (window as any).__focused = true; window.dispatchEvent(new Event('focus')); });
+  await expect(banner).toHaveCount(0);
+});

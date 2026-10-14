@@ -27,8 +27,12 @@ export function useAttentionAlerts(entries:readonly CatalogEntry[]|undefined,sel
   if(sound||settings.message)window.languageAssistant?.alert?.({...(sound?{sound}:{}),bounce:settings.message});
   if(settings.message)setBanners(old=>[...old.filter(b=>!events.some(e=>e.sessionId===b.sessionId)),...events.map(e=>({key:e.key,sessionId:e.sessionId,text:bannerText(e,entries)}))].slice(-MAX_BANNERS));
  },[entries,selectedId,settings]);
- // Opening a session clears its banners.
- useEffect(()=>{setBanners(old=>old.some(b=>b.sessionId===selectedId)?old.filter(b=>b.sessionId!==selectedId):old);},[selectedId]);
+ // Opening a session clears its banners, and so does returning to the window while it is shown.
+ useEffect(()=>{
+  const clear=()=>{if(isFocused())setBanners(old=>old.some(b=>b.sessionId===selectedId)?old.filter(b=>b.sessionId!==selectedId):old);};
+  clear();window.addEventListener('focus',clear);document.addEventListener('visibilitychange',clear);
+  return()=>{window.removeEventListener('focus',clear);document.removeEventListener('visibilitychange',clear);};
+ },[selectedId]);
  return {banners,dismiss:(key:string)=>setBanners(old=>old.filter(b=>b.key!==key))};
 }
 function Toast({banner,onOpen,onDismiss}:{banner:AlertBanner;onOpen():void;onDismiss():void}){
