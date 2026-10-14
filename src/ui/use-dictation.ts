@@ -89,8 +89,8 @@ export function useDictation(options: UseDictationOptions): Dictation {
   }, [options.enabled, dispatch]);
   const press = () => {
     const p = current.current.phase;
-    if ((p !== 'idle' && p !== 'error') || downloadAccepted.current || modelPresent.current !== false) { dispatch({ type: 'press', now: Date.now() }); return; }
-    // The model looked absent: re-check (another window may have downloaded it) before asking about the one-time download.
+    if ((p !== 'idle' && p !== 'error') || downloadAccepted.current || modelPresent.current === true) { dispatch({ type: 'press', now: Date.now() }); return; }
+    // The model looked absent, or the status has not loaded yet: re-check (another window may have downloaded it) before asking about the one-time download.
     fetchStatus().then(status => { modelPresent.current = status.model.present; return status.model.present; }, () => false).then(present => {
       const q = current.current.phase; if (q !== 'idle' && q !== 'error') return;
       if (present) dispatch({ type: 'press', now: Date.now() }); else setConfirmingDownload(true);

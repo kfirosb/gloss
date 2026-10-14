@@ -166,3 +166,12 @@ test('closing the download dialog with × or Enter never sends the composer text
   expect(actions.filter(a => a.type === 'send-composer' || a.type === 'discuss')).toHaveLength(0);
   await expect(composer).toHaveValue('keep me');
 });
+test('a press before the status has loaded still asks about the download first', async ({ page }) => {
+  await mockDictationPage(page, false);
+  await page.route('**/api/dictation', async route => { await new Promise(r => setTimeout(r, 800)); await route.fulfill({ json: { available: true, model: { present: false }, engine: 'stopped' } }); });
+  let sockets = 0; await page.routeWebSocket('**/api/dictation/audio**', () => { sockets++; });
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect(page.getByRole('dialog', { name: 'One-time download for dictation' })).toBeVisible();
+  expect(sockets).toBe(0);
+});
