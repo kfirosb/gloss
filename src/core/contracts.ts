@@ -67,6 +67,8 @@ export interface AgentCapabilities {
 export type AgentEvent =
   | { type: 'message'; message: AgentMessage }
   | { type: 'usage'; usage: import('./usage.js').ProviderUsage }
+  /** Claude read this Gloss channel message into its context; its next finished turn answers it. */
+  | { type: 'channel-seen'; requestId: string }
   | { type: 'status'; state: CodingState }
   | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
   | { type: 'gap'; reason: string };

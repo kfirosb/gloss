@@ -107,14 +107,22 @@ export async function discoverOpenClaude(options: ClaudeAdapterOptions, signal: 
   return result;
 }
 /** The agent's finished turn text is its answer; the channel's reply tool only carries optional interim status. */
+/** The Gloss delivery id of a channel message, when this record is Claude reading one into its context. */
+function channelRequest(origin: any, text: unknown): string | undefined {
+  if (origin?.kind !== 'channel' || origin.server !== CHANNEL_SERVER || typeof text !== 'string') return undefined;
+  return /^<channel source="language-assistant" request_id="([a-zA-Z0-9-]{1,100})"/.exec(text)?.[1];
+}
+const CHANNEL_SERVER = 'language-assistant';
 export function parseClaudeRecord(record: any, offset: number, sessionRef: string): Parsed {
   if (record.sessionId !== undefined && record.sessionId !== sessionRef) throw new Error('Transcript identity mismatch');
+  // A channel message that arrives during a running turn is queued into it as an attachment.
+  if (record.type === 'attachment') { const seen = record.attachment?.type === 'queued_command' ? channelRequest(record.attachment.origin, record.attachment.prompt) : undefined; return seen ? { channelSeen: seen } : {}; }
   if (record.type !== 'user' && record.type !== 'assistant') return {};
   if (record.sessionId !== sessionRef || typeof record.uuid !== 'string' || !record.message) throw new Error('Malformed Claude message');
   if (record.type === 'assistant' && record.message.stop_reason !== 'end_turn') return {};
   const peer = record.type === 'user' && record.origin?.kind === 'peer';
   let deliveryId = peer && typeof record.origin.msg_id === 'string' ? record.origin.msg_id : undefined;
-  if (record.isMeta && !peer) return {};
+  if (record.isMeta && !peer) { const seen = record.type === 'user' ? channelRequest(record.origin, record.message.content) : undefined; return seen ? { channelSeen: seen } : {}; }
   const body = record.message.content;
   let text = typeof body === 'string' ? body : Array.isArray(body) ? body.filter((part: any) => part.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n') : '';
   if (peer) {
