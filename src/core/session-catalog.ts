@@ -1,4 +1,5 @@
 import type { Target } from './contracts.js';
+import type { Attention } from './attention.js';
 
 export interface OpenSessionCandidate {
   sessionTitle?: string;
@@ -48,6 +49,10 @@ export interface CatalogEntry {
   launchState?: import('./session-contracts.js').LaunchState;
   /** Shown when Gloss cannot tell whether this launched session needs the user. */
   attentionNotice?: string;
+  /** What the session needs from the user; absent means 'none'. Derived by the server, never stored. */
+  attention?: Attention;
+  /** Revision of the newest completed assistant message, when the session has one. */
+  latestResponseSequence?: number;
 }
 export interface CatalogSnapshot {
   epoch: string;
@@ -64,6 +69,8 @@ export interface SessionCatalog {
   forget(sessionId: string): void;
   /** Entry for a saved session, if the catalog lists one. */
   entryFor(sessionId: string): CatalogEntry | undefined;
+  /** Records that the user saw responses up to `sequence` and republishes when that changes an entry. */
+  markSeen(sessionId: string, sequence: number): 'updated' | 'unchanged' | 'unknown';
   subscribe(listener: (snapshot: CatalogSnapshot) => void): () => void;
   close(): Promise<void>;
 }

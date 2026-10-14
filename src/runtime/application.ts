@@ -1,4 +1,5 @@
 import { createSessionCatalog, type SessionCatalog } from './session-catalog.js';
+import type { SeenStore } from '../core/session-catalog.js';
 import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
 import type { ImageAttachment } from '../core/contracts.js';
@@ -30,7 +31,7 @@ import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, ty
 
 export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
-  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore>; agents: AgentAdapter[];
+  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore> & Partial<SeenStore>; agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>; host?: HostAdapter;
   launcher?: SessionLauncher; terminals?: TerminalBridge; attention?: AttentionMonitor; approveLaunchFolder?(folder: string): void;
   conversationId?: string; language?: string; model?: string; projectPath?: string; attachmentRoot?: string;
@@ -134,7 +135,7 @@ export function createApplication(options: ApplicationOptions): Application {
       } catch (error) { if (workflow) await workflow.close(); else await session.close(); throw error; }
     },
   });
-  const catalog = createSessionCatalog({ sessions, agents: options.agents, ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}) });
+  const catalog = createSessionCatalog({ sessions, agents: options.agents, ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}), ...(options.store.markSeen && options.store.seenSequence ? { seen: options.store as SeenStore } : {}) });
   const channelSetup = options.channelSetup ?? createClaudeChannelSetup();
   const savedTarget = (id: string) => { sessions.snapshot(id); return sessions.list().find(record => record.id === id)!.target; };
   const pkg = readPackage();

@@ -2,7 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { AgentAdapter, Target } from '../core/contracts.js';
-import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SessionCatalog } from '../core/session-catalog.js';
+import { attentionFor, latestResponseSequence } from '../core/attention.js';
+import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SeenStore, SessionCatalog } from '../core/session-catalog.js';
 import { languageShortCode } from '../core/language-settings.js';
 import type { SessionRecord } from '../core/session-contracts.js';
 import type { SessionManager } from './session-manager.js';
@@ -16,6 +17,7 @@ export interface CatalogClock {
   clearInterval(timer: ReturnType<typeof setInterval>): void;
 }
 export interface SessionCatalogOptions {
+  seen?: SeenStore;
   sessions: SessionManager;
   agents: AgentAdapter[];
   readProjectMetadata?: (path: string) => Promise<ProjectMetadata>;
@@ -101,6 +103,10 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     })).sort((a, b) => a.projectKey.localeCompare(b.projectKey) || Number(b.open) - Number(a.open) || a.key.localeCompare(b.key));
     // Cached metadata (30s TTL per folder) is the only source; no extra filesystem reads happen here.
     for (const entry of entries) { delete entry.folderMissing; if (metadata.get(entry.target.projectId)?.value.available === false) entry.folderMissing = true; }
+    for (const entry of entries) {
+      const attention = attentionFor(entry, entry.sessionId && options.seen ? options.seen.seenSequence(entry.sessionId) : undefined);
+      if (attention === 'none') delete entry.attention; else entry.attention = attention;
+    }
     if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery)) return;
     current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health } };
     for (const listener of listeners) listener(structuredClone(current));
@@ -110,6 +116,10 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     const row = rows.get(nativeKey(record.target));
     if (!row || closed || candidates.get(row.key)?.support === 'unsupported') return;
     const state = sessions.snapshot(record.id).snapshot.codingState;
+    const latest = latestResponseSequence(sessions.snapshot(record.id).snapshot.codingMessages);
+    if (latest === undefined) delete row.latestResponseSequence; else row.latestResponseSequence = latest;
+    // A session never seen before starts seen at whatever history was present when Gloss first connected it (0 when none), so only responses arriving after that count.
+    if (options.seen && state !== 'disconnected' && options.seen.seenSequence(record.id) === undefined) options.seen.markSeen(record.id, latest ?? 0);
     // A manually connected Claude row has no discovery result; its connection is the liveness signal.
     if (record.target.agent === 'claude' && !candidates.has(row.key)) row.open = state !== 'disconnected';
     if (metadata.get(record.target.projectId)?.value.available === false) {
@@ -245,6 +255,13 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       publish();
     },
     entryFor(sessionId) { return current.entries.find(entry => entry.sessionId === sessionId); },
+    markSeen(sessionId, sequence) {
+      if (!options.seen || !current.entries.some(entry => entry.sessionId === sessionId)) return 'unknown';
+      const before = options.seen.seenSequence(sessionId);
+      options.seen.markSeen(sessionId, sequence);
+      if (options.seen.seenSequence(sessionId) === before) return 'unchanged';
+      publish(); return 'updated';
+    },
     subscribe(listener) { if (closed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
     async close() {
       closed = true; controller.abort(); if (timer) clock.clearInterval(timer);

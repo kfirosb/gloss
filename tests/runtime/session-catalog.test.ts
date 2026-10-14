@@ -28,7 +28,7 @@ function setup(kind: 'codex' | 'claude' = 'codex', extra: Partial<Parameters<typ
   });
   const manager = createSessionManager({ store, agents: [agent], languageSettings: () => languageSettings, createWorkflowForSession: factory });
   const metadata = vi.fn(async () => ({ canonicalRoot: process.cwd(), projectName: 'Project', projectKey: '/common', branch: 'main', available: true }));
-  const catalog = createSessionCatalog({ sessions: manager, agents: [Object.assign(agent, { discoverOpen })], readProjectMetadata: metadata, ...extra });
+  const catalog = createSessionCatalog({ sessions: manager, agents: [Object.assign(agent, { discoverOpen })], readProjectMetadata: metadata, seen: store, ...extra });
   cleanups.push(async () => { await catalog.close(); await manager.close(); store.close(); });
   return { store, agent, manager, catalog, factory, discoverOpen, metadata, setScan(value: OpenSessionScan) { scan = value; }, setLanguage(value: typeof languageSettings) { languageSettings = value; } };
 }
@@ -340,4 +340,39 @@ it('merges a Codex launch placeholder with its discovered row once the launch is
   for (const l of listeners) l(launches);
   await settle(() => f.catalog.snapshot().entries.length === 1);
   expect(f.catalog.snapshot().entries[0]).toMatchObject({ key: 'codex:A', sessionId, launchId: 'L1', launchState: 'running' });
+});
+// Updates to one message carry a higher revision (the workflow ignores equal or lower revisions).
+const reply = (sourceId: string, revision: number, complete = true) => ({ type: 'message' as const, message: { sourceId, revision, role: 'assistant' as const, text: 'Done ' + revision, complete } });
+it('baselines a never-seen session at connect, flags newer completed responses, and markSeen clears them', async () => {
+  const f = setup(); f.agent.historyMessages.set('A', [{ sourceId: 'h1', revision: 1, role: 'assistant', text: 'old', complete: true }]);
+  f.setScan({ candidates: [candidate('A')], complete: true }); f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  // History present at connect is baselined, never flagged.
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({ latestResponseSequence: 1 }); expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  expect(f.store.seenSequence(id)).toBe(1);
+  f.agent.emit(reply('m2', 2, false)); await settle(() => f.catalog.snapshot().entries[0]?.latestResponseSequence === 1 && f.catalog.snapshot().entries[0]?.attention === undefined);
+  f.agent.emit(reply('m2', 3, true)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.snapshot().entries[0]!.latestResponseSequence).toBe(3);
+  const before = f.catalog.snapshot().sequence;
+  expect(f.catalog.markSeen(id, 1)).toBe('unchanged');
+  expect(f.catalog.snapshot().sequence).toBe(before);
+  expect(f.catalog.markSeen(id, 3)).toBe('updated');
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  expect(f.catalog.markSeen('nope', 3)).toBe('unknown');
+});
+it('approval wins over an unseen response and an unavailable folder shows no response badge', async () => {
+  const attention = new Map<string, Attention>();
+  const subscribers = new Set<(current: Map<string, Attention>) => void>();
+  const f = setup('codex', { launcher: { list: () => [{ id: 'L1', agent: 'codex', folder: process.cwd(), panePid: 1, state: 'running', createdAt: 0, sessionRef: 'A' } as LaunchRecord], subscribe: () => () => {} }, attention: { current: () => attention, subscribe: l => { subscribers.add(l); return () => { subscribers.delete(l); }; } } });
+  f.setScan({ candidates: [candidate('A')], complete: true }); f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.agent.emit(reply('m2', 2)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  attention.set('L1', { launchId: 'L1', state: 'needs-user' }); for (const l of subscribers) l(attention);
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({ activity: 'approval-required', attention: 'approval' });
+  attention.set('L1', { launchId: 'L1', state: 'clear' }); for (const l of subscribers) l(attention);
+  expect(f.catalog.snapshot().entries[0]!.attention).toBe('response');
+  f.metadata.mockResolvedValue({ canonicalRoot: process.cwd(), projectName: 'Project', projectKey: '/common', branch: 'main', available: false });
+  await vi.advanceTimersByTimeAsync(30000); await settle(() => f.catalog.snapshot().entries[0]?.availability === 'unavailable');
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
 });
