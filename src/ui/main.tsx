@@ -38,6 +38,7 @@ import { SessionLanguageControl } from './language-controls.js';
 import { languageDirection, legacyLanguageSettings, needsReplyTranslation } from '../core/language-settings.js';
 import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
 import { canSendWhileWorking, isChannelAwaitingReply, isDeliverySubmitted } from '../core/contracts.js';
+import { fencedOutput } from './output-fence.js';
 window.addEventListener('hashchange', () => window.location.reload());
 const token = new URLSearchParams(location.hash.slice(1)).get('capability');
 const headers = token ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { 'content-type': 'application/json' };
@@ -84,7 +85,7 @@ function SessionWorkspace({ initial, record, entry, onRun, composerInsert, onCom
   const setComposerText = (value: React.SetStateAction<string>) => workspace.update(data => { data.composer = typeof value === 'function' ? value(data.composer) : value; });
   // Send output from a terminal: appended to the composer as a fenced block; nothing is sent until the user does.
   const appliedInsert = useRef<number | undefined>(undefined);
-  useEffect(() => { if (!composerInsert || appliedInsert.current === composerInsert.nonce) return; appliedInsert.current = composerInsert.nonce; setComposerText(v => (v.trim() ? v.replace(/\s*$/, '') + '\n\n' : '') + '```text\n' + composerInsert.text.replace(/\s+$/, '') + '\n```\n'); onComposerInserted(); }, [composerInsert?.nonce]);
+  useEffect(() => { if (!composerInsert || appliedInsert.current === composerInsert.nonce) return; appliedInsert.current = composerInsert.nonce; setComposerText(v => (v.trim() ? v.replace(/\s*$/, '') + '\n\n' : '') + fencedOutput(composerInsert.text.replace(/\s+$/, ''))); onComposerInserted(); }, [composerInsert?.nonce]);
   useEffect(() => {
     let active = true;
     void Promise.all(data.attachmentIds.map(id => client.fileMetadata(id).catch(() => ({ id, name: 'Unavailable reference', mime: '', size: 0, status: 'File unavailable or unreadable' })))).then(next => { if (active) setImages(next); });
@@ -501,6 +502,10 @@ function App() {
   };
   // A selected terminal that ended falls back to its folder's first open session.
   useEffect(() => { if (selectedTerminal && catalog && awaitedTerminal.current !== selectedTerminal && !terminals.some(t => t.launchId === selectedTerminal)) leaveTerminal(shownTerminalFolder.current); }, [catalog?.sequence]);
+  // A terminal popup whose shell exited closes the same way; agent-session popups are left alone.
+  const awaitedPopup = useRef<string | undefined>(undefined);
+  if (launchTerminal?.terminal && awaitedPopup.current === launchTerminal.launchId && terminals.some(t => t.launchId === launchTerminal.launchId)) awaitedPopup.current = undefined;
+  useEffect(() => { if (launchTerminal?.terminal && catalog && awaitedPopup.current !== launchTerminal.launchId && !terminals.some(t => t.launchId === launchTerminal.launchId)) setLaunchTerminal(null); }, [catalog?.sequence, launchTerminal?.launchId]);
   const [endingTerminal, setEndingTerminal] = useState<TerminalEntry | null>(null);
   const [composerInsert, setComposerInsert] = useState<{ sessionId: string; text: string; nonce: number } | null>(null);
   // One-off status for a terminal (Run could not type the command); replaced the next time a terminal is shown.
@@ -510,7 +515,7 @@ function App() {
     const entry = 'key' in t ? t : terminals.find(x => x.launchId === t.launchId);
     setTerminalNotice(notice ? { launchId: t.launchId, text: notice } : null);
     if (view === 'workspace') { setLaunchTerminal(null); if (!entry) awaitedTerminal.current = t.launchId; setSelectedTerminal(t.launchId); setFolderKey(t.folder); }
-    else { if (selectedTerminal === t.launchId) setSelectedTerminal(''); setLaunchTerminal({ launchId: t.launchId, title: terminalTitle(entry ?? t), terminal: true }); }
+    else { if (selectedTerminal === t.launchId) setSelectedTerminal(''); awaitedPopup.current = entry ? undefined : t.launchId; setLaunchTerminal({ launchId: t.launchId, title: terminalTitle(entry ?? t), terminal: true }); }
   };
   // Send output (and Shrink): the origin session if still open, else the folder's last shown session, else its first open one.
   const outputTarget = (t: TerminalEntry) => { const folder = folders.find(f => f.key === t.folder); const open = folder?.open.filter(e => e.sessionId && e.availability !== 'unavailable') ?? []; const origin = t.originSessionId ? open.find(e => e.sessionId === t.originSessionId) : undefined; const last = displayPrefs.lastByFolder[t.folder]; return origin ?? open.find(e => e.sessionId === last) ?? open[0]; };
@@ -533,7 +538,7 @@ function App() {
   const runFromSession = async (record: SessionRecord, command: string) => {
     const result = await runCommand(record.worktreePath ?? record.target.projectId, command, record.id);
     const t = terminals.find(x => x.launchId === result.launch.id);
-    showTerminal(t ?? { launchId: result.launch.id, title: result.launch.title ?? 'Terminal', projectName: record.projectName, folder: result.launch.folder }, terminalView, result.typed ? undefined : 'Terminal is not ready, paste the command yourself');
+    showTerminal(t ?? { launchId: result.launch.id, title: result.launch.title ?? 'Terminal', projectName: record.projectName, folder: result.launch.folder }, terminalView, result.typed ? undefined : 'The terminal may not have been ready. Check whether the command ran before running it again.');
   };
   const projectNameFor = (folder: string) => tree.find(p => p.folders.some(f => f.key === folder))?.name ?? folder.split('/').filter(Boolean).at(-1) ?? folder;
   const approvalToasts = popupMode === 'auto' ? allEntries.filter(e => e.launchId && e.activity === 'approval-required' && e.sessionId && e.sessionId !== selected && !dismissedToasts.includes(e.launchId)) : [];

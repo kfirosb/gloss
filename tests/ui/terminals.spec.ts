@@ -7,7 +7,9 @@ const terminal = (over: Record<string, unknown> = {}) => ({ key: 'terminal:T1', 
 async function withSession(page: Page, terminals: unknown[], terminalView = 'popup', opts: { typed?: boolean; output?: string; entries?: unknown[] } = {}) {
   const snap = { ...basicSnapshot(), id: 'S-panel', target: sessionEntry.target, codingMessages: [{ sourceId: 'm', revision: 1, role: 'assistant', text: markdown, translatedText: markdown, translationStatus: 'complete', complete: true }] };
   await mockSession(page, () => snap);
-  const catalog = { epoch: 'e', sequence: 1, discovery: { state: 'healthy' }, entries: opts.entries ?? [sessionEntry], terminals };
+  let catalog = { epoch: 'e', sequence: 1, discovery: { state: 'healthy' }, entries: opts.entries ?? [sessionEntry], terminals };
+  // Later catalogs reach the page when the events stream reconnects (it ends after each frame here).
+  const setTerminals = (next: unknown[]) => { catalog = { ...catalog, sequence: catalog.sequence + 1, terminals: next }; };
   await page.unroute('**/api/session-catalog**');
   await page.route('**/api/session-catalog', r => r.fulfill({ json: catalog }));
   await page.route('**/api/session-catalog/events', r => r.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify(catalog) + '\n\n' }));
@@ -19,7 +21,7 @@ async function withSession(page: Page, terminals: unknown[], terminalView = 'pop
   const received: any[] = [];
   await page.routeWebSocket(/\/api\/launches\/T1\/terminal\?ticket=tk/, ws => { ws.send(opts.output ?? 'project ❯ '); ws.onMessage(m => { received.push(JSON.parse(String(m))); }); });
   await page.route('**/events', r => r.request().url().includes('session-catalog') ? r.fallback() : r.fulfill({ contentType: 'text/event-stream', body: '' }));
-  return { runs, puts, received };
+  return { runs, puts, received, setTerminals };
 }
 
 test('Run appears only on shell blocks and opens the terminal popup with the typed command', async ({ page }) => {
@@ -94,16 +96,26 @@ test('Send output to Claude inserts exactly one fenced block in the composer', a
   expect(((await composer.inputValue()).match(/```text/g) ?? []).length).toBe(1);
 });
 test('Run shows the not-ready notice in the popup', async ({ page }) => {
-  const notice = 'Terminal is not ready, paste the command yourself';
+  const notice = 'The terminal may not have been ready. Check whether the command ran before running it again.';
   await withSession(page, [], 'popup', { typed: false });
   await page.goto('/#capability=test');
   await page.getByRole('button', { name: 'Run: npm test' }).click();
   await expect(page.getByRole('dialog', { name: /Terminal:/ }).getByText(notice)).toBeVisible();
 });
 test('Run shows the not-ready notice in the workspace status line', async ({ page }) => {
-  const notice = 'Terminal is not ready, paste the command yourself';
+  const notice = 'The terminal may not have been ready. Check whether the command ran before running it again.';
   await withSession(page, [terminal()], 'workspace', { typed: false }); // the run reuses the idle terminal already in the catalog
   await page.goto('/#capability=test');
   await page.getByRole('button', { name: 'Run: npm test' }).click();
   await expect(page.locator('.terminal-workspace').getByText(notice)).toBeVisible();
+});
+test('a terminal popup closes when its shell exits', async ({ page }) => {
+  const { setTerminals } = await withSession(page, [terminal()]);
+  await page.goto('/#capability=test');
+  await page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ }).click();
+  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
+  await expect(dialog).toBeVisible();
+  setTerminals([]);
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('tablist', { name: 'Sessions in project' }).getByRole('tab', { name: /Terminal/ })).toHaveCount(0);
 });
