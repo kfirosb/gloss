@@ -2,7 +2,7 @@
 
 Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
 
-As of 2026-10-14, version 0.6.0 is installed and in use. Its source is tagged `v0.6.0` at `9f6c9a8` on branch `release/0.6.0`; it includes local `main` through `dcf2737` (0.5.1). While it was being released, `main` gained the unreleased attention-cues work (schema 23), so the release was merged into `main` with merge commit `fce1c3d`; `main` therefore holds 0.6.0 plus that unreleased work, and the next release should get a new version. The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/Gloss-backups/2026-10-14-before-0.6.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
+As of 2026-10-14, version 0.7.0 is installed and in use. Its source is tagged `v0.7.0` at `4fd47cd` on branch `release/0.7.0`; it includes local `main` through `c1501e2` (0.6.0 with the attention-cues work), so `main` was fast-forwarded to it and holds exactly 0.7.0 plus this note. 0.7.0 adds schema 24 (`language_spend`). The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/.language-assistant-backups/2026-10-14-before-0.7.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
 
 ## 1. Establish the source and protect current work
 
