@@ -52,6 +52,15 @@ it('reports the session\'s provider usage, spend per scope and model on the sess
   report = await (await request('sessions/A/usage')).json();
   expect(report.spend.session).toMatchObject({ inputTokens: 1_000_030, outputTokens: 4 });
   expect(report.spend.session.usd).toBeCloseTo(4.0002, 10);
+});
+it('prices all Codex tokens when the popover is read, including tokens recorded before a price was known', async () => {
+  const { request, usage } = await setup();
+  usage.observer.spend({ provider: 'codex', model: 'unpriced-model', scope: 'A', spend: { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, outputTokens: 0 } });
+  usage.observer.spend({ provider: 'codex', model: 'gpt-5.6-sol', scope: 'A', spend: { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000 } });
+  const report = await (await request('sessions/A/usage')).json();
+  // 1M fresh × $4 + 1M cached × $0.40 + 0.1M output × $20, all at the session model's rate.
+  expect(report.spend.session.usd).toBeCloseTo(6.4, 10);
+  expect(report.spend.allTime.usd).toBeCloseTo(6.4, 10);
   expect(report.prices).toEqual({ input: 4, cachedInput: 0.4, output: 20, asOf: '2026-10-14' });
 });
 it('publishes usage in the session catalog, including observations from the live agent', async () => {

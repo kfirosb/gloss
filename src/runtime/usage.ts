@@ -26,18 +26,16 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
   const now = options.now ?? Date.now;
   const store = options.store;
   const codexHome = options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
-  const read = (scope: string, provider: AgentKind) => store?.readSpend?.(scope, provider) ?? null;
+  const read = (scope: string, provider: AgentKind, model: string) => { const spend = store?.readSpend?.(scope, provider); return spend ? priceSpend(provider, model, spend) : null; };
   return {
     tracker,
     observer: {
       usage: usage => tracker.observe(usage),
-      spend: entry => {
-        const { cachedInputTokens: _cached, ...priced } = priceSpend(entry.provider, entry.model, entry.spend);
-        for (const scope of [`session:${entry.scope}`, dayKey(now()), 'all']) store?.addSpend?.(scope, entry.provider, priced);
-      },
+      // Codex tokens are stored unpriced and priced when read, so every total uses one dated rate.
+      spend: entry => { for (const scope of [`session:${entry.scope}`, dayKey(now()), 'all']) store?.addSpend?.(scope, entry.provider, entry.spend); },
     },
     report(sessionId, provider, model) {
-      return { provider, model, usage: tracker.snapshot()[provider] ?? null, spend: { session: read(`session:${sessionId}`, provider), today: read(dayKey(now()), provider), allTime: read('all', provider) }, prices: pricesFor(provider, model) ?? null };
+      return { provider, model, usage: tracker.snapshot()[provider] ?? null, spend: { session: read(`session:${sessionId}`, provider, model), today: read(dayKey(now()), provider, model), allTime: read('all', provider, model) }, prices: pricesFor(provider, model) ?? null };
     },
     async refresh(provider, backends, signal) {
       if (provider === 'codex') { const usage = await readLatestCodexUsage(codexHome); if (usage) tracker.observe(usage); }

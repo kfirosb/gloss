@@ -167,7 +167,7 @@ const MIGRATIONS = [{
 ` }, { version: 19, sql: 'ALTER TABLE deliveries ADD COLUMN transport TEXT; ALTER TABLE deliveries ADD COLUMN channel_generation TEXT;' }, { version: 20, sql: `
   CREATE TABLE app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
   ALTER TABLE panel_sessions ADD COLUMN language_override_json TEXT;
-` }, { version: 21, sql: 'CREATE TABLE session_launches (id TEXT PRIMARY KEY, data_json TEXT NOT NULL);' }, { version: 22, sql: 'CREATE TABLE connected_folders (path TEXT PRIMARY KEY, project_key TEXT NOT NULL, kind TEXT NOT NULL, created_by_app INTEGER NOT NULL, connected_at INTEGER NOT NULL);' }, { version: 23, sql: 'CREATE TABLE IF NOT EXISTS language_spend (scope TEXT NOT NULL, provider TEXT NOT NULL, usd REAL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, PRIMARY KEY (scope, provider));' }] as const;
+` }, { version: 21, sql: 'CREATE TABLE session_launches (id TEXT PRIMARY KEY, data_json TEXT NOT NULL);' }, { version: 22, sql: 'CREATE TABLE connected_folders (path TEXT PRIMARY KEY, project_key TEXT NOT NULL, kind TEXT NOT NULL, created_by_app INTEGER NOT NULL, connected_at INTEGER NOT NULL);' }, { version: 23, sql: 'CREATE TABLE IF NOT EXISTS language_spend (scope TEXT NOT NULL, provider TEXT NOT NULL, usd REAL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, PRIMARY KEY (scope, provider));' }, { version: 24, sql: 'ALTER TABLE language_spend ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0;' }] as const;
 
 import {summaryCacheKey, type SummaryKey} from '../core/summary-contracts.js';
 import { orderAgentMessages } from '../core/contracts.js';
@@ -187,13 +187,13 @@ function validateLaunchSettings(value: unknown): LaunchSettings {
 }
 export class SqliteStore implements ConversationStore, SessionStore, FileReferenceStore, LanguageSettingsStore, LaunchStore, ConnectedFolderStore, SpendStore {
   addSpend(scope: string, provider: string, spend: Spend): void {
-    this.database.prepare(`INSERT INTO language_spend(scope, provider, usd, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(scope, provider) DO UPDATE SET usd = CASE WHEN excluded.usd IS NULL THEN usd ELSE coalesce(usd, 0) + excluded.usd END, input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`)
-      .run(scope, provider, spend.usd ?? null, spend.inputTokens, spend.outputTokens);
+    this.database.prepare(`INSERT INTO language_spend(scope, provider, usd, input_tokens, cached_input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(scope, provider) DO UPDATE SET usd = CASE WHEN excluded.usd IS NULL THEN usd ELSE coalesce(usd, 0) + excluded.usd END, input_tokens = input_tokens + excluded.input_tokens, cached_input_tokens = cached_input_tokens + excluded.cached_input_tokens, output_tokens = output_tokens + excluded.output_tokens`)
+      .run(scope, provider, spend.usd ?? null, spend.inputTokens, spend.cachedInputTokens ?? 0, spend.outputTokens);
   }
   readSpend(scope: string, provider: string): Spend | undefined {
-    const row = this.database.prepare('SELECT usd, input_tokens, output_tokens FROM language_spend WHERE scope = ? AND provider = ?').get(scope, provider) as Row | undefined;
-    return row ? { ...(row.usd === null ? {} : { usd: Number(row.usd) }), inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens) } : undefined;
+    const row = this.database.prepare('SELECT usd, input_tokens, cached_input_tokens, output_tokens FROM language_spend WHERE scope = ? AND provider = ?').get(scope, provider) as Row | undefined;
+    return row ? { ...(row.usd === null ? {} : { usd: Number(row.usd) }), inputTokens: Number(row.input_tokens), ...(Number(row.cached_input_tokens) ? { cachedInputTokens: Number(row.cached_input_tokens) } : {}), outputTokens: Number(row.output_tokens) } : undefined;
   }
   listConnectedFolders(): ConnectedFolder[] {
     return (this.database.prepare('SELECT * FROM connected_folders ORDER BY connected_at, path').all() as Row[]).map(r => ({ path: String(r.path), projectKey: String(r.project_key), kind: String(r.kind) as FolderKind, createdByApp: Number(r.created_by_app) === 1, connectedAt: Number(r.connected_at) }));
