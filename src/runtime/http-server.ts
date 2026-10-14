@@ -115,6 +115,10 @@ async function sessionRoute(app: Application, req: IncomingMessage, res: ServerR
     const body = await readBody(req);
     respond(res, 200, await app.writeWorkspace(id, body.expectedRevision, body.data)); return true;
   }
+  if (route === 'inventory' && req.method === 'GET' && app.inventory) {
+    res.setHeader('cache-control', 'no-store');
+    respond(res, 200, await app.inventory(id)); return true;
+  }
   const metadata = /^attachments\/([^/]+)\/metadata$/.exec(route);
   if (req.method === 'GET' && metadata) {
     if (!app.readImage) { respond(res, 501, { error: 'Attachments unavailable' }); return true; }

@@ -26,6 +26,8 @@ import type { SessionLauncher, LaunchSettings, LaunchStore } from './session-lau
 import type { TerminalBridge } from './terminal-bridge.js';
 import type { AttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
+import { createInventoryService, sessionInventoryRoot, type InventoryService } from './inventory-service.js';
+import type { Inventory } from '../agents/inventory.js';
 import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, type WorktreeInfo, type WorktreeInspection, type WorktreeService } from './worktrees.js';
 
 export interface ApplicationOptions {
@@ -38,6 +40,7 @@ export interface ApplicationOptions {
   /** Ends every live launch whose folder is `folder` (used before deleting a worktree). */
   endLaunchesInFolder?(folder: string): Promise<unknown>;
   worktrees?: WorktreeService;
+  inventory?: InventoryService;
 }
 export interface WorktreeListing { hasCommits: boolean; worktrees: WorktreeInfo[] }
 export interface WorktreeRemoval { removed: true; conversationsRemoved: number; skipped: number }
@@ -64,6 +67,8 @@ export interface Application {
   uploadImage?(input: { name: string; data: string }, sessionId?: string): Promise<ImageAttachment>;
   readonly files?: FileRegistry;
   readImage?(id: string, sessionId?: string): Promise<ImageAttachment>;
+  /** Skills and MCP servers the session's agent can use in its folder. Read-only. */
+  inventory?(sessionId: string): Promise<Inventory>;
   readonly capability: string;
   readonly launcher?: SessionLauncher;
   readonly terminals?: TerminalBridge;
@@ -113,6 +118,12 @@ export function createApplication(options: ApplicationOptions): Application {
   const readDefaults = (): LanguageSettings | undefined => settingsStore.readLanguageDefaults?.();
   const readOverride = (sessionId: string): LanguageOverride => settingsStore.readLanguageOverride?.(sessionId) ?? {};
   const worktrees = options.worktrees ?? createWorktreeService();
+  const inventoryService = options.inventory ?? createInventoryService();
+  const sessionRecord = (sessionId: string) => {
+    const record = options.store.listSessions().find(r => r.id === sessionId);
+    if (!record) throw Object.assign(new Error('Unknown session'), { code: 'not-found' });
+    return record;
+  };
   const files = createFileRegistry({store: options.store, nestedWorktrees: createNestedWorktreeLookup(worktrees), ...(options.attachmentRoot ? {attachmentRoot:options.attachmentRoot} : {})});
   const sessions = createSessionManager({ store: options.store, agents: options.agents, files,
     ...(settingsStore.readLanguageDefaults ? { languageSettings: (sessionId: string) => effectiveLanguageSettings(readDefaults()!, readOverride(sessionId)) } : {}),
@@ -185,6 +196,7 @@ export function createApplication(options: ApplicationOptions): Application {
   };
   return {
     capability: options.capability ?? randomUUID(), sessions, files, catalog,
+    async inventory(sessionId) { const record = sessionRecord(sessionId); return inventoryService.read(record.target.agent, sessionInventoryRoot(record)); },
     ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.terminals ? { terminals: options.terminals } : {}), ...(options.approveLaunchFolder ? { approveLaunchFolder: options.approveLaunchFolder } : {}),
     async removeSession(sessionId) {
       requireOpen(); sessions.snapshot(sessionId);

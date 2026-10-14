@@ -30,6 +30,7 @@ export class SessionClient {
  fileMetadata(id:string,signal?:AbortSignal) { return sessionRequest<SessionFileMetadata>(this.base+'/files/'+encodeURIComponent(id)+'/metadata',signal?{signal}:{}); }
  fileUrl(id:string) { return this.base+'/files/'+encodeURIComponent(id)+'/content'; }
  searchFiles(query:string,signal:AbortSignal) { return sessionRequest<{name:string;relativePath:string}[]>(this.base+'/files/search?q='+encodeURIComponent(query),{signal}); }
+ inventory(signal?:AbortSignal) { return sessionRequest<import('../agents/inventory.js').Inventory>(this.base+'/inventory',signal?{signal}:{}); }
  browseFiles(relativePath:string,offset:number,signal:AbortSignal) { return sessionRequest<BrowserPage>(this.base+'/files/browse?path='+encodeURIComponent(relativePath)+'&offset='+offset,{signal}); }
  reviewFile(path:string,mode:'summary'|'translation',version:string|undefined,signal:AbortSignal) { return sessionRequest<{path:string;mode:'summary'|'translation';text:string}>(this.base+'/files/review',{method:'POST',body:JSON.stringify({path,mode,version}),signal}); }
  previewFile(relativePath:string,signal:AbortSignal) { return sessionRequest<FilePreview>(this.base+'/files/preview?path='+encodeURIComponent(relativePath),{signal}); }
