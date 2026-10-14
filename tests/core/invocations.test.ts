@@ -57,3 +57,8 @@ it('matches the longest known name', () => {
   const both = catalogFrom([{ kind: 'skill', name: 'polish' }, { kind: 'skill', name: 'polish-ui' }]);
   expect(findInvocations('/polish-ui go', both)).toEqual({ skills: ['polish-ui'], mcp: [] });
 });
+
+it('leaves paths that share a picked name alone and keeps trailing punctuation', () => {
+  expect(assembleInstruction('claude', { skills: ['docs'], mcp: [] }, 'Update /docs.md using /docs.')).toBe('/docs Update /docs.md using.');
+  expect(assembleInstruction('claude', { skills: ['polish'], mcp: [] }, 'Use /polish: then go')).toBe('/polish Use: then go');
+});

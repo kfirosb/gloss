@@ -33,8 +33,9 @@ export function findInvocations(text: string, catalog: InvocationCatalog): Invoc
 
 /** Removes one token and closes only the gap it leaves. `sigils` lists the prefixes that count for this kind. */
 function strip(text: string, name: string, sigils: string): string {
-  const pattern = new RegExp(String.raw`(^|[ \t]+)‎?[${sigils}]${escape(name)}(?=$|[\s.,;:!?)])([ \t]*)`, 'gm');
-  return text.replace(pattern, (match: string, before: string, after: string, offset: number, whole: string) => {
+  const pattern = new RegExp(String.raw`(^|[ \t]+)‎?[${sigils}]${escape(name)}([.:-]*)(?=$|[\s,;!?)'"])([ \t]*)`, 'gm');
+  return text.replace(pattern, (match: string, before: string, punct: string, after: string, offset: number, whole: string) => {
+    if (punct) return punct + after;
     if (!before) return '';
     const next = whole[offset + match.length] ?? '';
     if (after && next && !/[\s.,;:!?)]/.test(next)) return ' ';

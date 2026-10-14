@@ -24,10 +24,15 @@ import { translateMessageResult } from './translations.js';
 import { assembleInstruction, findInvocations, type InvocationCatalog } from './invocations.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
 
+const INVOCATION_TIMEOUT_MS = 1500;
+const INVOCATION_CANDIDATE = /(^|\s)‎?[/$][A-Za-z]/;
+
 export interface WorkflowDependencies {
   files?: FileRegistry;
   /** Skill and MCP names the session's agent can use; when absent or failing, instructions are sent as written. */
   invocations?: () => Promise<InvocationCatalog>;
+  /** Longest wait for `invocations` at send time; defaults to 1500. */
+  invocationTimeoutMs?: number;
   readFileContext?: (files: FileReference[]) => Promise<NonNullable<LanguageInput['fileContext']>>;
   conversationId: string;
   language: string;
@@ -809,9 +814,14 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const deliveryConnection = connection;
       const attachments = draft.attachments?.length ? await resolveReferences(draft.attachments) : [];
       let englishText = draft.englishText;
-      if (deps.invocations) {
-        try { englishText = assembleInstruction(draft.target.agent, findInvocations(draft.localizedText, await deps.invocations()), englishText); }
-        catch { /* Inventory unavailable: deliver the reviewed instruction as written. */ }
+      if (deps.invocations && INVOCATION_CANDIDATE.test(draft.localizedText)) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Inventory timed out')), deps.invocationTimeoutMs ?? INVOCATION_TIMEOUT_MS); });
+          englishText = assembleInstruction(draft.target.agent, findInvocations(draft.localizedText, await Promise.race([deps.invocations(), timeout])), englishText);
+        }
+        catch { /* Inventory unavailable or slow: deliver the reviewed instruction as written. */ }
+        finally { clearTimeout(timer); }
       }
       requireOpen();
       if (connection !== deliveryConnection || !state.target || !sameTarget(draft.target,state.target)) throw new Error('Target changed');

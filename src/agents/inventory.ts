@@ -24,13 +24,13 @@ const oneLine = (text: string) => {
 const missing = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '');
 
 /** Reads `name` and `description` from YAML frontmatter; supports plain, quoted and folded (`>`/`|`) scalars. */
-export function parseFrontmatter(text: string): { name?: string; description?: string } {
+export function parseFrontmatter(text: string): { name?: string; description?: string; userInvocable?: boolean } {
   const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!block) return {};
   const lines = block[1]!.split(/\r?\n/);
-  const out: { name?: string; description?: string } = {};
+  const out: { name?: string; description?: string; userInvocable?: boolean } = {};
   for (let i = 0; i < lines.length; i++) {
-    const field = /^(name|description):\s*(.*)$/.exec(lines[i]!);
+    const field = /^(name|description|user-invocable):\s*(.*)$/.exec(lines[i]!);
     if (!field) continue;
     let value = field[2]!.trim();
     if (/^[>|][-+]?$/.test(value)) {
@@ -39,7 +39,8 @@ export function parseFrontmatter(text: string): { name?: string; description?: s
       value = parts.join(' ');
     }
     value = value.replace(/^(['"])(.*)\1$/, '$2').trim();
-    if (value) out[field[1] as 'name' | 'description'] = value;
+    if (field[1] === 'user-invocable') { if (/^(true|false)$/i.test(value)) out.userInvocable = value.toLowerCase() === 'true'; }
+    else if (value) out[field[1] as 'name' | 'description'] = value;
   }
   return out;
 }
@@ -66,6 +67,7 @@ export async function readSkillDir(dir: string, scope: InventoryScope, ctx: Inve
     let text: string;
     try { text = await readHead(join(dir, item.name, 'SKILL.md'), FRONTMATTER_BYTES); } catch { continue; }
     const meta = parseFrontmatter(text);
+    if (meta.userInvocable === false) continue;
     const base = meta.name && TOKEN_NAME.test(meta.name) ? meta.name : item.name;
     const name = plugin ? `${plugin}:${base}` : base;
     if (!TOKEN_NAME.test(name)) continue;
@@ -99,7 +101,7 @@ export function mcpEntries(map: unknown, scope: InventoryScope, plugin?: string)
     const transport = server.type === 'http' || server.type === 'sse' ? server.type : url ? 'http' : 'stdio';
     let target: string | undefined;
     if (url) { try { target = new URL(url).origin; } catch { target = undefined; } }
-    else if (typeof server.command === 'string' && server.command) target = basename(server.command);
+    else if (typeof server.command === 'string' && server.command) target = basename(server.command.trim().split(/\s+/)[0]!);
     entries.push({ kind: 'mcp', name, scope, transport, ...(target ? { target } : {}), ...(plugin ? { plugin } : {}) });
   }
   return entries;

@@ -81,3 +81,17 @@ it('keeps the project entry over plugin and global ones and sorts the result', (
   expect(mergeEntries([e('b', 'global'), e('a', 'global'), e('a', 'project'), e('x', 'plugin', 'mcp'), e('x', 'global', 'mcp'), e('a', 'global', 'mcp')]))
     .toEqual([e('a', 'global', 'mcp'), e('x', 'plugin', 'mcp'), e('a', 'project'), e('b', 'global')]);
 });
+
+it('drops arguments from a command that holds a whole command line', () => {
+  const entries = mcpEntries({ risky: { command: 'npx -y @x/pkg --token=abc' } }, 'global');
+  expect(entries[0]!.target).toBe('npx');
+  expect(JSON.stringify(entries)).not.toContain('abc');
+});
+
+it('skips skills that are not user-invocable', async () => {
+  const home = await temp(); const dir = join(home, 'skills');
+  await skill(dir, 'shown', '---\nname: shown\nuser-invocable: true\n---\n');
+  await skill(dir, 'hidden', '---\nname: hidden\nuser-invocable: false\n---\n');
+  expect((await readSkillDir(dir, 'global', { home, problems: [] })).map(e => e.name)).toEqual(['shown']);
+  expect(parseFrontmatter('---\nname: x\nuser-invocable: false\n---\n')).toEqual({ name: 'x', userInvocable: false });
+});

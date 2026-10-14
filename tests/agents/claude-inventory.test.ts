@@ -71,3 +71,35 @@ it('lets project settings enable a plugin and reports a broken .mcp.json', async
   expect(inventory.entries.map(e => e.name)).toContain('impeccable:polish');
   expect(inventory.problems).toEqual(['Could not parse ~/work/app/.mcp.json']);
 });
+
+async function pluginFixture(manifest: Record<string, unknown>) {
+  const home = await temp(); const project = join(home, 'work', 'app'); const configDir = join(home, '.claude');
+  const root = join(configDir, 'plugins', 'cache', 'm', 'widgets', '1.0.0');
+  await write(join(root, '.claude-plugin', 'plugin.json'), { name: 'widgets', ...manifest });
+  await write(join(configDir, 'settings.json'), { enabledPlugins: { 'widgets@m': true } });
+  await write(join(configDir, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'widgets@m': [{ scope: 'user', installPath: root }] } });
+  vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+  return { home, project, root };
+}
+
+it('reads plugin skills from a manifest skills path given as a string', async () => {
+  const { home, project, root } = await pluginFixture({ skills: './.claude/skills' });
+  await skill(join(root, '.claude', 'skills'), 'gadget');
+  const inventory = await readClaudeInventory({ project, home });
+  expect(inventory.entries).toEqual([{ kind: 'skill', name: 'widgets:gadget', description: 'About gadget', scope: 'plugin', plugin: 'widgets' }]);
+});
+
+it('reads plugin skills from a manifest skills array and still reads skills/', async () => {
+  const { home, project, root } = await pluginFixture({ skills: ['./a', './b'] });
+  await skill(join(root, 'a'), 'one'); await skill(join(root, 'b'), 'two'); await skill(join(root, 'skills'), 'default');
+  const inventory = await readClaudeInventory({ project, home });
+  expect(inventory.entries.map(e => e.name).sort()).toEqual(['widgets:default', 'widgets:one', 'widgets:two']);
+});
+
+it('ignores a manifest skills path outside the plugin', async () => {
+  const { home, project, root } = await pluginFixture({ skills: '../outside' });
+  await skill(join(root, '..', 'outside'), 'leak');
+  const inventory = await readClaudeInventory({ project, home });
+  expect(inventory.entries).toEqual([]);
+  expect(inventory.problems).toContain('Ignored a skills path outside plugin widgets');
+});

@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { mcpEntries, mergeEntries, readJsonConfig, readSkillDir, type Inventory, type InventoryContext, type InventoryEntry } from '../inventory.js';
 
 const CHANNEL_SERVER = 'language-assistant';
@@ -25,10 +25,17 @@ async function enabledPlugins(configDir: string, project: string, ctx: Inventory
 }
 
 async function pluginEntries(plugin: { name: string; installPath: string }, ctx: InventoryContext): Promise<InventoryEntry[]> {
-  const entries = await readSkillDir(join(plugin.installPath, 'skills'), 'plugin', ctx, plugin.name);
+  const manifest = await readJsonConfig(join(plugin.installPath, '.claude-plugin', 'plugin.json'), ctx);
+  const declared = typeof manifest?.skills === 'string' ? [manifest.skills] : Array.isArray(manifest?.skills) ? manifest.skills.filter((p): p is string => typeof p === 'string') : [];
+  const dirs = new Set([resolve(plugin.installPath, 'skills')]);
+  for (const path of declared) {
+    const dir = resolve(plugin.installPath, path); const rel = relative(plugin.installPath, dir);
+    if (rel.startsWith('..') || isAbsolute(rel)) ctx.problems.push(`Ignored a skills path outside plugin ${plugin.name}`); else dirs.add(dir);
+  }
+  const entries: InventoryEntry[] = [];
+  for (const dir of dirs) entries.push(...await readSkillDir(dir, 'plugin', ctx, plugin.name));
   const file = await readJsonConfig(join(plugin.installPath, '.mcp.json'), ctx);
   if (file) entries.push(...mcpEntries(isObject(file.mcpServers) ? file.mcpServers : file, 'plugin', plugin.name));
-  const manifest = await readJsonConfig(join(plugin.installPath, '.claude-plugin', 'plugin.json'), ctx);
   if (isObject(manifest?.mcpServers)) entries.push(...mcpEntries(manifest.mcpServers, 'plugin', plugin.name));
   return entries;
 }
