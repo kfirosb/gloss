@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { preparationPrompt, summaryPrompt } from '../../src/language/prompts.js';
+import { preparationPrompt, summaryPrompt, translationPrompt } from '../../src/language/prompts.js';
 import { SUMMARY_PROMPT_VERSION } from '../../src/core/response-summaries.js';
 import type { LanguageInput } from '../../src/core/contracts.js';
 
@@ -20,4 +20,10 @@ describe('language prompts', () => {
     const def = preparationPrompt(input());
     expect(def).toContain('deliveryLanguage (English when absent)'); expect(def).not.toContain('"deliveryLanguage"');
   });
+});
+
+it('tells the translator to keep every placeholder exactly once', () => {
+  const prompt = translationPrompt('Run ⟪LITERAL_0⟫ now.', 'he');
+  expect(prompt).toMatch(/placeholder/i);
+  expect(prompt).toContain('exactly once');
 });

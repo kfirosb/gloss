@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { translateMessage } from '../../src/core/translations.js';
+import { translateMessage, translateMessageResult } from '../../src/core/translations.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
 import { MemoryConversationStore } from '../helpers/memory-store.js';
 
@@ -125,4 +125,51 @@ it('keeps English product terminology intact while translating surrounding prose
   expect(translated).toContain('\u05d1\u05e7\u05e8\u05d9 \u05d2\u05d5\u05d3\u05dc \u05e2\u05d1\u05d5\u05e8 Queue');
   for (const term of ['Live Conversation', 'Language Assistant', 'Markdown', 'code blocks', 'Copy code', 'layout', 'refresh']) expect(translated).toContain(term);
   expect(translated).not.toContain('WRONG');
+});
+
+describe('translation placeholders', () => {
+  const request = (text: string, sourceId = 'm') => ({ sourceScope: 'p/s', sourceId, sourceRevision: 1, text, complete: true, language: 'he', model: 'm1', promptVersion: 'v1' });
+  const markers = (text: string) => text.match(/⟪LITERAL_\d+⟫/g) ?? [];
+
+  it('translates a reply that itself quotes placeholder text (regression: replies about the marker bug always failed)', async () => {
+    const store = new MemoryConversationStore(); const session = new FakeLanguageSession();
+    session.translateTransform = text => text.replace('The translation instructions mention special markers to preserve', 'הוראות התרגום מזכירות סמנים מיוחדים');
+    const original = 'The translation instructions mention special markers to preserve (`⟪LITERAL_0⟫` etc.). A bare ⟪LITERAL_1⟫ too, and `npm test`.';
+    const result = await translateMessageResult(request(original), { store, session });
+    expect(result.status).toBe('complete');
+    expect(result.text).toContain('הוראות התרגום מזכירות סמנים מיוחדים');
+    for (const literal of ['`⟪LITERAL_0⟫`', '⟪LITERAL_1⟫', '`npm test`']) expect(result.text).toContain(literal);
+  });
+
+  it('retries once when the model drops a placeholder, and uses the second translation', async () => {
+    const store = new MemoryConversationStore(); const session = new FakeLanguageSession();
+    let calls = 0;
+    session.translateTransform = text => { calls++; const [first] = markers(text); return calls === 1 ? 'תרגום ' + text.replace(first!, '') : 'תרגום ' + text; };
+    const result = await translateMessageResult(request('Then `$` it is: `/` opens skills and `$` opens MCP.'), { store, session });
+    expect(result).toEqual({ status: 'complete', text: 'תרגום Then `$` it is: `/` opens skills and `$` opens MCP.' });
+    expect(session.translated).toHaveLength(2);
+  });
+
+  it('gives up after the retry and keeps the original', async () => {
+    const store = new MemoryConversationStore(); const session = new FakeLanguageSession();
+    session.translateTransform = text => text.replace(markers(text)[0]!, '');
+    const original = 'Run `npm test` and `npm run build`.';
+    expect(await translateMessageResult(request(original), { store, session })).toEqual({ status: 'error', text: original });
+    expect(session.translated).toHaveLength(2);
+  });
+
+  it('rejects a duplicated or invented placeholder', async () => {
+    const store = new MemoryConversationStore(); const session = new FakeLanguageSession();
+    session.translateTransform = text => text + ' ' + markers(text)[0];
+    expect((await translateMessageResult(request('Run `npm test`.', 'dup'), { store, session })).status).toBe('error');
+    session.translateTransform = text => text + ' ⟪LITERAL_9⟫';
+    expect((await translateMessageResult(request('Run `npm test`.', 'invented'), { store, session })).status).toBe('error');
+  });
+
+  it('does not retry when the session itself fails', async () => {
+    const store = new MemoryConversationStore(); const session = new FakeLanguageSession();
+    session.translationError = new Error('offline');
+    expect((await translateMessageResult(request('Run `npm test`.'), { store, session })).status).toBe('error');
+    expect(session.translated).toHaveLength(1);
+  });
 });

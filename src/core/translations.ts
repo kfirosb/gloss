@@ -20,7 +20,8 @@ interface TranslationDependencies {
   session: LanguageSession;
 }
 
-const literalPattern = /```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s)\]}>,]+|(["'])(?=(?:[A-Za-z]:\\|\\\\|\.\.?\/|\/|(?:[\w.-]+\/)+))[^"'\r\n]+\1|(?:[A-Za-z]:\\|\\\\)(?:[^\\\r\n]+?\\)*?[^\\\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:\.\.?\/|\/)(?:[^/\r\n]+?\/)*?[^/\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:[A-Za-z]:\\|\\\\)[\w@%+.,~#=\\-]+|(?:\.\.?\/|\/|(?:[\w.-]+\/)+)(?:\\ |[\w@%+.,~#=\\\-/])+/g;
+// Placeholder-shaped text already in the message is protected like any literal, so every placeholder the model sees is ours.
+const literalPattern = /⟪LITERAL_\d+⟫|```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s)\]}>,]+|(["'])(?=(?:[A-Za-z]:\\|\\\\|\.\.?\/|\/|(?:[\w.-]+\/)+))[^"'\r\n]+\1|(?:[A-Za-z]:\\|\\\\)(?:[^\\\r\n]+?\\)*?[^\\\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:\.\.?\/|\/)(?:[^/\r\n]+?\/)*?[^/\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:[A-Za-z]:\\|\\\\)[\w@%+.,~#=\\-]+|(?:\.\.?\/|\/|(?:[\w.-]+\/)+)(?:\\ |[\w@%+.,~#=\\\-/])+/g;
 
 const protectLiterals = (text: string, language: string) => {
   const pattern = isHebrew(language) ? new RegExp(literalPattern.source + '|\\b(?:' + englishProductTerms.join('|') + ')\\b', 'g') : literalPattern;
@@ -35,15 +36,16 @@ const protectLiterals = (text: string, language: string) => {
   };
 };
 
+/** One pass, so restored literals are never rescanned; each placeholder must appear exactly once and none may be invented. */
 const restoreLiterals = (translated: string, literals: string[]): string | undefined => {
-  let restored = translated;
-  for (let index = 0; index < literals.length; index += 1) {
-    const marker = `⟪LITERAL_${index}⟫`;
-    if (restored.split(marker).length !== 2) return undefined;
-    restored = restored.replace(marker, literals[index]!);
-  }
-  if (/⟪LITERAL_\d+⟫/.test(restored)) return undefined;
-  return restored;
+  const seen = new Array<number>(literals.length).fill(0); let invalid = false;
+  const restored = translated.replace(/⟪LITERAL_(\d+)⟫/g, (marker, index: string) => {
+    const at = Number(index);
+    if (at >= literals.length) { invalid = true; return marker; }
+    seen[at]!++;
+    return literals[at]!;
+  });
+  return invalid || seen.some(count => count !== 1) ? undefined : restored;
 };
 
 export const translationContentHash = (text: string) =>
@@ -71,12 +73,14 @@ export async function translateMessageResult(
 
   const protectedText = protectLiterals(request.text, request.language);
   try {
-    const translated = await session.translate(
+    const attempt = async () => restoreLiterals(await session.translate(
       protectedText.text,
       request.promptLanguage ?? request.language,
       request.signal ?? new AbortController().signal,
-    );
-    const restored = restoreLiterals(translated, protectedText.literals);
+    ), protectedText.literals);
+    // A model occasionally drops a placeholder in long, code-heavy replies; one more try usually keeps them all.
+    let restored = await attempt();
+    if (restored === undefined && !request.signal?.aborted) restored = await attempt();
     if (restored === undefined || request.signal?.aborted) return { status: 'error', text: request.text };
     store.putTranslation(key, restored);
     return { status: 'complete', text: restored };
