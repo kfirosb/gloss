@@ -78,3 +78,10 @@ test('an insertion scrolls the composer to the end, and a pending stop shows a m
   await expect.poll(() => stops.length).toBe(1);
   await expect(page.locator('.dictation-control .dictation-status', { hasText: '…' })).toBeVisible();
 });
+test('the recording clock advances once a second while recording', async ({ page }) => {
+  await recordingFixture(page, false);
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  const clock = page.locator('.dictation-elapsed');
+  await expect(clock).toHaveText('00:00');
+  await expect(clock).toHaveText('00:01', { timeout: 2500 });
+});
