@@ -63,3 +63,31 @@ it('reports an unreadable config.toml and still lists skills', async () => {
   expect(inventory.entries.map(e => e.name)).toEqual(['kept']);
   expect(inventory.problems).toEqual(['Could not fully read MCP servers in ~/codex-home/config.toml']);
 });
+
+it('keeps a later command after a multi-line array in the same table', () => {
+  expect(parseCodexMcpServers('[mcp_servers.a]\nargs = [\n "x",\n ["y"]\n]\ncommand = "late"')).toEqual({ ok: true, servers: { a: { command: 'late' } } });
+});
+
+it('reports multi-line strings for mcp_servers commands as unreadable', () => {
+  expect(parseCodexMcpServers('[mcp_servers.x]\ncommand = """multi\nline"""').ok).toBe(false);
+  expect(parseCodexMcpServers("[mcp_servers.x]\ncommand = '''multi\nline'''").ok).toBe(false);
+});
+
+it('reports an unclosed header as unreadable and reads a quoted mcp_servers root only when the whole key is parsed', () => {
+  expect(parseCodexMcpServers('[mcp_servers.x\ncommand = "npx"').ok).toBe(false);
+  expect(parseCodexMcpServers('["mcp_servers"].x\ncommand = "npx"').ok).toBe(false);
+  expect(parseCodexMcpServers('[ "mcp_servers" .x ]\ncommand = "npx"')).toEqual({ ok: true, servers: { x: { command: 'npx' } } });
+});
+
+it('parses a realistic config with hook state and nested tool tables', () => {
+  const toml = [
+    '[hooks.state."/Users/x/.codex/hooks.json:session_end:0:0"]',
+    'trusted_hash = "sha256:..."',
+    '[mcp_servers.playwright]',
+    'command = "npx"',
+    'args = ["-y", "@playwright/mcp@latest", "--extension"]',
+    '[mcp_servers.playwright.tools.browser_fill_form]',
+    'approval_mode = "approve"',
+  ].join('\n');
+  expect(parseCodexMcpServers(toml)).toEqual({ ok: true, servers: { playwright: { command: 'npx' } } });
+});

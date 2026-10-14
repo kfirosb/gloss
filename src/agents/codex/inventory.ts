@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { displayPath, MAX_CONFIG_BYTES, mcpEntries, mergeEntries, readSkillDir, type Inventory, type InventoryContext, type InventoryEntry, type InventoryScope } from '../inventory.js';
 
 type Server = { command?: string; url?: string };
+type Triple = '"""' | "'''";
 const STRING = String.raw`"((?:[^"\\]|\\.)*)"|'([^']*)'`;
 const unescape = (value: string) => value.replace(/\\(["\\])/g, '$1');
 
@@ -28,6 +29,37 @@ function stringValue(source: string, key: 'command' | 'url'): string | undefined
 }
 
 /**
+ * Brackets opened minus closed on one line, outside quoted strings and comments.
+ * `open` is set when a multi-line string starts on this line and does not close on it.
+ */
+function scanValue(line: string): { depth: number; open: Triple | null } {
+  let depth = 0;
+  let i = 0;
+  while (i < line.length) {
+    const triple = (['"""', "'''"] as const).find(t => line.startsWith(t, i));
+    if (triple) {
+      const end = line.indexOf(triple, i + 3);
+      if (end < 0) return { depth, open: triple };
+      i = end + 3;
+      continue;
+    }
+    const c = line[i]!;
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== c) j += c === '"' && line[j] === '\\' ? 2 : 1;
+      if (j >= line.length) break;
+      i = j + 1;
+      continue;
+    }
+    if (c === '#') break;
+    if (c === '[' || c === '{') depth++;
+    else if (c === ']' || c === '}') depth--;
+    i++;
+  }
+  return { depth, open: null };
+}
+
+/**
  * Minimal reader for Codex `[mcp_servers.<name>]` tables and `[mcp_servers]` inline tables.
  * It keeps only `command` and `url`; anything it cannot read confidently sets `ok: false` instead of guessing.
  */
@@ -35,19 +67,41 @@ export function parseCodexMcpServers(text: string): { servers: Record<string, Se
   const servers: Record<string, Server> = {};
   let ok = true;
   let table: string[] | null = null;
+  let depth = 0; // brackets left open by a multi-line value
+  let multi: Triple | null = null; // multi-line string still open
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    if (line.startsWith('[[')) { table = null; continue; }
-    const header = /^\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
-    if (header) {
-      table = headerKeys(header[1]!);
-      if (!table && header[1]!.trimStart().startsWith('mcp_servers')) ok = false;
-      if (table?.[0] === 'mcp_servers' && table.length === 2) servers[table[1]!] ??= {};
+    if (multi) { if (line.includes(multi)) multi = null; continue; }
+    if (depth > 0) {
+      const s = scanValue(line);
+      depth = Math.max(0, depth + s.depth);
+      if (s.open) { if (table?.[0] === 'mcp_servers') ok = false; multi = s.open; }
       continue;
     }
+    if (!line || line.startsWith('#')) continue;
+    if (/^("""|''')/.test(line)) {
+      if (table?.[0] === 'mcp_servers') ok = false;
+      multi = scanValue(line).open;
+      continue;
+    }
+    if (line.startsWith('[[')) {
+      if (!/^\[\[([^\]]+)\]\]\s*(?:#.*)?$/.test(line)) ok = false;
+      table = null;
+      continue;
+    }
+    if (line.startsWith('[')) {
+      const header = /^\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
+      table = header ? headerKeys(header[1]!) : null;
+      if (!table) { ok = false; continue; }
+      if (table[0] === 'mcp_servers' && table.length === 2) servers[table[1]!] ??= {};
+      continue;
+    }
+    const s = scanValue(line);
+    depth = Math.max(0, s.depth);
+    if (s.open) { if (table?.[0] === 'mcp_servers') ok = false; multi = s.open; continue; }
     if (!table || table[0] !== 'mcp_servers') continue;
     if (table.length === 2) {
+      if (/^(command|url)\s*=\s*("""|''')/.test(line)) { ok = false; continue; }
       const server = servers[table[1]!]!;
       const command = /^command\s*=/.test(line) ? stringValue(line, 'command') : undefined;
       const url = /^url\s*=/.test(line) ? stringValue(line, 'url') : undefined;
@@ -62,6 +116,7 @@ export function parseCodexMcpServers(text: string): { servers: Record<string, Se
       servers[name] = { ...(command !== undefined ? { command } : {}), ...(url !== undefined ? { url } : {}) };
     }
   }
+  if (depth > 0 || multi) ok = false;
   return { servers, ok };
 }
 
