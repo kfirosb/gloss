@@ -17,7 +17,7 @@ import { FileLinkContext, localFilePath } from './file-links.js';
 import { RichText } from './rich-text.js';
 import { SummarizableResponse } from './response-summary.js';
 import { ReadingPane } from './reading-pane.js';
-import { REFERENCE_MARK, SessionClient, sessionRequest, forgetFolder, type SessionEnvelope } from './session-client.js';
+import { REFERENCE_MARK, SessionClient, sessionRequest, markSessionSeen, forgetFolder, type SessionEnvelope } from './session-client.js';
 import { useWorkspace, workspaceFor } from './use-workspace.js';
 import { useSessionCatalog } from './use-session-catalog.js';
 import { SessionsSidebar as SessionSwitcher } from './sessions-sidebar.js';
@@ -44,8 +44,26 @@ function Message({ message, original, replyLanguage, assist, client, onTranslate
  const body = original ? <RichText language="auto" text={message.text} /> : <RichText language={status === 'complete' ? replyLanguage : 'auto'} text={status === 'complete' ? (message.translatedText ?? message.text) : status === 'error' ? 'Translation failed. Original available below.' : status === 'pending' || (status === undefined && !message.complete) ? 'Translating…' : message.text} />;
  return <article data-source-id={message.sourceId} data-sequence={message.revision} data-translation-status={original ? 'original' : status ?? 'none'} className={'message ' + message.role}><small>{message.role === 'assistant' ? (original ? 'Coding agent · original' : 'Coding agent · translated') : 'Coding agent · original user message'}</small><SummarizableResponse client={client} kind="coding" messageId={message.sourceId} text={message.text} complete={message.role==='assistant'&&message.complete===true} assist={assist}>{body}</SummarizableResponse>{!original && status === undefined && message.role === 'assistant' && message.complete && onTranslate && <button type="button" className="translate-one" onClick={onTranslate}>Translate</button>}{!original && <details><summary>Original</summary><pre dir="ltr">{message.text}</pre></details>}</article>;
 }
+// Keys already posted in this page; module-level so remounting the workspace (tab switches) never re-posts the same sequence.
+const postedSeen = new Set<string>();
+/** Marks the shown session seen once per response sequence, only while the page is visible and the window focused. Approval attention is cleared by the attention monitor, never here. */
+export function useMarkSeen(entry: CatalogEntry | undefined) {
+  const sessionId = entry?.sessionId; const attention = entry?.attention; const sequence = entry?.latestResponseSequence;
+  useEffect(() => {
+    if (!sessionId || attention !== 'response' || sequence === undefined) return;
+    const key = sessionId + ':' + sequence;
+    const attempt = () => {
+      if (postedSeen.has(key) || document.visibilityState !== 'visible' || !document.hasFocus()) return;
+      postedSeen.add(key);
+      void markSessionSeen(sessionId, sequence).catch(() => { postedSeen.delete(key); });
+    };
+    attempt();
+    window.addEventListener('focus', attempt); document.addEventListener('visibilitychange', attempt);
+    return () => { window.removeEventListener('focus', attempt); document.removeEventListener('visibilitychange', attempt); };
+  }, [sessionId, attention, sequence]);
+}
 function SessionWorkspace({ initial, record, entry }: { initial: SessionEnvelope; record: SessionRecord; entry?: CatalogEntry | undefined }) {
-  const client = useRef(new SessionClient(record.id)).current;
+  const client = useRef(new SessionClient(record.id)).current; useMarkSeen(entry);
   const isClaude = record.target.agent === 'claude';
   const channelStatus = useClaudeConnection(client, isClaude);
   const channelReady = !isClaude || channelStatus.state === 'connected';
