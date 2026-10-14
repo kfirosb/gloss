@@ -97,3 +97,26 @@ export function mergeSavedRecords(entries:CatalogEntry[],records:SessionRecord[]
   merged.push({key:'saved:'+record.id,sessionId:record.id,target:record.target,projectKey:sibling?.projectKey??record.projectKey??record.canonicalRoot,projectName:sibling?.projectName??record.projectName,...(record.sessionTitle?{sessionTitle:record.sessionTitle}:{}),...(record.branch?{branch:record.branch}:{}),...(record.worktreePath?{worktreePath:record.worktreePath}:{}),open:false,activity:record.enabled?'unknown':'disconnected',availability:record.enabled?'available':'unavailable',...(record.folderMissing||(sibling&&folderKeyFor(sibling)===folder&&sibling.folderMissing)?{folderMissing:true}:{})});}
  return merged;
 }
+export interface AttentionSummary {waiting:number;responses:number;approvals:number;working:boolean}
+const plural=(n:number,word:string)=>`${n} ${word}${n===1?'':'s'}`;
+/** Open sessions in the folder that need the user, counted per session, plus whether any is working. Saved sessions never count. */
+export function folderAttention(folder:FolderNode):AttentionSummary{
+ const summary:AttentionSummary={waiting:0,responses:0,approvals:0,working:false};
+ for(const entry of folder.open){
+  if(entry.attention==='response'){summary.waiting++;summary.responses++;}
+  else if(entry.attention==='approval'){summary.waiting++;summary.approvals++;}
+  if(entry.activity==='working')summary.working=true;
+ }
+ return summary;
+}
+export function projectAttention(project:ProjectNode):AttentionSummary{
+ const total:AttentionSummary={waiting:0,responses:0,approvals:0,working:false};
+ for(const folder of project.folders){const s=folderAttention(folder);total.waiting+=s.waiting;total.responses+=s.responses;total.approvals+=s.approvals;total.working||=s.working;}
+ return total;
+}
+/** Hover and screen-reader text for a badge; empty when nothing is waiting. */
+export function attentionLabel(summary:AttentionSummary):string{
+ if(!summary.waiting)return '';
+ const parts=[summary.responses?plural(summary.responses,'response'):'',summary.approvals?plural(summary.approvals,'approval'):''].filter(Boolean);
+ return `${plural(summary.waiting,'session')} waiting: ${parts.join(', ')}`;
+}
