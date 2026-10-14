@@ -6,7 +6,26 @@ export interface UsageWindow { usedFraction: number; resetsAt: number }
 export interface ProviderUsage { provider: AgentKind; observedAt: number; fiveHour?: UsageWindow; sevenDay?: UsageWindow }
 export type UsageSnapshot = Partial<Record<AgentKind, ProviderUsage>>;
 /** What one language call cost. Claude reports an API-equivalent dollar figure; Codex reports tokens only. */
-export interface Spend { usd?: number; inputTokens: number; outputTokens: number }
+export interface Spend { usd?: number; inputTokens: number; outputTokens: number; /** Part of inputTokens served from cache; used only to price the call. */ cachedInputTokens?: number }
+/** USD per million tokens. */
+export interface TokenPrices { input: number; cachedInput: number; output: number; asOf: string }
+/**
+ * OpenAI API prices for Codex language models, from developers.openai.com/api/docs/pricing (standard tier, short context).
+ * gpt-5.6-sol is on a promotional price guaranteed through at least 2026-11-21; update this table when it changes.
+ * Codex reports tokens only, so a dollar figure for Codex is an estimate from this table.
+ */
+export const CODEX_PRICES: Readonly<Record<string, TokenPrices>> = {
+  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, output: 20, asOf: '2026-10-14' },
+};
+export function pricesFor(provider: AgentKind, model: string): TokenPrices | undefined { return provider === 'codex' ? CODEX_PRICES[model] : undefined; }
+/** Adds an estimated dollar figure to a Codex call whose model has a known price. */
+export function priceSpend(provider: AgentKind, model: string, spend: Spend): Spend {
+  const prices = pricesFor(provider, model);
+  if (!prices || spend.usd !== undefined) return spend;
+  const cached = Math.min(spend.cachedInputTokens ?? 0, spend.inputTokens);
+  const usd = ((spend.inputTokens - cached) * prices.input + cached * prices.cachedInput + spend.outputTokens * prices.output) / 1_000_000;
+  return { ...spend, usd: Math.round(usd * 1e10) / 1e10 };
+}
 export type QuotaWindow = 'five_hour' | 'seven_day';
 /** Running totals of Gloss's own language calls, keyed by scope: `session:<id>`, `day:<YYYY-MM-DD>` and `all`. */
 export interface SpendStore {
@@ -49,7 +68,8 @@ export function parseClaudeSpend(event: Record<string, any>): Spend | undefined 
 }
 export function parseCodexSpend(event: Record<string, any>): Spend | undefined {
   if (event?.type !== 'turn.completed' || !event.usage || typeof event.usage !== 'object') return undefined;
-  return { inputTokens: finite(event.usage.input_tokens) ? event.usage.input_tokens : 0, outputTokens: finite(event.usage.output_tokens) ? event.usage.output_tokens : 0 };
+  const u = event.usage;
+  return { inputTokens: finite(u.input_tokens) ? u.input_tokens : 0, ...(finite(u.cached_input_tokens) ? { cachedInputTokens: u.cached_input_tokens } : {}), outputTokens: finite(u.output_tokens) ? u.output_tokens : 0 };
 }
 
 /** Latest observation per provider; older observations never overwrite newer ones. */

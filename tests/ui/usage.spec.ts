@@ -29,6 +29,7 @@ test('the header shows usage left, and the popover shows both windows, refresh a
   await expect(popover).toContainText('5-hour window'); await expect(popover).toContainText('Renews in 2h 4');
   await expect(popover).toContainText('$0.004 this session'); await expect(popover).toContainText('$0.31'); await expect(popover).toContainText('haiku');
   await expect(popover).toContainText('not billed');
+  await expect(popover).toContainText('Language Assistant chat');
   await popover.getByRole('button', { name: 'Refresh' }).click();
   await expect.poll(() => refreshes).toEqual([{ provider: 'claude' }]);
   await page.keyboard.press('Escape');
@@ -70,4 +71,27 @@ test('without data the pill reads usage —', async ({ page }) => {
   await withUsage(page, {});
   await page.goto('/#capability=test');
   await expect(page.getByRole('button', { name: /^Claude Code usage:/ })).toHaveText('usage —');
+});
+
+test('Codex spend shows an estimated dollar figure with the dated price it used', async ({ page }) => {
+  const now = Date.now();
+  const snap = { ...basicSnapshot(), id: 'C-panel', target: { agent: 'codex', sessionRef: 'c1', projectId: '/project' } };
+  await mockSession(page, () => snap);
+  const usage = { codex: { provider: 'codex', observedAt: now, fiveHour: { usedFraction: 0.16, resetsAt: now + HOUR }, sevenDay: { usedFraction: 0.03, resetsAt: now + 100 * HOUR } } };
+  const catalog = { epoch: 'e', sequence: 1, discovery: { state: 'healthy' }, entries: [{ ...entry, key: 'C-panel', sessionId: 'C-panel', target: snap.target }], usage };
+  await page.unroute('**/api/session-catalog**');
+  await page.route('**/api/session-catalog', r => r.fulfill({ json: catalog }));
+  await page.route('**/api/session-catalog/events', r => r.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify(catalog) + '\n\n' }));
+  await page.route('**/events', r => r.request().url().includes('session-catalog') ? r.fallback() : r.fulfill({ contentType: 'text/event-stream', body: '' }));
+  await page.route('**/api/sessions/C-panel/usage', r => r.fulfill({ json: { provider: 'codex', model: 'gpt-5.6-sol', usage: usage.codex, prices: { input: 4, cachedInput: 0.4, output: 20, asOf: '2026-10-14' }, spend: { session: { usd: 0.0231, inputTokens: 16812, outputTokens: 5 }, today: { usd: 0.31, inputTokens: 1, outputTokens: 1 }, allTime: null } } }));
+  await page.goto('/#capability=test');
+  const pill = page.getByRole('button', { name: /^Codex usage:/ });
+  await expect(pill).toHaveText('5h 84% left · week 97% left');
+  await pill.click();
+  const popover = page.getByRole('dialog', { name: 'Codex usage' });
+  await expect(popover).toContainText('≈ $0.02 this session');
+  await expect(popover).toContainText('16.8k / 5 tokens');
+  await expect(popover).toContainText('≈ $0.31');
+  await expect(popover).toContainText('estimated at OpenAI API prices as of Oct 14, 2026');
+  await expect(popover).toContainText('$4.00 input, $0.40 cached input, $20.00 output per million tokens');
 });

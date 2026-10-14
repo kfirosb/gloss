@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseClaudeRateLimit, parseCodexRateLimits, parseClaudeSpend, parseCodexSpend, quotaBreak, UsageTracker, type ProviderUsage } from '../../src/core/usage.js';
+import { parseClaudeRateLimit, parseCodexRateLimits, parseClaudeSpend, parseCodexSpend, priceSpend, CODEX_PRICES, quotaBreak, UsageTracker, type ProviderUsage } from '../../src/core/usage.js';
 
 const claudeEvent = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1791973200, rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 0.37, resetsAt: 1791973200 }, seven_day: { utilization: 0.43, resetsAt: 1792335600 } } } };
 const codexLimits = { limit_id: 'codex', primary: { used_percent: 95, window_minutes: 300, resets_at: 1791812736 }, secondary: { used_percent: 43, window_minutes: 10080, resets_at: 1792309531 } };
@@ -28,8 +28,21 @@ describe('spend parsing', () => {
     expect(parseClaudeSpend({ type: 'assistant' })).toBeUndefined();
   });
   it('reads Codex tokens from turn.completed with no dollar figure', () => {
-    expect(parseCodexSpend({ type: 'turn.completed', usage: { input_tokens: 16812, cached_input_tokens: 12288, output_tokens: 5 } })).toEqual({ inputTokens: 16812, outputTokens: 5 });
+    expect(parseCodexSpend({ type: 'turn.completed', usage: { input_tokens: 16812, cached_input_tokens: 12288, output_tokens: 5 } })).toEqual({ inputTokens: 16812, cachedInputTokens: 12288, outputTokens: 5 });
     expect(parseCodexSpend({ type: 'turn.completed' })).toBeUndefined();
+  });
+});
+
+describe('Codex dollar estimate', () => {
+  it('prices fresh input, cached input and output at the dated table rate', () => {
+    expect(CODEX_PRICES['gpt-5.6-sol']).toEqual({ input: 4, cachedInput: 0.4, output: 20, asOf: '2026-10-14' });
+    // (4,524 fresh × $4 + 12,288 cached × $0.40 + 5 output × $20) / 1M = $0.0231112.
+    expect(priceSpend('codex', 'gpt-5.6-sol', { inputTokens: 16812, cachedInputTokens: 12288, outputTokens: 5 })).toEqual({ usd: 0.0231112, inputTokens: 16812, cachedInputTokens: 12288, outputTokens: 5 });
+  });
+  it('leaves Claude costs, unknown models and already priced spend untouched', () => {
+    const tokens = { inputTokens: 10, outputTokens: 2 };
+    expect(priceSpend('codex', 'unknown-model', tokens)).toEqual(tokens);
+    expect(priceSpend('claude', 'haiku', { usd: 0.1, ...tokens })).toEqual({ usd: 0.1, ...tokens });
   });
 });
 

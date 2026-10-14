@@ -39,13 +39,20 @@ it('reports the session\'s provider usage, spend per scope and model on the sess
   expect((await request('sessions/A/usage', 'GET', undefined, false)).status).toBe(401);
   expect((await request('sessions/missing/usage')).status).toBe(404);
   let report = await (await request('sessions/A/usage')).json();
-  expect(report).toEqual({ provider: 'codex', model: 'gpt-5.6-sol', usage: null, spend: { session: null, today: null, allTime: null } });
+  expect(report).toMatchObject({ provider: 'codex', model: 'gpt-5.6-sol', usage: null, spend: { session: null, today: null, allTime: null } });
   usage.observer.spend({ provider: 'codex', model: 'gpt-5.6-sol', scope: 'A', spend: { inputTokens: 30, outputTokens: 4 } });
   usage.observer.spend({ provider: 'codex', model: 'gpt-5.6-sol', scope: 'B', spend: { inputTokens: 1, outputTokens: 1 } });
   usage.observer.usage(codexUsage);
   report = await (await request('sessions/A/usage')).json();
   expect(report.usage).toEqual(codexUsage);
-  expect(report.spend).toEqual({ session: { inputTokens: 30, outputTokens: 4 }, today: { inputTokens: 31, outputTokens: 5 }, allTime: { inputTokens: 31, outputTokens: 5 } });
+  expect(report.spend).toMatchObject({ session: { inputTokens: 30, outputTokens: 4 }, today: { inputTokens: 31, outputTokens: 5 }, allTime: { inputTokens: 31, outputTokens: 5 } });
+  // (30 × $4 + 4 × $20) / 1M, estimated from the dated table.
+  expect(report.spend.session.usd).toBeCloseTo(0.0002, 10);
+  usage.observer.spend({ provider: 'codex', model: 'gpt-5.6-sol', scope: 'A', spend: { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 } });
+  report = await (await request('sessions/A/usage')).json();
+  expect(report.spend.session).toMatchObject({ inputTokens: 1_000_030, outputTokens: 4 });
+  expect(report.spend.session.usd).toBeCloseTo(4.0002, 10);
+  expect(report.prices).toEqual({ input: 4, cachedInput: 0.4, output: 20, asOf: '2026-10-14' });
 });
 it('publishes usage in the session catalog, including observations from the live agent', async () => {
   const { request, usage, agent, app } = await setup();

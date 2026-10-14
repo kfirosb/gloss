@@ -1,11 +1,15 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentKind, LanguageBackend } from '../core/contracts.js';
-import { UsageTracker, type ProviderUsage, type Spend, type SpendStore, type UsageSnapshot } from '../core/usage.js';
+import { pricesFor, priceSpend, UsageTracker, type ProviderUsage, type Spend, type SpendStore, type TokenPrices, type UsageSnapshot } from '../core/usage.js';
 import type { LanguageObserver } from '../language/shared.js';
 import { readLatestCodexUsage } from '../agents/codex/usage.js';
 
-export interface SessionUsageReport { provider: AgentKind; model: string; usage: ProviderUsage | null; spend: { session: Spend | null; today: Spend | null; allTime: Spend | null } }
+export interface SessionUsageReport {
+  provider: AgentKind; model: string; usage: ProviderUsage | null; spend: { session: Spend | null; today: Spend | null; allTime: Spend | null };
+  /** Set when the dollar figures are Gloss's own estimate from a dated price table rather than the provider's reported cost. */
+  prices: TokenPrices | null;
+}
 export interface UsageService {
   readonly tracker: UsageTracker;
   /** Given to the language backends; every call they make lands here. */
@@ -27,10 +31,13 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
     tracker,
     observer: {
       usage: usage => tracker.observe(usage),
-      spend: entry => { for (const scope of [`session:${entry.scope}`, dayKey(now()), 'all']) store?.addSpend?.(scope, entry.provider, entry.spend); },
+      spend: entry => {
+        const { cachedInputTokens: _cached, ...priced } = priceSpend(entry.provider, entry.model, entry.spend);
+        for (const scope of [`session:${entry.scope}`, dayKey(now()), 'all']) store?.addSpend?.(scope, entry.provider, priced);
+      },
     },
     report(sessionId, provider, model) {
-      return { provider, model, usage: tracker.snapshot()[provider] ?? null, spend: { session: read(`session:${sessionId}`, provider), today: read(dayKey(now()), provider), allTime: read('all', provider) } };
+      return { provider, model, usage: tracker.snapshot()[provider] ?? null, spend: { session: read(`session:${sessionId}`, provider), today: read(dayKey(now()), provider), allTime: read('all', provider) }, prices: pricesFor(provider, model) ?? null };
     },
     async refresh(provider, backends, signal) {
       if (provider === 'codex') { const usage = await readLatestCodexUsage(codexHome); if (usage) tracker.observe(usage); }

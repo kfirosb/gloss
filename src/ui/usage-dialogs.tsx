@@ -28,22 +28,31 @@ function WindowBar({ label, window, now }: { label: string; window: UsageWindow;
   </div>;
 }
 
+const COUNTED = 'Counts every call Gloss’s own language model makes, translations, summaries, instruction prep and Language Assistant chat, including the instructions and context sent with each.';
+const price = (value: number) => `$${value.toFixed(2)}`;
+function spendNote(provider: AgentKind, report: SessionUsageReport): string {
+  if (provider === 'claude') return `${COUNTED} Refresh checks count toward today and all time. On a Claude subscription this is drawn from your plan, not billed; the figure is what it would cost at API prices.`;
+  const p = report.prices;
+  if (!p) return `${COUNTED} Codex reports tokens, not dollars, and this model has no price on file. Included in your ChatGPT plan.`;
+  const asOf = new Date(`${p.asOf}T12:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${COUNTED} Codex reports tokens only, so dollars are estimated at OpenAI API prices as of ${asOf}: ${price(p.input)} input, ${price(p.cachedInput)} cached input, ${price(p.output)} output per million tokens. Included in your ChatGPT plan, not billed.`;
+}
+
 function SpendBlock({ provider, report }: { provider: AgentKind; report: SessionUsageReport | null }) {
-  const amount = (spend: Spend | null) => !spend ? (provider === 'claude' ? '$0' : '0 tokens') : provider === 'claude' && spend.usd !== undefined ? formatUsd(spend.usd) : `${formatTokens(spend.inputTokens + spend.outputTokens)} tokens`;
+  const estimated = provider === 'codex' && Boolean(report?.prices);
+  const amount = (spend: Spend | null) => spend?.usd !== undefined ? `${estimated ? '≈ ' : ''}${formatUsd(spend.usd)}` : !spend ? (provider === 'claude' || estimated ? '$0' : '0 tokens') : `${formatTokens(spend.inputTokens + spend.outputTokens)} tokens`;
   const session = report?.spend.session ?? null;
   return <div className="usage-spent">
     <h4>What Gloss has spent</h4>
     {report ? <>
       <p className="usage-big">{amount(session)} this session</p>
       <table><tbody>
-        {provider === 'codex' && <tr><td>In / out, this session</td><td>{formatTokens(session?.inputTokens ?? 0)} / {formatTokens(session?.outputTokens ?? 0)}</td></tr>}
+        {provider === 'codex' && <tr><td>In / out, this session</td><td>{formatTokens(session?.inputTokens ?? 0)} / {formatTokens(session?.outputTokens ?? 0)} tokens</td></tr>}
         <tr><td>Today</td><td>{amount(report.spend.today)}</td></tr>
         <tr><td>All time, since install</td><td>{amount(report.spend.allTime)}</td></tr>
         <tr><td>Model</td><td>{report.model}</td></tr>
       </tbody></table>
-      <p className="usage-fine">{provider === 'claude'
-        ? 'Translations, summaries and instruction prep only. On a Claude subscription this is drawn from your plan, not billed; the figure is what it would cost at API prices.'
-        : 'Translations, summaries and instruction prep only. Codex reports tokens, not dollars, so no price is guessed. Included in your ChatGPT plan.'}</p>
+      <p className="usage-fine">{spendNote(provider, report)}</p>
     </> : <p className="usage-fine">Loading…</p>}
   </div>;
 }
