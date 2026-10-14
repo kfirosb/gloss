@@ -496,6 +496,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .session-context{position:absolute;z-index:40}.folder-context{position:fixed;z-index:60}.session-context-menu{position:static;right:auto;top:auto}
 .new-session label{display:block;margin:8px 0 4px;font-weight:600}
 .new-session fieldset{border:1px solid #e0e4ed;border-radius:10px;margin:12px 0;padding:8px 12px}
+.new-session .first-message{width:100%;min-height:72px;max-height:200px;resize:vertical;direction:ltr;font:13px/1.5 ui-monospace, Menlo, monospace;border:1px solid #bbc5d8;border-radius:8px;padding:8px}
 .new-session fieldset label{display:inline-flex;gap:6px;margin-right:16px;font-weight:400}
 .new-session-folder{display:flex;gap:8px}.new-session-folder select{flex:1;min-width:0}
 .new-session .language-field label{display:block;margin:0;font-weight:400}
