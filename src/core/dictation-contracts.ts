@@ -7,6 +7,12 @@ export const FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS / 1000; // 1600
 export const MAX_RECORDING_MS = 600_000;
 export const ENGINE_IDLE_MS = 180_000;
 export const FINISH_TIMEOUT_MS = 5_000;
+/** Largest WebSocket message the dictation bridge accepts; a capture frame is FRAME_SAMPLES 16-bit samples, far below it. */
+export const MAX_AUDIO_MESSAGE_BYTES = 64 * 1024;
+/** How much of the recording's transcribed text (from the end) is sent as the prompt for the next segment. */
+export const PROMPT_CONTEXT_CHARS = 200;
+/** Transcription errors in a row after which the recording ends with engine-failed; fewer are reported as a lost segment. */
+export const MAX_CONSECUTIVE_FAILURES = 3;
 export const MODEL_FILE = 'ggml-large-v3-turbo-q5_0.bin';
 export type DictationErrorCode = 'engine-missing' | 'microphone-denied' | 'download-failed' | 'engine-failed' | 'connection-lost' | 'busy';
 export type DictationNoticeCode = 'segment-lost' | 'max-duration';
@@ -29,6 +35,11 @@ export const SEED_PROMPT: Record<DictationLanguage, string> = {
   he: 'שיחה בעברית על עבודה עם קוד: הסבר קצר, שאלה, ובקשה.',
   en: 'A conversation in English about working with code: a short explanation, a question, and a request.',
 };
+/** Prompt for the next transcription request: the seed when nothing has been transcribed yet, otherwise the last PROMPT_CONTEXT_CHARS of context; none right after a repetitive segment, since feeding a loop back amplifies it. */
+export function nextPrompt(context: string, skipPrompt: boolean, language: DictationLanguage): string | undefined {
+  if (skipPrompt) return undefined;
+  return context ? context.slice(-PROMPT_CONTEXT_CHARS) : SEED_PROMPT[language];
+}
 /** Longest run of the same word kept; whisper loops on repetitive speech. */
 export const MAX_WORD_RUN = 3;
 const TRAILING_PUNCTUATION = /[.!?,;:…׃]+$/u;

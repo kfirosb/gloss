@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { acceptTranscription, DictationFailure, isDictationLanguage, isRepetitive, MAX_RECORDING_MS, SAMPLE_RATE, SEED_PROMPT, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../../core/dictation-contracts.js';
+import { acceptTranscription, DictationFailure, isDictationLanguage, isRepetitive, MAX_AUDIO_MESSAGE_BYTES, MAX_CONSECUTIVE_FAILURES, MAX_RECORDING_MS, nextPrompt, SAMPLE_RATE, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../../core/dictation-contracts.js';
 import { createSegmenter, type Segmenter } from '../../core/dictation-segmenter.js';
 import { isLoopbackOrigin, rejectUpgrade } from '../loopback.js';
 import type { DictationEngine } from './engine.js';
@@ -13,7 +13,7 @@ const PATH = '/api/dictation/audio', SESSION = /^[\w.:-]{1,128}$/;
 const same = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
 export function createDictationBridge(options: { engine: DictationEngine; model: ModelStore; capability: () => string; now?: () => number; maxRecordingMs?: number; createSegmenter?: () => Segmenter; log?: (line: string) => void }): DictationBridge {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_AUDIO_MESSAGE_BYTES });
   const maxMs = options.maxRecordingMs ?? MAX_RECORDING_MS, log = options.log ?? (() => undefined), now = options.now ?? Date.now;
   function record(ws: WebSocket, language: DictationLanguage, session: string) {
     const started = now(); const segmenter = (options.createSegmenter ?? createSegmenter)();
@@ -25,8 +25,7 @@ export function createDictationBridge(options: { engine: DictationEngine; model:
     const enqueue = (samples: Int16Array) => { queue = queue.then(async () => {
       if (closed) return;
       try {
-        // The first request has no context, so it gets a seed; after a repetitive (looping) segment the next one gets no prompt, since feeding a loop back amplifies it.
-        const prompt = skipPrompt ? undefined : context ? context.slice(-200) : SEED_PROMPT[language];
+        const prompt = nextPrompt(context, skipPrompt, language);
         const result = await options.engine.transcribe(samples, { language, ...(prompt ? { prompt } : {}) });
         if (closed) return;
         failures = 0; const text = acceptTranscription(result.text, result.noSpeech, language);
@@ -38,7 +37,7 @@ export function createDictationBridge(options: { engine: DictationEngine; model:
       } catch (error) {
         if (closed) return;
         if (error instanceof DictationFailure) { fail(error); return; }
-        if (++failures >= 3) { fail(new DictationFailure('engine-failed', 'Transcription keeps failing')); return; }
+        if (++failures >= MAX_CONSECUTIVE_FAILURES) { fail(new DictationFailure('engine-failed', 'Transcription keeps failing')); return; }
         send({ type: 'notice', code: 'segment-lost' });
       }
     }); };

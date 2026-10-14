@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptTranscription, DictationFailure, FRAME_SAMPLES, isDictationLanguage, isRepetitive, SEED_PROMPT } from '../../src/core/dictation-contracts.js';
+import { acceptTranscription, DictationFailure, FRAME_SAMPLES, isDictationLanguage, isRepetitive, nextPrompt, PROMPT_CONTEXT_CHARS, SEED_PROMPT } from '../../src/core/dictation-contracts.js';
 
 describe('acceptTranscription', () => {
   it('trims and collapses whitespace', () => { expect(acceptTranscription('  שלום  עולם \n', false, 'he')).toBe('שלום עולם'); });
@@ -51,4 +51,20 @@ it('exposes 100 ms frames at 16 kHz and a coded failure', () => {
   expect(FRAME_SAMPLES).toBe(1600);
   expect(isDictationLanguage('he')).toBe(true); expect(isDictationLanguage('fr')).toBe(false);
   const f = new DictationFailure('engine-failed'); expect(f.code).toBe('engine-failed'); expect(f.message).toBe('engine-failed');
+});
+describe('nextPrompt', () => {
+  it('seeds the first request in the recording language', () => {
+    expect(nextPrompt('', false, 'he')).toBe(SEED_PROMPT.he);
+    expect(nextPrompt('', false, 'en')).toBe(SEED_PROMPT.en);
+  });
+  it('sends the trailing context once there is some', () => {
+    expect(nextPrompt('short context', false, 'en')).toBe('short context');
+    const long = 'a'.repeat(PROMPT_CONTEXT_CHARS) + 'tail';
+    expect(nextPrompt(long, false, 'en')).toBe(long.slice(-PROMPT_CONTEXT_CHARS));
+    expect(nextPrompt(long, false, 'en')!.endsWith('tail')).toBe(true);
+  });
+  it('sends no prompt right after a repetitive segment, with or without context', () => {
+    expect(nextPrompt('some context', true, 'he')).toBeUndefined();
+    expect(nextPrompt('', true, 'he')).toBeUndefined();
+  });
 });

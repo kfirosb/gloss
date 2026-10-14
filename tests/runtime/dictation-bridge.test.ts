@@ -5,7 +5,7 @@ import { createDictationBridge } from '../../src/runtime/dictation/bridge.js';
 import type { DictationEngine } from '../../src/runtime/dictation/engine.js';
 import type { ModelStore } from '../../src/runtime/dictation/model.js';
 import type { Segmenter } from '../../src/core/dictation-segmenter.js';
-import { DictationFailure, SEED_PROMPT, type DictationServerMessage } from '../../src/core/dictation-contracts.js';
+import { DictationFailure, FRAME_SAMPLES, MAX_AUDIO_MESSAGE_BYTES, MAX_CONSECUTIVE_FAILURES, SEED_PROMPT, type DictationServerMessage } from '../../src/core/dictation-contracts.js';
 
 const closers: (() => void)[] = []; afterEach(() => { for (const c of closers.splice(0)) c(); vi.useRealTimers(); });
 /** A segmenter that emits every frame whose first sample is nonzero as its own segment; stop() flushes a frame starting with 9. */
@@ -36,7 +36,7 @@ async function setup(engine: DictationEngine, extra: Partial<Parameters<typeof c
   return { bridge, connect, port };
 }
 const opened = (ws: WebSocket) => new Promise<void>((res, rej) => { ws.once('open', () => res()); ws.once('unexpected-response', (_q, r) => rej(new Error(String(r.statusCode)))); ws.once('error', rej); });
-const frame = (first: number) => { const f = new Int16Array(1600); f[0] = first; return Buffer.from(f.buffer); };
+const frame = (first: number) => { const f = new Int16Array(FRAME_SAMPLES); f[0] = first; return Buffer.from(f.buffer); };
 
 describe('createDictationBridge', () => {
   it('rejects a wrong capability, a bad language, a foreign origin and an unknown path', async () => {
@@ -101,7 +101,7 @@ describe('createDictationBridge', () => {
   });
   it('closes an abusive connection sending frames over the payload cap without crashing', async () => {
     const { engine } = fakeEngine(); const { connect } = await setup(engine); const c = connect(); await opened(c.ws); await c.until(m => m.length === 3);
-    c.ws.send(Buffer.alloc(70 * 1024));
+    c.ws.send(Buffer.alloc(MAX_AUDIO_MESSAGE_BYTES + 6 * 1024));
     expect(await c.closed).not.toBe(1000);
     const d = connect(); await opened(d.ws); d.ws.close(); // the server is still alive
   });
@@ -112,7 +112,7 @@ describe('createDictationBridge', () => {
     expect(c.messages.at(-1)).toEqual({ type: 'notice', code: 'segment-lost' });
     c.ws.send(frame(2)); c.ws.send(frame(3));
     expect(await c.closed).toBe(1011);
-    expect(c.messages.at(-1)).toMatchObject({ type: 'error', code: 'engine-failed' }); expect(n).toBe(3);
+    expect(c.messages.at(-1)).toMatchObject({ type: 'error', code: 'engine-failed' }); expect(n).toBe(MAX_CONSECUTIVE_FAILURES);
   });
   it('ends immediately with engine-failed when the engine reports a crash', async () => {
     const { engine } = fakeEngine({ transcribe: async () => { throw new DictationFailure('engine-failed', 'gone'); } });
