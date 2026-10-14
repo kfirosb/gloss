@@ -1,10 +1,11 @@
-// src/runtime/dictation/engine.ts
 import { spawn as nodeSpawn } from 'node:child_process';
-import { accessSync, constants, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { cpus } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LOOPBACK_HOST } from '../loopback.js';
+import { packageRoot } from '../package-root.js';
 import { DictationFailure, ENGINE_IDLE_MS, type DictationLanguage } from '../../core/dictation-contracts.js';
 import type { ModelProgress, ModelStore } from './model.js';
 import { encodeWav } from './wav.js';
@@ -36,15 +37,6 @@ export interface DictationEngine {
   close(): void;
 }
 
-// Source runs from src/runtime/dictation and the build from dist/server/runtime/dictation; walk up to the package.json named language-assistant (bounded).
-function packageRoot(start: string): string | undefined {
-  let dir = start;
-  for (let level = 0; level < 6; level += 1, dir = dirname(dir)) {
-    try { if ((JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown }).name === 'language-assistant') return dir; } catch { /* keep walking up */ }
-    if (dirname(dir) === dir) break;
-  }
-  return undefined;
-}
 /** Explicit env path first (the desktop shell sets it), then the packaged resources, then the checkout's vendor dir (omitted when no repo root is found). `start` overrides the module's directory, for tests. */
 export function whisperCandidates(env: NodeJS.ProcessEnv = process.env, resourcesPath = (process as { resourcesPath?: string }).resourcesPath, start = dirname(fileURLToPath(import.meta.url))): string[] {
   const explicit = env.LANGUAGE_ASSISTANT_WHISPER; const root = packageRoot(start);
@@ -59,7 +51,7 @@ const nodeEngineSpawn = (binary: string, args: string[]): EngineProcess => {
   let onStderr: ((text: string) => void) | undefined; child.stderr?.setEncoding('utf8'); child.stderr?.on('data', (text: string) => onStderr?.(text));
   return { ...(child.pid === undefined ? {} : { pid: child.pid }), onStderr: cb => { onStderr = cb; }, kill: () => { try { if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGTERM'); else child.kill(); } catch { /* already gone */ } }, onExit: cb => { child.once('exit', code => cb(code)); child.once('error', () => cb(null)); } };
 };
-const freeLoopbackPort = () => new Promise<number>((resolve, reject) => { const s = createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const a = s.address(); const port = typeof a === 'object' && a ? a.port : 0; s.close(() => resolve(port)); }); });
+const freeLoopbackPort = () => new Promise<number>((resolve, reject) => { const s = createServer(); s.once('error', reject); s.listen(0, LOOPBACK_HOST, () => { const a = s.address(); const port = typeof a === 'object' && a ? a.port : 0; s.close(() => resolve(port)); }); });
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export function createDictationEngine(options: DictationEngineOptions): DictationEngine {
@@ -77,8 +69,8 @@ export function createDictationEngine(options: DictationEngineOptions): Dictatio
     if (generation !== gen) throw closed();
     const port = await freePort(); if (generation !== gen) throw closed();
     const started = Date.now();
-    state = 'starting'; base = 'http://127.0.0.1:' + port;
-    proc = spawn(options.binary!, ['--host', '127.0.0.1', '--port', String(port), '-m', modelPath, '-t', String(threads)]);
+    state = 'starting'; base = 'http://' + LOOPBACK_HOST + ':' + port;
+    proc = spawn(options.binary!, ['--host', LOOPBACK_HOST, '--port', String(port), '-m', modelPath, '-t', String(threads)]);
     const tail = stderrTail(); proc.onStderr?.(text => tail.push(text));
     const dumpStderr = () => { for (const line of tail.lines()) log('dictation-engine stderr: ' + line); };
     let exited = false; proc.onExit(code => { exited = true; if (generation === gen) { log('dictation-engine exit ' + code); dumpStderr(); stop('exit'); } });

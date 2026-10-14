@@ -6,6 +6,7 @@ import { createFileRegistry } from './file-registry.js';
 import { splitArgs } from './session-launcher.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
+import { PACKAGE_NAME, packageRoot } from './package-root.js';
 import { realpath, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -48,16 +49,14 @@ export interface WorktreeDeletePreview extends WorktreeInspection { launchedSess
 export interface CreatedWorktree { path: string; branch: string; location: string; ignore?: { added: boolean; line: string } }
 export interface FolderListing extends ConnectedFolder { projectName: string; branch?: string; missing: boolean }
 export interface AboutInfo { name: string; version: string; platform: string; arch: string }
-// source runs from src/runtime and the build from dist/server/runtime; walk up to the package.json named language-assistant (bounded).
+/** This package's name and version, read from the package root's package.json (see packageRoot). */
 function readPackage(): { name: string; version: string } {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (let level = 0; level < 4; level += 1, dir = dirname(dir)) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
-      if (pkg.name === 'language-assistant' && typeof pkg.version === 'string') return { name: pkg.name, version: pkg.version };
-    } catch { /* keep walking up */ }
-  }
-  return { name: 'language-assistant', version: '0.0.0' };
+  const root = packageRoot(dirname(fileURLToPath(import.meta.url)));
+  if (root) try {
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof version === 'string') return { name: PACKAGE_NAME, version };
+  } catch { /* fall back */ }
+  return { name: PACKAGE_NAME, version: '0.0.0' };
 }
 export interface SessionLanguage { defaults: LanguageSettings; override: LanguageOverride; effective: LanguageSettings }
 export interface Application {

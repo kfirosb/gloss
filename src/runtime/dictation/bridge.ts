@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { acceptTranscription, DictationFailure, isDictationLanguage, isRepetitive, MAX_RECORDING_MS, SAMPLE_RATE, SEED_PROMPT, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../../core/dictation-contracts.js';
 import { createSegmenter, type Segmenter } from '../../core/dictation-segmenter.js';
+import { isLoopbackOrigin, rejectUpgrade } from '../loopback.js';
 import type { DictationEngine } from './engine.js';
 import type { ModelStore } from './model.js';
 
@@ -14,7 +15,6 @@ const same = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.fr
 export function createDictationBridge(options: { engine: DictationEngine; model: ModelStore; capability: () => string; now?: () => number; maxRecordingMs?: number; createSegmenter?: () => Segmenter; log?: (line: string) => void }): DictationBridge {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const maxMs = options.maxRecordingMs ?? MAX_RECORDING_MS, log = options.log ?? (() => undefined), now = options.now ?? Date.now;
-  const reject = (socket: Duplex, status: number) => { socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Bad Request'}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
   function record(ws: WebSocket, language: DictationLanguage, session: string) {
     const started = now(); const segmenter = (options.createSegmenter ?? createSegmenter)();
     let closed = false; let stopping = false; let ready = false; let sequence = 0; let context = ''; let skipPrompt = false; let failures = 0; let pendingStop = false; let earlySamples = 0; const earlyLimit = SAMPLE_RATE * maxMs / 1000; let cap: NodeJS.Timeout | undefined;
@@ -70,11 +70,11 @@ export function createDictationBridge(options: { engine: DictationEngine; model:
     cancelDownload: () => options.engine.cancelDownload(),
     handleUpgrade(req, socket, head) {
       const url = new URL(req.url ?? '/', 'http://localhost');
-      if (url.pathname !== PATH) return reject(socket, 400);
-      const origin = req.headers.origin; if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return reject(socket, 403);
-      const expected = options.capability(); if (!expected || !same(url.searchParams.get('capability') ?? '', expected)) return reject(socket, 401);
+      if (url.pathname !== PATH) return rejectUpgrade(socket, 400);
+      const origin = req.headers.origin; if (origin && !isLoopbackOrigin(origin)) return rejectUpgrade(socket, 403);
+      const expected = options.capability(); if (!expected || !same(url.searchParams.get('capability') ?? '', expected)) return rejectUpgrade(socket, 401);
       const language = url.searchParams.get('language'); const session = url.searchParams.get('session') ?? '';
-      if (!isDictationLanguage(language) || !SESSION.test(session)) return reject(socket, 400);
+      if (!isDictationLanguage(language) || !SESSION.test(session)) return rejectUpgrade(socket, 400);
       wss.handleUpgrade(req, socket, head, ws => record(ws, language, session));
     },
     close() { for (const c of wss.clients) c.terminate(); wss.close(); options.engine.close(); },

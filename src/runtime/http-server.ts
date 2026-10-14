@@ -10,6 +10,7 @@ import type { Application } from './application.js';
 import type { Action } from './protocol.js';
 import { readProjectMetadata, type ProjectMetadata } from './project-metadata.js';
 import { validateLanguageOverride } from '../core/language-settings.js';
+import { isLoopbackHost, isLoopbackOrigin, LOOPBACK_HOST } from './loopback.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -268,9 +269,9 @@ export async function startServer(application: Application, options: { port?: nu
   const server = createServer(async (req, res) => {
     try {
       const host = req.headers.host ?? '';
-      if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return respond(res, 403, { error: 'Loopback host required', code: 'host-unavailable' });
+      if (!isLoopbackHost(host)) return respond(res, 403, { error: 'Loopback host required', code: 'host-unavailable' });
       const origin = req.headers.origin;
-      if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return respond(res, 403, { error: 'Origin is not allowed', code: 'origin-rejected' });
+      if (origin && !isLoopbackOrigin(origin)) return respond(res, 403, { error: 'Origin is not allowed', code: 'origin-rejected' });
       const url = new URL(req.url ?? '/', 'http://' + host);
       if (await staticRoute(req, res, url.pathname)) return;
       if (req.headers.authorization !== 'Bearer ' + application.capability) return respond(res, 401, { error: 'Unauthorized', code: 'unauthorized' });
@@ -343,16 +344,16 @@ export async function startServer(application: Application, options: { port?: nu
   // Tickets and capabilities travel in these URLs' query strings, so the URLs are never logged.
   server.on('upgrade', (req, socket, head) => {
     const host = req.headers.host ?? ''; const url = req.url ?? '';
-    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) { socket.destroy(); return; }
+    if (!isLoopbackHost(host)) { socket.destroy(); return; }
     if (url.startsWith('/api/launches/') && application.terminals) { application.terminals.handleUpgrade(req, socket, head); return; }
     if (url.startsWith('/api/dictation/') && application.dictation) { application.dictation.handleUpgrade(req, socket, head); return; }
     socket.destroy();
   });
   return new Promise<{ url: string; close(): Promise<void> }>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => {
+    server.listen(options.port ?? 0, options.host ?? LOOPBACK_HOST, () => {
       const address = server.address(); const port = typeof address === 'object' && address ? address.port : options.port;
-      resolve({ url: 'http://' + (options.host ?? '127.0.0.1') + ':' + port + '/#capability=' + application.capability, close: () => new Promise(done => { server.close(() => done()); server.closeAllConnections(); }) });
+      resolve({ url: 'http://' + (options.host ?? LOOPBACK_HOST) + ':' + port + '/#capability=' + application.capability, close: () => new Promise(done => { server.close(() => done()); server.closeAllConnections(); }) });
     });
   });
 }
