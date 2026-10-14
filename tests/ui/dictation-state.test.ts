@@ -22,6 +22,12 @@ describe('reduceDictation', () => {
     const u = run([{ type: 'server', message: { type: 'state', state: 'starting' } }, { type: 'server', message: { type: 'state', state: 'recording' } }], t.state);
     expect(u.state.phase).toBe('recording'); expect(u.state.startedAt).toBe(1000); expect(u.effects).toEqual([]);
   });
+  it('cancelling a download releases the microphone so the next press starts afresh', () => {
+    const d = run([{ type: 'press', now: 1 }, { type: 'mic-ready' }, { type: 'server', message: { type: 'state', state: 'downloading', received: 0, total: 10 } }]);
+    expect(d.effects).toContainEqual({ type: 'start-stream' });
+    const c = reduceDictation(d.state, { type: 'press', now: 2 }); expect(c.effects).toContainEqual({ type: 'stop-stream' });
+    const again = run([{ type: 'press', now: 3 }, { type: 'mic-ready' }], c.state); expect(again.state.phase).toBe('starting'); expect(again.effects).toEqual([{ type: 'request-mic' }, { type: 'open-socket' }, { type: 'start-stream' }]);
+  });
   it('captures while the engine starts: recording after starting only changes the phase', () => {
     const s = run([{ type: 'press', now: 1000 }, { type: 'mic-ready' }, { type: 'server', message: { type: 'state', state: 'starting' } }]);
     expect(s.state.phase).toBe('starting'); expect(s.effects.filter(e => e.type === 'start-stream')).toHaveLength(1);
@@ -38,7 +44,7 @@ describe('reduceDictation', () => {
   });
   it('press while downloading cancels; press or Escape while recording stops and finishes', () => {
     const d = run([{ type: 'press', now: 1 }, { type: 'mic-ready' }, { type: 'server', message: { type: 'state', state: 'downloading', received: 0, total: null } }]);
-    const c = reduceDictation(d.state, { type: 'press', now: 2 }); expect(c.state.phase).toBe('idle'); expect(c.effects).toEqual([{ type: 'cancel-download' }, { type: 'close-socket' }]);
+    const c = reduceDictation(d.state, { type: 'press', now: 2 }); expect(c.state.phase).toBe('idle'); expect(c.effects).toEqual([{ type: 'cancel-download' }, { type: 'close-socket' }, { type: 'stop-stream' }]);
     const p = reduceDictation(recording(), { type: 'press', now: 3 }); expect(p.state.phase).toBe('finishing'); expect(p.effects).toEqual([{ type: 'send-stop' }, { type: 'stop-stream' }, { type: 'start-finish-timer', ms: STOP_TIMEOUT_MS }]);
     const e = reduceDictation(recording(), { type: 'escape' }); expect(e.state.phase).toBe('finishing'); expect(e.state.sendAfterFinish).toBe(false);
     const f = reduceDictation(p.state, { type: 'server', message: { type: 'state', state: 'finished' } }); expect(f.state.phase).toBe('idle'); expect(f.effects).toEqual([{ type: 'clear-finish-timer' }, { type: 'close-socket' }]);

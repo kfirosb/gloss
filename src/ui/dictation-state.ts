@@ -35,7 +35,7 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
     case 'status-failed': return out({ ...state, phase: 'unavailable', reason: 'Dictation status unavailable' });
     case 'press':
       if (state.phase === 'idle' || state.phase === 'error') return out({ ...idle(state), phase: 'starting', startedAt: event.now }, { type: 'request-mic' });
-      if (state.phase === 'downloading') return out(idle(state), { type: 'cancel-download' }, { type: 'close-socket' });
+      if (state.phase === 'downloading') return out(idle(state), { type: 'cancel-download' }, { type: 'close-socket' }, { type: 'stop-stream' });
       if (state.phase === 'starting' || state.phase === 'recording') return finishing(state, { type: 'send-stop' }, { type: 'stop-stream' });
       return out(state);
     // Capture starts with the socket: the server buffers audio sent while the engine is still downloading or starting.

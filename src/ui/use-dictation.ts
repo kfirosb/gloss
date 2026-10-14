@@ -34,7 +34,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
     switch (effect.type) {
       case 'request-mic':
         if (!navigator.mediaDevices?.getUserMedia) { dispatch({ type: 'mic-denied' }); return; }
-        navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }).then(s => { if (current.current.phase !== 'starting' || stream.current) { s.getTracks().forEach(t => t.stop()); return; } stream.current = s; dispatch({ type: 'mic-ready' }); }, () => { if (current.current.phase === 'starting') dispatch({ type: 'mic-denied' }); });
+        navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }).then(s => { if (current.current.phase !== 'starting') { s.getTracks().forEach(t => t.stop()); return; } if (stream.current) stopStream(); /* a stream left from an earlier attempt must not block this one */ stream.current = s; dispatch({ type: 'mic-ready' }); }, () => { if (current.current.phase === 'starting') dispatch({ type: 'mic-denied' }); });
         return;
       case 'open-socket': {
         closeSocket();

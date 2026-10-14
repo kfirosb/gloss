@@ -132,6 +132,14 @@ test('the first press without the speech model explains the one-time download; C
   await expect.poll(() => sockets).toBe(1);
   await expect(page.locator('.dictation-status', { hasText: 'Downloading the speech model (10%), speech is being recorded…' })).toBeVisible();
   await expect.poll(() => frames).toBeGreaterThan(2);
+  // Cancel the download, then press again: the mic is released and a fresh socket opens (no dialog the second time).
+  await page.route('**/api/dictation/model/cancel', route => route.fulfill({ json: { ok: true } }));
+  await page.getByRole('button', { name: /^Downloading the speech model, you can talk now, click to cancel/ }).click();
+  await expect(mic).toBeEnabled();
+  await mic.click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => sockets).toBe(2);
+  await expect(page.locator('.dictation-status', { hasText: 'Downloading the speech model (10%)' })).toBeVisible();
 });
 test('no download dialog when the speech model is present', async ({ page }) => {
   await mockDictationPage(page);
