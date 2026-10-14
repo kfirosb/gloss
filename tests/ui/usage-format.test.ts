@@ -20,6 +20,10 @@ test('the header readout turns amber under 20% left, red when a window is out, a
   expect(readout(usage(1, 0.43), at)).toEqual({ state: 'out', text: '5h quota renews in 2h 40m · week 57% left' });
   expect(readout({ provider: 'codex', observedAt: at, fiveHour: { usedFraction: 0.2, resetsAt: at + 60_000 } }, at)).toEqual({ state: 'healthy', text: '5h 80% left' });
 });
+test('a window whose reset already passed reads as renewed instead of its stale percentage', () => {
+  expect(readout({ provider: 'codex', observedAt: at - 3 * 3600_000, fiveHour: { usedFraction: 0.84, resetsAt: at - 60_000 }, sevenDay: { usedFraction: 0.03, resetsAt: at + 86400_000 } }, at)).toEqual({ state: 'healthy', text: '5h renewed · week 97% left' });
+  expect(readout({ provider: 'codex', observedAt: at - 3 * 3600_000, fiveHour: { usedFraction: 1, resetsAt: at - 60_000 } }, at)).toEqual({ state: 'healthy', text: '5h renewed' });
+});
 test('break episodes are keyed by provider, window and reset time so a dismissed break stays dismissed', () => {
   expect(breakEpisodeKey('claude', { window: 'five_hour', resetsAt: 123 })).toBe('claude:five_hour:123');
 });

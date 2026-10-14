@@ -24,6 +24,8 @@ export function readout(usage: ProviderUsage | undefined, now: number): { state:
   const parts: string[] = []; let state: ReadoutState = 'healthy';
   const consider = (label: string, window: UsageWindow | undefined) => {
     if (!window) return;
+    // The provider has not reported since this window renewed; its old percentage no longer applies.
+    if (window.resetsAt <= now) { parts.push(`${label} renewed`); return; }
     if (window.usedFraction >= 1 && window.resetsAt > now) { state = 'out'; parts.push(`${label} quota renews in ${formatCountdown(window.resetsAt - now)}`); return; }
     if (1 - window.usedFraction < WARN_LEFT_FRACTION && state !== 'out') state = 'warn';
     parts.push(`${label} ${percentLeft(window)}% left`);

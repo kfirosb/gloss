@@ -18,11 +18,12 @@ function useNow(ms: number) {
 }
 
 function WindowBar({ label, window, now }: { label: string; window: UsageWindow; now: number }) {
-  const left = percentLeft(window); const out = window.usedFraction >= 1 && window.resetsAt > now;
-  const tone = out ? 'out' : 1 - window.usedFraction < WARN_LEFT_FRACTION ? 'warn' : 'healthy';
+  const renewed = window.resetsAt <= now;
+  const left = percentLeft(window); const out = window.usedFraction >= 1 && !renewed;
+  const tone = renewed ? 'healthy' : out ? 'out' : 1 - window.usedFraction < WARN_LEFT_FRACTION ? 'warn' : 'healthy';
   return <div className="usage-window">
-    <div className="usage-window-label"><b>{label}</b><span>{out ? 'Used up' : `${left}% left`}</span></div>
-    <div className={`usage-bar ${tone}`} role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(window.usedFraction * 100)}><div style={{ width: `${Math.min(100, window.usedFraction * 100)}%` }} /></div>
+    <div className="usage-window-label"><b>{label}</b><span>{renewed ? 'Renewed' : out ? 'Used up' : `${left}% left`}</span></div>
+    {!renewed && <div className={`usage-bar ${tone}`} role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(window.usedFraction * 100)}><div style={{ width: `${Math.min(100, window.usedFraction * 100)}%` }} /></div>}
     <div className="usage-reset">{window.resetsAt > now ? `Renews in ${formatCountdown(window.resetsAt - now)} · ${formatClock(window.resetsAt)}` : 'Renewed; refresh for current numbers'}</div>
   </div>;
 }
