@@ -33,7 +33,7 @@ export function DictationButton({ dictation, language }: { dictation: Dictation;
     {state.phase === 'downloading' && <span role="status" aria-live="polite" className="dictation-status dictation-loading">Downloading the speech model ({label.progress}), speech is being recorded…</span>}
     {state.phase === 'finishing' && <span className="dictation-status" aria-hidden="true">…</span>}
     {state.phase === 'error' && <span role="alert" className="dictation-status">{state.message} <button type="button" onClick={() => dictation.press()}>Retry</button></span>}
-    <PanelDialog title="One-time download for dictation" open={dictation.confirmingDownload} close={() => dictation.declineDownload()} className="dictation-download-dialog">
+    <PanelDialog title="One-time download for dictation" open={dictation.confirmingDownload} close={() => dictation.declineDownload()} className="dictation-download-dialog" dir="ltr">
       <div className="review-body"><p>Gloss will now download the Whisper speech model (about 574 MB) so dictation runs on your Mac. This happens once. You can start talking right after you press Continue: your speech is recorded, and the text appears only after the download finishes.</p></div>
       <div className="review-actions"><button type="button" onClick={() => dictation.declineDownload()}>Cancel</button><button type="button" className="primary" onClick={() => dictation.acceptDownload()}>Continue</button></div>
     </PanelDialog>

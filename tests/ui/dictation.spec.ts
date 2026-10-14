@@ -123,6 +123,11 @@ test('the first press without the speech model explains the one-time download; C
   await mic.click();
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('about 574 MB');
+  await expect(dialog).toHaveAttribute('dir', 'ltr');
+  expect(await dialog.locator('p').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+  const box = await dialog.boundingBox(); const viewport = page.viewportSize()!;
+  expect(box!.width).toBeLessThanOrEqual(600); if (viewport.width > 700) expect(box!.width).toBeLessThan(viewport.width - 32);
+  expect(box!.height).toBeLessThan(viewport.height * 0.8);
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(mic).toBeEnabled(); expect(sockets).toBe(0);
