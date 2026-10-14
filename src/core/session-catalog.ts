@@ -18,6 +18,14 @@ export interface OpenSessionScan {
   error?: string;
 }
 
+/** Per-session record of the newest response the user has looked at. */
+export interface SeenStore {
+  /** Newest response sequence the user has seen, or undefined when the session was never seen. */
+  seenSequence(sessionId: string): number | undefined;
+  /** Records that the user saw responses up to `sequence`; a value lower than the stored one is ignored. */
+  markSeen(sessionId: string, sequence: number, at?: number): void;
+}
+
 export interface CatalogEntry {
   sessionTitle?: string;
   key: string;
