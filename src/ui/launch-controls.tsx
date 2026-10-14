@@ -3,6 +3,8 @@ import type { CatalogEntry } from '../core/session-catalog.js';
 import type { TerminalView } from '../core/session-contracts.js';
 import { sessionRequest } from './session-client.js';
 
+export type { TerminalView } from '../core/session-contracts.js';
+
 export type PopupMode = 'auto' | 'current-tab' | 'dot-only';
 export interface LaunchSettings { extraArgs: { claude: string[]; codex: string[] }; popup: PopupMode; terminalView: TerminalView }
 /** The editable form: extra arguments are plain text; the server splits them with its one quoting rule. */
@@ -12,6 +14,9 @@ export const writeLaunchSettings = (s: LaunchSettingsInput) => sessionRequest<La
 export const terminalTicket = (launchId: string) => sessionRequest<{ ticket: string; expiresAt: number }>(`/api/launches/${encodeURIComponent(launchId)}/terminal-ticket`, { method: 'POST', body: '{}' });
 export const listLaunches = () => sessionRequest<unknown[]>('/api/launches');
 export const retryLaunch = (launchId: string) => sessionRequest<unknown>(`/api/launches/${encodeURIComponent(launchId)}/identify`, { method: 'POST', body: '{}' });
+export interface RunResult { launch: { id: string; title?: string; folder: string }; reused: boolean; typed: boolean }
+export const runCommand = (folder: string, command: string, originSessionId?: string) => sessionRequest<RunResult>('/api/launches/run', { method: 'POST', body: JSON.stringify({ folder, command, ...(originSessionId ? { originSessionId } : {}) }) });
+export const terminalTitle = (t: { title: string; projectName: string; folder: string }) => `${t.title} · ${t.projectName} / ${t.folder.split('/').filter(Boolean).at(-1) ?? t.folder}`;
 export const endLaunch = (launchId: string) => sessionRequest<unknown>(`/api/launches/${encodeURIComponent(launchId)}/end`, { method: 'POST', body: '{}' });
 
 /** Frames stay far below the server's 64 KiB cap even after JSON escaping (worst case 6 bytes per UTF-16 unit). */
@@ -83,6 +88,22 @@ export function usePopupMode(): PopupMode {
     return () => { listeners.delete(l); };
   }, []);
   return current?.popup ?? DEFAULT_POPUP;
+}
+const DEFAULT_TERMINAL_VIEW: TerminalView = 'popup';
+/** How terminal tabs open; 'popup' until the settings are read. */
+export function useTerminalView(): TerminalView {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const l = () => bump(v => v + 1); listeners.add(l);
+    if (!current) void readLaunchSettings().then(publish, () => {});
+    return () => { listeners.delete(l); };
+  }, []);
+  return current?.terminalView ?? DEFAULT_TERMINAL_VIEW;
+}
+/** Expand and Shrink save only the view; every other launch setting is sent back unchanged. */
+export async function saveTerminalView(view: TerminalView) {
+  const base = current ?? await readLaunchSettings();
+  const saved = await writeLaunchSettings({ ...toInput(base), terminalView: view }); publish(saved);
 }
 export const saveLaunchSettings = async (input: LaunchSettingsInput) => { const saved = await writeLaunchSettings(input); publish(saved); return saved; };
 
