@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attention cues · Gloss preview</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;color:#172033;background:#f6f7fb;--line:#d9deea;--muted:#647089;--green:#2d6a50;--red:#e5372b;--amber:#e0a23a;--glow:#3b82f6}
+*{box-sizing:border-box}body{margin:0}button{font:inherit;color:inherit;cursor:pointer;background:transparent;border:1px solid var(--line);border-radius:7px;padding:6px 10px}button:hover{background:#e9edf4}
+.preview{height:40px;padding:0 20px;background:#213e32;color:#e7eee9;display:flex;gap:16px;align-items:center;font-size:12px;position:sticky;top:0;z-index:5}.preview b{font-size:10px;letter-spacing:1.5px}.preview .spacer{flex:1}.preview button{border:0;color:#e7eee9;padding:4px 10px}.preview button:hover{background:#395649}.preview button.on{background:#4e7a62}
+.page{max-width:1240px;margin:0 auto;padding:22px 20px 60px;display:grid;gap:28px}
+h2{font-size:13px;letter-spacing:1.3px;text-transform:uppercase;color:#78877e;margin:0 0 10px}
+.note{color:var(--muted);font-size:12px;line-height:1.7;margin:0 0 12px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.card h3{margin:0;padding:9px 12px;font-size:11px;font-weight:600;color:#58657d;background:#f0f3fa;border-bottom:1px solid var(--line)}
+
+/* ---- shared attention vocabulary (what would ship in styles.css) ---- */
+.attn-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--red);color:#fff;font-size:10.5px;font-weight:700;line-height:1;box-shadow:0 0 0 2px #fff}
+.attn-badge.small{min-width:15px;height:15px;font-size:9px}
+.attn-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex:none;display:inline-block}
+.attn-spinner{width:12px;height:12px;border-radius:50%;border:2px solid #d9c38f;border-top-color:var(--amber);animation:spin .9s linear infinite;flex:none}
+.attn-ring{animation:ring 1.6s ease-in-out infinite}
+.attn-ring-static{box-shadow:0 0 0 3px #3b82f680,0 0 18px #3b82f666}
+.attn-flash{animation:flash 1.4s ease-out 1}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes ring{0%,100%{box-shadow:0 0 0 2px #3b82f633,0 0 0 0 #3b82f600}50%{box-shadow:0 0 0 3px #3b82f6aa,0 0 22px #3b82f680}}
+@keyframes flash{0%{background:#dcf5e6;box-shadow:0 0 0 3px #1bb76880}100%{background:transparent;box-shadow:none}}
+@keyframes pulse{50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.attn-spinner,.attn-ring,.attn-flash,.working{animation:none}.attn-ring{box-shadow:0 0 0 3px #3b82f6aa}}
+
+/* ---- sidebar mock (green theme as in the sidebar preview) ---- */
+.sidebar{background:#f1f5f0;color:#253c34;padding:10px 10px 14px;font-size:13px}
+.section-title{display:flex;justify-content:space-between;align-items:center;padding:6px 10px 8px;font-size:10px;font-weight:650;letter-spacing:1.3px;color:#78877e}.section-title .more{position:relative;border:0;padding:3px 6px}.section-title .attn-badge{position:absolute;top:-8px;right:-9px}
+.project-head{display:flex;align-items:center;gap:7px;padding:8px 6px;font-weight:600}.project-head .chev{color:#839087}.project-head .name{flex:1}
+.folder-list{margin-left:16px;padding-left:9px;border-left:1px solid #d5e0d6}
+.folder-row{display:flex;align-items:center;gap:9px;padding:8px 7px;border-radius:8px;margin:3px 0;border:1px solid transparent}.folder-row.selected{background:#e0ece0;border-color:#bfd3bf}
+.folder-row .labels{flex:1;min-width:0}.folder-row small{display:block;color:#718177;font-size:10px;margin-top:3px}
+.count{color:#54705e;background:#fff9;border-radius:4px;padding:2px 5px;font-size:10px}
+.rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px;background:#f1f5f0;width:68px}.rail button{position:relative;width:38px;height:38px;border:1px solid #dbe4de;background:#fff;font-weight:600;border-radius:8px}.rail .attn-badge{position:absolute;top:-6px;right:-6px}.rail .attn-spinner{position:absolute;left:-4px;bottom:-4px}
+
+/* ---- tabs + panes mock (app theme) ---- */
+.tabs{display:flex;gap:2px;align-items:flex-end;padding:8px 12px 0;background:#eceff5;border-bottom:1px solid var(--line)}
+.tab{display:flex;align-items:center;gap:6px;padding:6px 11px;font-size:.78rem;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;color:#4b566b;position:relative;top:1px}.tab.selected{background:#fff;border-color:var(--line);color:#172033;font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot.idle{background:#4f9a6b}.dot.working{background:var(--amber);animation:pulse 1.2s infinite}
+.pane{margin:14px;border:1px solid #cfd6e5;border-radius:12px;background:#fff;overflow:hidden;transition:box-shadow .3s}
+.pane-toolbar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:#f0f3fa;border-bottom:1px solid var(--line)}.pane-toolbar h4{flex:1;margin:0;font-size:.85rem;text-align:right}.pane-toolbar button{font-size:.75rem;padding:5px 8px;background:#fff}
+.pane-toolbar .live-state{display:none;align-items:center;gap:6px;font-size:.72rem;color:#2d5fb8;background:#e6efff;border-radius:999px;padding:3px 9px}.pane.arriving .live-state,.pane.translating .live-state{display:inline-flex}
+.feed{padding:12px;background:#eef1f7;min-height:110px}.msg{background:#fff;border:1px solid #e3e6ee;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.7}.msg small{display:block;color:#647089;font-size:10.5px;margin-bottom:5px;text-align:right}.msg p{margin:0;text-align:right;direction:rtl}
+.composer{margin:14px;border:1px solid #cfd6e5;border-radius:12px;background:#fff;padding:10px 12px;transition:box-shadow .3s}
+.status-strip{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:12px;margin-bottom:8px}
+.status-strip.waiting{background:#e6efff;color:#2d5fb8}.status-strip.sending{background:#f0f3fa;color:#58657d}.status-strip.delivered{background:#dcf5e6;color:#1f6b45}.status-strip.failed{background:#fde8e6;color:#a8291f;font-weight:600}.status-strip.received{background:#dcf5e6;color:#1f6b45}
+.status-strip .retry{margin-left:auto;border-color:#e3a39d;font-size:11px;padding:3px 8px}
+.composer textarea{width:100%;height:52px;border:1px solid var(--line);border-radius:8px;padding:8px;resize:none;direction:rtl;font:inherit}
+.composer .actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.composer .actions button{font-size:12px;opacity:.6}
+
+/* ---- dock mock ---- */
+.dock{display:flex;gap:14px;align-items:flex-end;padding:12px 18px;background:linear-gradient(#5e6b7a,#3b4552);border-radius:18px;width:max-content;margin:8px auto}
+.dock .icon{position:relative;width:52px;height:52px;border-radius:12px;display:grid;place-items:center;color:#fff;font-size:22px;font-weight:700}.dock .icon.gloss{background:#2d6a50;font-family:serif}.dock .icon.other{background:#cfd4dc;color:#555}.dock .attn-badge{position:absolute;top:-7px;right:-7px;min-width:22px;height:22px;font-size:12px;box-shadow:0 0 0 1.5px #fff}
+.timeline{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}.timeline button.on{background:#dfece3;border-color:#b5cdbd;font-weight:600}
+</style>
+</head>
+<body>
+<div class="preview"><b>DESIGN PREVIEW</b><span>Attention cues · sample data only</span><span class="spacer"></span><span id="scenario-label">Step 1 of 5: everything quiet</span><button id="play">▶ Play scenario</button></div>
+<div class="page">
+
+<section>
+ <h2>Scenario player</h2>
+ <p class="note">Press Play, or click a step. All five surfaces below update together: sidebar, icon rail, session tabs, Live Conversation, composer, and the Mac Dock. Every static state is also shown further down, so this page is readable with scripts off.</p>
+ <div class="timeline" id="timeline">
+  <button data-step="0" class="on">1 · Quiet</button><button data-step="1">2 · Claude working</button><button data-step="2">3 · Response arriving</button><button data-step="3">4 · Translating, Dock badge</button><button data-step="4">5 · Opened the session · seen</button>
+ </div>
+ <div class="row" style="grid-template-columns:300px 68px minmax(0,1fr)">
+  <div class="card"><h3>Sidebar</h3><div class="sidebar">
+   <div class="section-title">PROJECTS <button class="more">⋯<span class="attn-badge small" id="s-header-badge" hidden>1</span></button></div>
+   <div class="project-head"><span class="chev">▾</span><span class="name">hebrow-for-terminal</span><span class="attn-badge" id="s-project-badge" hidden>1</span></div>
+   <div class="folder-list">
+    <div class="folder-row"><span class="labels">main<small>main checkout</small></span><span class="count">5</span></div>
+    <div class="folder-row selected" id="s-row-wm"><span class="attn-spinner" id="s-spinner" hidden></span><span class="labels">working-mode<small>working-mode · worktree</small></span><span class="count" id="s-count">1</span><span class="attn-badge" id="s-row-badge" hidden>1</span></div>
+    <div class="folder-row"><span class="labels">voice<small>dictation · worktree</small></span><span class="count">1</span></div>
+   </div>
+   <div class="project-head"><span class="chev">▸</span><span class="name">scan-app-store</span></div>
+  </div></div>
+  <div class="card"><h3>Rail</h3><div class="rail"><button>H<span class="attn-badge small" id="r-badge" hidden>1</span><span class="attn-spinner" id="r-spinner" hidden></span></button><button>S</button><button>T</button></div></div>
+  <div class="card"><h3>Session tabs · panels · composer</h3>
+   <div class="tabs"><div class="tab selected" id="t-tab1"><span>✳ working-mode · Claude</span><span class="dot idle" id="t-dot1"></span></div><div class="tab" id="t-tab2"><span>main · Codex</span><span class="dot idle"></span></div></div>
+   <div class="pane" id="p-live"><div class="pane-toolbar"><button>Expand</button><button>History</button><span class="live-state" id="p-state"><span class="attn-spinner"></span><span id="p-state-text">Response arriving…</span></span><h4>Live Conversation</h4></div>
+    <div class="feed"><div class="msg"><small>Coding agent · translated</small><p id="p-text">מוכן. הסתכלתי על שלושת צילומי המסך ומיפיתי את הקוד.</p></div></div></div>
+   <div class="composer" id="c-composer"><div class="status-strip waiting" id="c-strip" hidden><span class="attn-spinner" id="c-spin"></span><span id="c-text">Waiting for Claude’s response</span></div><textarea placeholder="כתוב בעברית…"></textarea><div class="actions"><button>Send as peer</button><button>Send to agent</button><button>Discuss first</button><button style="opacity:1">Attach files</button></div></div>
+  </div>
+ </div>
+ <div class="card" style="margin-top:20px"><h3>Mac Dock · badge appears only while Gloss is not the front window</h3><div class="dock"><span class="icon other">F</span><span class="icon other">⚙</span><span class="icon gloss">G<span class="attn-badge" id="d-badge" hidden>1</span></span><span class="icon other">W</span></div></div>
+</section>
+
+<section>
+ <h2>All states, side by side</h2>
+ <p class="note">One red means one thing: the agent stopped and needs you, whether it finished a response or is asking for approval. Amber means working. Blue means something is arriving right now.</p>
+ <div class="row">
+  <div class="card"><h3>Folder row · working</h3><div class="sidebar"><div class="folder-row"><span class="attn-spinner"></span><span class="labels">working-mode<small>working-mode · worktree</small></span><span class="count">1</span></div></div></div>
+  <div class="card"><h3>Folder row · 2 sessions waiting (1 response, 1 approval)</h3><div class="sidebar"><div class="folder-row" title="2 sessions waiting: 1 response, 1 approval"><span class="labels">main<small>main checkout</small></span><span class="count">5</span><span class="attn-badge">2</span></div></div></div>
+  <div class="card"><h3>Folder row · working and waiting at once</h3><div class="sidebar"><div class="folder-row"><span class="attn-spinner"></span><span class="labels">main<small>main checkout</small></span><span class="count">5</span><span class="attn-badge">1</span></div></div></div>
+  <div class="card"><h3>Project header · collapsed, 3 waiting across folders</h3><div class="sidebar"><div class="project-head"><span class="chev">▸</span><span class="name">hebrow-for-terminal</span><span class="attn-badge">3</span></div></div></div>
+  <div class="card"><h3>Session tab · needs you</h3><div class="tabs" style="padding-bottom:8px"><div class="tab"><span>✳ working-mode · Claude</span><span class="attn-dot"></span></div><div class="tab selected"><span>main · Codex</span><span class="dot working"></span></div></div></div>
+  <div class="card"><h3>Live Conversation · translating (glow ring)</h3><div class="pane attn-ring-static translating" style="margin:14px"><div class="pane-toolbar"><button>Expand</button><button>History</button><span class="live-state"><span class="attn-spinner"></span>Translating…</span><h4>Live Conversation</h4></div><div class="feed" style="min-height:50px"><div class="msg"><small>Coding agent · translating</small><p>…</p></div></div></div></div>
+  <div class="card"><h3>Composer · waiting</h3><div class="composer attn-ring-static" style="margin:14px"><div class="status-strip waiting"><span class="attn-spinner"></span>Waiting for Claude’s response</div><textarea placeholder="כתוב בעברית…"></textarea></div></div>
+  <div class="card"><h3>Composer · failed</h3><div class="composer" style="margin:14px"><div class="status-strip failed"><span>✕</span>Failed: channel not connected<button class="retry">Retry</button></div><textarea placeholder="כתוב בעברית…"></textarea></div></div>
+  <div class="card"><h3>Composer · delivered (brief flash, then quiet)</h3><div class="composer" style="margin:14px"><div class="status-strip delivered"><span>✓</span>Delivered</div><textarea placeholder="כתוב בעברית…"></textarea></div></div>
+ </div>
+</section>
+
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const steps=[
+ {label:'Step 1 of 5: everything quiet',spinner:false,badge:0,arriving:'',dock:false,strip:null,tabDot:'idle'},
+ {label:'Step 2 of 5: Claude is working in working-mode',spinner:true,badge:0,arriving:'',dock:false,strip:'waiting',tabDot:'working'},
+ {label:'Step 3 of 5: response arriving in Live Conversation',spinner:true,badge:0,arriving:'arriving',dock:false,strip:'waiting',tabDot:'working'},
+ {label:'Step 4 of 5: translating; you switched to another app',spinner:false,badge:1,arriving:'translating',dock:true,strip:'received',tabDot:'needs',otherTab:true},
+ {label:'Step 5 of 5: you opened the session; marked seen',spinner:false,badge:0,arriving:'',dock:false,strip:null,tabDot:'idle'},
+];
+function show(i){const s=steps[i];$('#scenario-label').textContent=s.label;
+ for(const b of document.querySelectorAll('#timeline button'))b.classList.toggle('on',+b.dataset.step===i);
+ for(const id of ['s-spinner','r-spinner'])$('#'+id).hidden=!s.spinner;
+ for(const id of ['s-header-badge','s-project-badge','s-row-badge','r-badge'])$('#'+id).hidden=!s.badge;
+ $('#d-badge').hidden=!s.dock;
+ const live=$('#p-live');live.className='pane'+(s.arriving?' attn-ring '+s.arriving:'');$('#p-state-text').textContent=s.arriving==='translating'?'Translating…':'Response arriving…';
+ $('#p-text').textContent=s.arriving==='arriving'?'…':s.arriving==='translating'?'(תרגום בדרך) I mapped the sidebar, the Live Conversation pane and the session catalog…':'מיפיתי את הסרגל הצדי, את חלונית השיחה החיה ואת קטלוג הסשנים…';
+ const strip=$('#c-strip');strip.hidden=!s.strip;if(s.strip){strip.className='status-strip '+s.strip;$('#c-spin').hidden=s.strip!=='waiting';$('#c-text').textContent=s.strip==='waiting'?'Waiting for Claude’s response':'Response received';}
+ $('#c-composer').className='composer'+(s.strip==='waiting'?' attn-ring':s.strip==='received'?' attn-flash':'');
+ const d=$('#t-dot1');d.className=s.tabDot==='needs'?'attn-dot':'dot '+s.tabDot;
+ $('#t-tab1').classList.toggle('selected',!s.otherTab);$('#t-tab2').classList.toggle('selected',!!s.otherTab);
+}
+let timer=null,cur=0;
+$('#timeline').onclick=e=>{const b=e.target.closest('button');if(!b)return;clearInterval(timer);timer=null;$('#play').textContent='▶ Play scenario';cur=+b.dataset.step;show(cur)};
+$('#play').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('#play').textContent='▶ Play scenario';return}cur=0;show(0);$('#play').textContent='■ Stop';timer=setInterval(()=>{cur=(cur+1)%steps.length;show(cur);if(cur===steps.length-1){clearInterval(timer);timer=null;$('#play').textContent='▶ Play scenario'}},2200)};
+show(0);
+</script>
+</body>
+</html>
