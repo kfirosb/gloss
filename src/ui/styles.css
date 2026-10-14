@@ -583,3 +583,9 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .sidebar-notice{display:flex;align-items:flex-start;gap:8px;margin:0 12px 10px;padding:7px 10px;border-radius:7px;background:#f0f5ec;color:#4f6a50;font-size:11px;line-height:1.5;flex-shrink:0}
 .sidebar-notice span{flex:1;min-width:0;overflow-wrap:anywhere}
 .sidebar-notice button{border:0;background:transparent;padding:0 2px;color:#6b7e6e;cursor:pointer;font-size:13px;line-height:1}
+.session-tab-agent.terminal{font:11px/1 ui-monospace, Menlo, monospace;background:#172033;color:#9ef0b8;border-radius:4px;padding:2px 4px}
+.terminal-workspace{display:flex;flex-direction:column;flex:1;min-height:0;background:#0f1420}
+.terminal-workspace .session-header{background:#fff}
+.terminal-workspace-host{flex:1;min-height:0;display:flex;flex-direction:column;padding:6px 8px}
+.terminal-workspace-host .terminal-host{flex:1;min-height:0}
+.pill.shell{border-radius:999px;padding:2px 9px;font-size:.72rem;background:#e6e9f0;color:#44506a}
