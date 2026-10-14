@@ -79,28 +79,22 @@ export function useAutoOpenWaitingLaunch(entry: CatalogEntry | undefined, select
 let current: LaunchSettings | undefined; const listeners = new Set<() => void>();
 const publish = (value: LaunchSettings) => { current = value; listeners.forEach(l => l()); };
 const DEFAULT_POPUP: PopupMode = 'auto';
-/** Popup behavior for the session view; defaults to 'auto' when the settings cannot be read. */
-export function usePopupMode(): PopupMode {
+/** Subscribes to the shared settings copy and triggers the first read; undefined until it arrives. */
+function useLaunchSettings(): LaunchSettings | undefined {
   const [, bump] = useState(0);
   useEffect(() => {
     const l = () => bump(v => v + 1); listeners.add(l);
     if (!current) void readLaunchSettings().then(publish, () => {});
     return () => { listeners.delete(l); };
   }, []);
-  return current?.popup ?? DEFAULT_POPUP;
+  return current;
 }
+/** Popup behavior for the session view; defaults to 'auto' when the settings cannot be read. */
+export const usePopupMode = (): PopupMode => useLaunchSettings()?.popup ?? DEFAULT_POPUP;
 const DEFAULT_TERMINAL_VIEW: TerminalView = 'popup';
 /** How terminal tabs open; 'popup' until the settings are read. */
-export function useTerminalView(): TerminalView {
-  const [, bump] = useState(0);
-  useEffect(() => {
-    const l = () => bump(v => v + 1); listeners.add(l);
-    if (!current) void readLaunchSettings().then(publish, () => {});
-    return () => { listeners.delete(l); };
-  }, []);
-  return current?.terminalView ?? DEFAULT_TERMINAL_VIEW;
-}
-/** Expand and Shrink save only the view; every other launch setting is sent back unchanged. */
+export const useTerminalView = (): TerminalView => useLaunchSettings()?.terminalView ?? DEFAULT_TERMINAL_VIEW;
+/** Expand and Shrink save only the view; every other launch setting is sent back unchanged. Rejects when the settings cannot be read or written, so callers must catch. */
 export async function saveTerminalView(view: TerminalView) {
   const base = current ?? await readLaunchSettings();
   const saved = await writeLaunchSettings({ ...toInput(base), terminalView: view }); publish(saved);
