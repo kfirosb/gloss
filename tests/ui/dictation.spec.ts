@@ -22,9 +22,9 @@ test('a status request failure leaves the button disabled rather than broken', a
   await expect(page.getByRole('button', { name: /Dictation unavailable/ })).toBeDisabled();
   await expect(page.getByRole('textbox', { name: 'Discuss with language assistant' })).toBeEditable();
 });
-async function mockDictationPage(page: import('@playwright/test').Page) {
+async function mockDictationPage(page: import('@playwright/test').Page, modelPresent = true) {
   const snapshot = base(); await mockSession(page, () => snapshot); const actions: any[] = [];
-  await page.route('**/api/dictation', route => route.fulfill({ json: { available: true, model: { present: true, bytes: 1 }, engine: 'running' } }));
+  await page.route('**/api/dictation', route => route.fulfill({ json: { available: true, model: modelPresent ? { present: true, bytes: 1 } : { present: false }, engine: modelPresent ? 'running' : 'stopped' } }));
   await page.route('**/api/sessions/*/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence: 1, snapshot }) + '\n\n' }));
   await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { sessionId: snapshot.id, sequence: 2, snapshot } }); });
   // A synthetic tone stands in for the microphone; the server side is a scripted socket.
@@ -109,4 +109,35 @@ test('audio is captured while the speech engine starts, with a status line sayin
   await expect(page.getByRole('button', { name: 'Stop dictation' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.dictation-status', { hasText: 'speech is being recorded' })).toHaveCount(0);
   await expect(composer).toHaveValue('שלום');
+});
+test('the first press without the speech model explains the one-time download; Cancel does nothing, Continue starts', async ({ page }) => {
+  await mockDictationPage(page, false);
+  let sockets = 0; let frames = 0;
+  await page.routeWebSocket('**/api/dictation/audio**', ws => {
+    sockets++; ws.send(JSON.stringify({ type: 'state', state: 'downloading', received: 10 * 1024 * 1024, total: 100 * 1024 * 1024 }));
+    ws.onMessage(message => { if (typeof message !== 'string') frames++; });
+  });
+  await page.goto('/#capability=test');
+  const mic = page.getByRole('button', { name: 'Dictate in Hebrew' });
+  const dialog = page.getByRole('dialog', { name: 'One-time download for dictation' });
+  await mic.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('about 574 MB');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(mic).toBeEnabled(); expect(sockets).toBe(0);
+  await mic.click();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => sockets).toBe(1);
+  await expect(page.locator('.dictation-status', { hasText: 'Downloading the speech model (10%), speech is being recorded…' })).toBeVisible();
+  await expect.poll(() => frames).toBeGreaterThan(2);
+});
+test('no download dialog when the speech model is present', async ({ page }) => {
+  await mockDictationPage(page);
+  let sockets = 0; await page.routeWebSocket('**/api/dictation/audio**', ws => { sockets++; ws.send(JSON.stringify({ type: 'state', state: 'starting' })); });
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Dictate in Hebrew' }).click();
+  await expect.poll(() => sockets).toBe(1);
+  await expect(page.getByRole('dialog', { name: 'One-time download for dictation' })).toBeHidden();
 });

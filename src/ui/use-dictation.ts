@@ -5,7 +5,11 @@ import { initialDictationState, reduceDictation, type DictationEffect, type Dict
 import { PCM_PROCESSOR_NAME, workletUrl } from './pcm-worklet.js';
 
 export interface UseDictationOptions { sessionId: string; language: DictationLanguage; appendText(text: string): void; sendNow(): void; enabled: boolean }
-export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; /** Asks to send once dictation has finished; false (and nothing happens) when no recording is in progress, so the caller sends now. */ requestSend(): boolean; dismissNotice(): void }
+export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; /** Asks to send once dictation has finished; false (and nothing happens) when no recording is in progress, so the caller sends now. */ requestSend(): boolean; dismissNotice(): void;
+  /** True while the one-time model download dialog is open (the first press when the speech model is not on disk yet). */
+  confirmingDownload: boolean; acceptDownload(): void; declineDownload(): void }
+
+const fetchStatus = (signal?: AbortSignal) => fetch('/api/dictation', { headers: authHeaders(), ...(signal ? { signal } : {}) }).then(r => r.ok ? r.json() as Promise<DictationStatus> : Promise.reject(new Error(String(r.status))));
 
 export function useDictation(options: UseDictationOptions): Dictation {
   const [state, setState] = useState<DictationUiState>(initialDictationState);
@@ -13,6 +17,9 @@ export function useDictation(options: UseDictationOptions): Dictation {
   const latest = useRef(options); latest.current = options;
   const stream = useRef<MediaStream | undefined>(undefined); const context = useRef<AudioContext | undefined>(undefined);
   const socket = useRef<WebSocket | undefined>(undefined); const finishTimer = useRef<number | undefined>(undefined); const level = useRef(0);
+  // Last known model presence from GET /api/dictation, and whether the download dialog was accepted in this page session.
+  const modelPresent = useRef<boolean | undefined>(undefined); const downloadAccepted = useRef(false);
+  const [confirmingDownload, setConfirmingDownload] = useState(false);
   const dispatch = useCallback((event: DictationUiEvent) => {
     const { state: next, effects } = reduceDictation(current.current, event);
     current.current = next; setState(next);
@@ -73,17 +80,28 @@ export function useDictation(options: UseDictationOptions): Dictation {
   useEffect(() => {
     if (!options.enabled) return;
     const controller = new AbortController();
-    fetch('/api/dictation', { headers: authHeaders(), signal: controller.signal }).then(r => r.ok ? r.json() as Promise<DictationStatus> : Promise.reject(new Error(String(r.status))))
-      .then(status => dispatch({ type: 'status', status }), () => { if (!controller.signal.aborted) dispatch({ type: 'status-failed' }); });
+    fetchStatus(controller.signal).then(status => { modelPresent.current = status.model.present; dispatch({ type: 'status', status }); }, () => { if (!controller.signal.aborted) dispatch({ type: 'status-failed' }); });
     return () => controller.abort();
   }, [options.enabled, dispatch]);
+  const press = () => {
+    const p = current.current.phase;
+    if ((p !== 'idle' && p !== 'error') || downloadAccepted.current || modelPresent.current !== false) { dispatch({ type: 'press', now: Date.now() }); return; }
+    // The model looked absent: re-check (another window may have downloaded it) before asking about the one-time download.
+    fetchStatus().then(status => { modelPresent.current = status.model.present; return status.model.present; }, () => false).then(present => {
+      const q = current.current.phase; if (q !== 'idle' && q !== 'error') return;
+      if (present) dispatch({ type: 'press', now: Date.now() }); else setConfirmingDownload(true);
+    });
+  };
   // On session change or unmount: let the reducer go idle, then release anything still held (the reducer neither clears the
   // finish timer here nor closes a socket left open after an error phase).
   useEffect(() => () => { dispatch({ type: 'session-changed' }); window.clearTimeout(finishTimer.current); finishTimer.current = undefined; closeSocket(); stopStream(); }, [options.sessionId, dispatch]);
   return {
     state,
     readLevel,
-    press: () => dispatch({ type: 'press', now: Date.now() }),
+    press,
+    confirmingDownload,
+    acceptDownload: () => { downloadAccepted.current = true; setConfirmingDownload(false); dispatch({ type: 'press', now: Date.now() }); },
+    declineDownload: () => setConfirmingDownload(false),
     escape: () => { const p = current.current.phase; if (p !== 'starting' && p !== 'recording') return false; dispatch({ type: 'escape' }); return true; },
     requestSend: () => { const p = current.current.phase; if (p !== 'starting' && p !== 'recording' && p !== 'finishing') return false; dispatch({ type: 'send-requested' }); return true; },
     dismissNotice: () => dispatch({ type: 'dismiss-notice' }),
