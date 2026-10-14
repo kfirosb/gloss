@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, CodingState, Target, Attachment } from '../../core/contracts.js';
 import { collectProcess, runProcess } from '../../runtime/process-runner.js';
+import { parseCodexRateLimits } from '../../core/usage.js';
 import { projectIdentity, Transcript, transcriptConnection, uuid, validateTarget, verifyFirstRecord, type AdapterOptions, type Parsed } from '../shared.js';
 
 export function codexMessage(text: string, attachments: Attachment[] = []): string {
@@ -43,6 +44,7 @@ export function parseCodexRecord(record: any, offset: number, sessionRef: string
   if (p.thread_id !== undefined && p.thread_id !== sessionRef) throw new Error('Transcript identity mismatch');
   if (p.type === 'task_started') return { state: 'working' };
   if (p.type === 'task_complete' || p.type === 'turn_aborted') return { state: 'idle' };
+  if (p.type === 'token_count') { const usage = parseCodexRateLimits(p.rate_limits, Date.parse(record.timestamp) || Date.now()); return usage ? { usage } : {}; }
   if (p.type !== 'item_completed') return {};
   const item = p.item;
   if (!item || typeof item.type !== 'string') throw new Error('Malformed Codex item');

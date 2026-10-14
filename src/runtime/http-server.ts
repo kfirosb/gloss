@@ -99,6 +99,7 @@ async function sessionRoute(app: Application, req: IncomingMessage, res: ServerR
     if (req.method === 'PUT' && app.setSessionLanguage) { const body = await readBody(req, 4096); if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid language settings'); respond(res, 200, app.setSessionLanguage(id, body)); return true; }
     if (req.method === 'DELETE' && app.setSessionLanguage) { respond(res, 200, app.setSessionLanguage(id, null)); return true; }
   }
+  if (route === 'usage' && req.method === 'GET' && app.sessionUsage) { res.setHeader('cache-control', 'no-store'); respond(res, 200, app.sessionUsage(id)); return true; }
   if (route === 'snapshot' && req.method === 'GET') { respond(res, 200, snapshot); return true; }
   if (route === 'events' && req.method === 'GET') {
     events(res, snapshot, listener => app.sessions!.subscribe(id, listener)); return true;
@@ -281,6 +282,11 @@ export async function startServer(application: Application, options: { port?: nu
         if (url.pathname.endsWith('/events')) return events(res, catalog.snapshot(), listener => catalog.subscribe(listener));
         res.setHeader('cache-control', 'no-store');
         return respond(res, 200, catalog.snapshot());
+      }
+      if (url.pathname === '/api/usage/refresh' && req.method === 'POST' && application.refreshUsage) {
+        const body = await readBody(req, 1024) as { provider?: unknown } | null;
+        if (!body || typeof body !== 'object' || (body.provider !== 'claude' && body.provider !== 'codex')) { respond(res, 400, { error: 'Unknown provider' }); return; }
+        res.setHeader('cache-control', 'no-store'); return respond(res, 200, await application.refreshUsage(body.provider));
       }
       if (url.pathname === '/api/about' && req.method === 'GET' && application.about) { res.setHeader('cache-control', 'no-store'); return respond(res, 200, application.about()); }
       if (url.pathname === '/api/folders/search' && req.method === 'GET' && application.searchFolders) {

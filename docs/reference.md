@@ -46,6 +46,14 @@ Product history is stored under `~/.language-assistant/state.db` with restrictiv
 
 The language model is an economical model in the same tool ecosystem (`haiku` for Claude, `gpt-5.6-sol` for Codex by default in this account). Availability and usage limits come from the existing account. Native approval prompts stay in the coding tool and are never answered by the assistant.
 
+## Usage and quota
+
+The session header shows how much of the selected agent's account quota is left, for example "5h 63% left · week 57% left". It turns amber when either window has less than 20% left, red with a renewal countdown when a window is used up, and reads "usage —" until the first report arrives. Claude reports its 5-hour and weekly windows with every Gloss language call; Codex reports them in the live session's rollout after every turn, and before that the newest rollout on this Mac is used. The numbers are account-wide, so they include the live agent's own use.
+
+Click the readout for both windows with their renewal times, a **Refresh** button and **What Gloss has spent**. Refresh on Claude runs a one-word call on the cheapest model, which costs a fraction of a cent; on Codex it re-reads the newest rollout. Spend counts only Gloss's own translations, summaries and instruction preparation, per session, today and since install, and is stored in the local database (schema 23). Claude reports an API-equivalent dollar figure, which on a subscription is drawn from the plan rather than billed; Codex reports tokens only, so no price is shown.
+
+When a window is used up, a break dialog opens once per exhaustion: the renewal countdown, an **Upgrade plan** link, and a suggestion for the time in between, with **Another idea** to rotate it. A used-up week shows the weekly dialog, with travel and rest ideas, instead of the 5-hour one. Dismissing is remembered in this browser until that window renews.
+
 ## Live terminal bridge
 
 The launcher starts the panel HTTP server first and automatically gives the native session adapter its loopback endpoint and capability. No bridge flags are needed for the normal local workflow. The adapter posts completed assistant replies to `POST /api/source/messages`; Codex commentary, reasoning, and tool output are excluded. English terminal replies are translated inside the panel.

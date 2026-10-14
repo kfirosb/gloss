@@ -35,6 +35,8 @@ export interface WorkflowDependencies {
   agents: AgentAdapter[];
   store: ConversationStore;
   createId?: (prefix: 'draft' | 'delivery') => string;
+  /** Account-level quota observations from the live agent's own transcript; never part of the conversation. */
+  onUsage?: (usage: import('./usage.js').ProviderUsage) => void;
 }
 
 export interface Workflow {
@@ -239,6 +241,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
   };
 
   const consumeEvent = async (event: AgentEvent, active: CodingConnection) => {
+    if (event.type === 'usage') { deps.onUsage?.(event.usage); return; }
     if (event.type === 'gap') {
       state.sourceGaps = [...new Set([...(state.sourceGaps ?? []), event.reason])].slice(-20);
       publish();

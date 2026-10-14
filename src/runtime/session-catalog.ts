@@ -22,6 +22,8 @@ export interface SessionCatalogOptions {
   clock?: CatalogClock;
   launcher?: Pick<SessionLauncher, 'list' | 'subscribe'> & Partial<Pick<SessionLauncher, 'noticeDiscovery'>>;
   attention?: Pick<AttentionMonitor, 'current' | 'subscribe'>;
+  /** Latest quota windows per provider; republished whenever refresh() runs. */
+  usage?: () => import('../core/usage.js').UsageSnapshot;
 }
 const nativeKey = (target: Target) => `${target.agent}:${target.sessionRef}`;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -101,8 +103,9 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     })).sort((a, b) => a.projectKey.localeCompare(b.projectKey) || Number(b.open) - Number(a.open) || a.key.localeCompare(b.key));
     // Cached metadata (30s TTL per folder) is the only source; no extra filesystem reads happen here.
     for (const entry of entries) { delete entry.folderMissing; if (metadata.get(entry.target.projectId)?.value.available === false) entry.folderMissing = true; }
-    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery)) return;
-    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health } };
+    const usage = options.usage?.();
+    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery) && isDeepStrictEqual(usage, current.usage)) return;
+    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health }, ...(usage ? { usage } : {}) };
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };

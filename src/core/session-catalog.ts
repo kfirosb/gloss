@@ -46,6 +46,8 @@ export interface CatalogSnapshot {
   sequence: number;
   entries: CatalogEntry[];
   discovery: { state: 'healthy' | 'stale'; error?: string };
+  /** Account-level quota per provider, when the host tracks it. */
+  usage?: import('./usage.js').UsageSnapshot;
 }
 export interface SessionCatalog {
   start(): void;

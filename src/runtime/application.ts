@@ -15,7 +15,7 @@ import { searchFolders, type FolderSearchResult } from './folder-search.js';
 import { validateSidebarSettings, type ConnectedFolder, type ConnectedFolderStore, type FolderKind, type SidebarSettings } from './connected-folders.js';
 import type { ProjectMetadata } from './project-metadata.js';
 import type { AgentAdapter, AgentKind, HostAdapter, LanguageBackend, ConversationStore, Target } from '../core/contracts.js';
-import type { SessionStore, WorkspaceData, WorkspaceRecord } from '../core/session-contracts.js';
+import type { SessionRecord, SessionStore, WorkspaceData, WorkspaceRecord } from '../core/session-contracts.js';
 import { createWorkflow, type Workflow } from '../core/workflow.js';
 import { buildProjectContext } from '../core/project-context.js';
 import { SqliteStore } from '../storage/sqlite-store.js';
@@ -26,6 +26,8 @@ import { effectiveLanguageSettings, validateLanguageOverride, validateLanguageSe
 import type { SessionLauncher, LaunchSettings, LaunchStore } from './session-launcher.js';
 import type { TerminalBridge } from './terminal-bridge.js';
 import type { DictationBridge } from './dictation/bridge.js';
+import { createUsageService, type SessionUsageReport, type UsageService } from './usage.js';
+import type { UsageSnapshot } from '../core/usage.js';
 import type { AttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
 import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, type WorktreeInfo, type WorktreeInspection, type WorktreeService } from './worktrees.js';
@@ -34,6 +36,8 @@ export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
   capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore>; agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>; host?: HostAdapter;
+  /** Shared with the language backends so their calls feed the same tracker; created here when absent. */
+  usage?: UsageService;
   launcher?: SessionLauncher; terminals?: TerminalBridge; attention?: AttentionMonitor; approveLaunchFolder?(folder: string): void;
   dictation?: DictationBridge;
   conversationId?: string; language?: string; model?: string; projectPath?: string; attachmentRoot?: string;
@@ -95,6 +99,10 @@ export interface Application {
   /** Removes a closed session from this app's history only; agent transcripts are never touched. */
   removeSession?(id: string): Promise<void>;
   readonly catalog?: SessionCatalog;
+  readonly usage?: UsageService;
+  /** The selected session's provider quota and what Gloss spent for it, today and overall. */
+  sessionUsage?(id: string): SessionUsageReport;
+  refreshUsage?(provider: unknown): Promise<UsageSnapshot>;
   restore?(preferredId?: string): Promise<void>;
   discoverSessions?(projectPath: string): Promise<DiscoveredTarget[]>;
   createSession?(target: Target): Promise<RuntimeSnapshot>;
@@ -115,7 +123,10 @@ export function createApplication(options: ApplicationOptions): Application {
   const readDefaults = (): LanguageSettings | undefined => settingsStore.readLanguageDefaults?.();
   const readOverride = (sessionId: string): LanguageOverride => settingsStore.readLanguageOverride?.(sessionId) ?? {};
   const worktrees = options.worktrees ?? createWorktreeService();
+  const usage = options.usage ?? createUsageService({ store: options.store as Partial<import('../core/usage.js').SpendStore> });
   const files = createFileRegistry({store: options.store, nestedWorktrees: createNestedWorktreeLookup(worktrees), ...(options.attachmentRoot ? {attachmentRoot:options.attachmentRoot} : {})});
+  /** The model a session's language calls use: the launch flag for the launch session, else its saved choice, else the provider default. */
+  const languageModelFor = (record: SessionRecord): string => { const saved = options.store.load(record.id); return (record.id === id ? options.model : undefined) ?? (saved?.languageModel !== 'default' ? saved?.languageModel : undefined) ?? (record.target.agent === 'claude' ? 'haiku' : 'gpt-5.6-sol'); };
   const sessions = createSessionManager({ store: options.store, agents: options.agents, files,
     ...(settingsStore.readLanguageDefaults ? { languageSettings: (sessionId: string) => effectiveLanguageSettings(readDefaults()!, readOverride(sessionId)) } : {}),
     async createWorkflowForSession(record) {
@@ -124,19 +135,20 @@ export function createApplication(options: ApplicationOptions): Application {
       if (!backend) throw Object.assign(new Error('No language backend available'), { code: 'model-unavailable' });
       const project = record.target.projectId;
       if (!(await readProjectMetadata(project)).available) throw Object.assign(new Error('Project directory is unavailable'), { code: 'project-unavailable' });
-      const selectedModel = (record.id === id ? options.model : undefined) ?? (current?.languageModel !== 'default' ? current?.languageModel : undefined) ?? (record.target.agent === 'claude' ? 'haiku' : 'gpt-5.6-sol');
-      const session = await backend.open(selectedModel, current?.languageSessionId);
+      const selectedModel = languageModelFor(record);
+      const session = await backend.open(selectedModel, current?.languageSessionId, { scope: record.id });
       let workflow: Workflow | undefined;
       try {
         workflow = createWorkflow({ files, readFileContext, conversationId: record.id, language: current?.language ?? options.language ?? 'he', languageModel: selectedModel, languageSession: session,
-          projectContext: () => buildProjectContext({ notes: options.store.readContext(project) ?? '', messages: workflow?.snapshot().codingMessages ?? [], maxCharacters: 12000 }), agents: options.agents, store: options.store,
+          projectContext: () => buildProjectContext({ notes: options.store.readContext(project) ?? '', messages: workflow?.snapshot().codingMessages ?? [], maxCharacters: 12000 }), agents: options.agents, store: options.store, onUsage: value => usage.tracker.observe(value),
           ...(readDefaults() ? { languageSettings: () => effectiveLanguageSettings(readDefaults()!, readOverride(record.id)) } : {}) });
         await workflow.connect(record.target);
         return workflow;
       } catch (error) { if (workflow) await workflow.close(); else await session.close(); throw error; }
     },
   });
-  const catalog = createSessionCatalog({ sessions, agents: options.agents, ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}) });
+  const catalog = createSessionCatalog({ sessions, agents: options.agents, usage: () => usage.tracker.snapshot(), ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}) });
+  const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
   const channelSetup = options.channelSetup ?? createClaudeChannelSetup();
   const savedTarget = (id: string) => { sessions.snapshot(id); return sessions.list().find(record => record.id === id)!.target; };
   const pkg = readPackage();
@@ -201,6 +213,9 @@ export function createApplication(options: ApplicationOptions): Application {
       await Promise.all(uploads.map(file => unlink(file.path).catch(() => {})));
     },
     about() { requireOpen(); return { name: pkg.name, version: pkg.version, platform: process.platform, arch: process.arch }; },
+    usage,
+    sessionUsage(sessionId) { requireOpen(); const record = sessions.list().find(r => r.id === sessionId); if (!record) throw Object.assign(new Error('Unknown session'), { code: 'unknown-session' }); return usage.report(sessionId, record.target.agent, languageModelFor(record)); },
+    async refreshUsage(provider) { requireOpen(); if (provider !== 'claude' && provider !== 'codex') throw new Error('Unknown provider'); return usage.refresh(provider, options.languageBackends, AbortSignal.timeout(60_000)); },
     searchFolders(query) { requireOpen(); return (options.folderSearch ?? ((q: string) => searchFolders(q, { home: homedir() })))(query); },
     async listFolders() {
       requireOpen();
@@ -404,7 +419,7 @@ export function createApplication(options: ApplicationOptions): Application {
     close() {
       closing ??= (async () => {
         closed = true;
-        try { options.dictation?.close(); options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
+        try { unsubscribeUsage(); options.dictation?.close(); options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
         finally { (options.store as ConversationStore & { close?: () => void }).close?.(); }
       })();
       return closing;

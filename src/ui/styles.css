@@ -598,3 +598,43 @@ button.dictation-downloading .dictation-icon, button.dictation-starting .dictati
 .dictation-elapsed { font-variant-numeric:tabular-nums; }
 .dictation-status { display:inline-flex; align-items:center; gap:6px; font-size:.8rem; color:#58657d; }
 @media (prefers-reduced-motion: reduce) { button.dictation .dictation-icon { animation:none; } }
+
+/* Usage readout: header pill, popover and quota break dialogs */
+.usage-wrap{position:relative;display:inline-flex}
+.usage-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #d9deea;border-radius:999px;padding:3px 10px;background:#f6f8ff;color:#384761;font-size:.72rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.usage-pill i{width:7px;height:7px;border-radius:50%;background:#4f9a6b;flex:none}
+.usage-pill.warn{background:#fff4d8;border-color:#ecd39a;color:#7a4e00}.usage-pill.warn i{background:#e0a23a}
+.usage-pill.out{background:#ffe2e2;border-color:#f0b4b4;color:#8c2020}.usage-pill.out i{background:#d0453a}
+.usage-pill.unknown{color:#8a93a6}.usage-pill.unknown i{background:#c3c9d6}
+.usage-popover{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:min(340px,calc(100vw - 32px));background:#fff;border:1px solid #d9deea;border-radius:12px;box-shadow:0 14px 40px #17203324;padding:14px 16px;color:#172033;font-size:.8rem;text-align:left}
+.usage-popover h3{font-size:.85rem;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.usage-popover h3 small{margin-left:auto;font-weight:400;color:#8a93a6;font-size:.7rem}
+.usage-window{margin:8px 0 12px}
+.usage-window-label{display:flex;justify-content:space-between;margin-bottom:5px}.usage-window-label b{font-weight:600}.usage-window-label span{color:#58657d}
+.usage-bar{height:8px;border-radius:999px;background:#eceff5;overflow:hidden}
+.usage-bar div{height:100%;background:#4f9a6b;border-radius:999px}
+.usage-bar.warn div{background:#e0a23a}.usage-bar.out div{background:#d0453a}
+.usage-reset{font-size:.72rem;color:#8a93a6;margin-top:4px}
+.usage-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.usage-row button{padding:5px 9px;font-size:.75rem}.usage-row span{margin-left:auto;font-size:.72rem;color:#8a93a6}
+.usage-spent{border-top:1px solid #eef0f5;margin-top:12px;padding-top:12px}
+.usage-spent h4{margin:0 0 6px;font-size:.8rem}
+.usage-big{font-size:1.25rem;font-weight:650;color:#2e6b45;margin:0 0 2px}
+.usage-spent table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.usage-spent td{padding:3px 0}.usage-spent td:last-child{text-align:right;font-weight:600}
+.usage-fine{margin:7px 0 0;font-size:.72rem;color:#8a93a6;line-height:1.45}
+.instruction-review.quota-break{width:min(420px,calc(100vw - 32px));height:auto;max-height:calc(100dvh - 32px)}
+.quota-break .review-header{display:none}
+.quota-break .review-body{padding:22px 24px 6px;line-height:1.5}
+.quota-eyebrow{margin:0;font-size:.68rem;letter-spacing:1.3px;text-transform:uppercase;color:#7a4e00;font-weight:650}
+.quota-break.weekly .quota-eyebrow{color:#2f5bd3}
+.quota-break h3{margin:6px 0 2px;font-size:1.1rem}
+.quota-renew{font-size:.85rem;color:#58657d;margin:0 0 14px}.quota-renew b{color:#172033;font-variant-numeric:tabular-nums}
+.quota-idea{background:#fff8e8;border:1px solid #f2dfae;border-radius:11px;padding:12px 14px;margin:0 0 6px}
+.quota-break.weekly .quota-idea{background:#edf1ff;border-color:#c7d3f5}
+.quota-idea small{font-size:.68rem;color:#8a7140;font-weight:650;letter-spacing:.8px;text-transform:uppercase}
+.quota-break.weekly .quota-idea small{color:#3f58a0}
+.quota-idea p{margin:4px 0 0;font-size:.9rem}
+.quota-emoji{font-size:1.35rem;margin-right:6px;vertical-align:-3px}
+.quota-break .review-actions{align-items:center}
+.quota-upgrade{margin-right:auto;font-size:.8rem;color:#2f5bd3}

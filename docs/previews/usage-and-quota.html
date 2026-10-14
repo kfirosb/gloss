@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Usage and quota · Design preview</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#172033;background:#f6f7fb;font-size:13px}
+*{box-sizing:border-box}body{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #2f5bd3;outline-offset:2px}
+.preview{background:#243b33;color:#e0eee6;padding:9px 18px;display:flex;align-items:center;gap:14px;font-size:12px;position:sticky;top:0;z-index:20}
+.preview strong{letter-spacing:1.4px;font-size:10px}.preview span{opacity:.85}
+.page{max-width:1040px;margin:0 auto;padding:22px 18px 60px}
+h1{font-size:18px;margin:0 0 4px}.lead{color:#58657d;margin:0 0 26px;line-height:1.5}
+h2{font-size:11px;letter-spacing:1.5px;color:#7a8a80;text-transform:uppercase;margin:34px 0 10px;font-weight:650}
+.note{font-size:12px;color:#58657d;line-height:1.55;margin:8px 0 0}
+/* Session header, copied from the app */
+.session-header{display:flex;align-items:center;gap:10px;padding:7px 14px;border:1px solid #e6e9f0;border-radius:10px;background:#fff;font-size:.8rem;color:#58657d;flex-wrap:wrap;margin-bottom:10px}
+.session-header b{color:#172033}.session-header .lang{margin-left:auto;border:1px solid #b7c1d4;border-radius:8px;padding:4px 8px;background:#fff;font-size:11px}
+.session-header .term{border:1px solid #b7c1d4;border-radius:8px;padding:4px 8px;background:#fff;font-size:11px}
+/* The new usage readout */
+.usage{display:inline-flex;align-items:center;gap:6px;border:1px solid #d9deea;border-radius:999px;padding:3px 10px;background:#f6f8ff;color:#384761;font-size:11.5px;font-variant-numeric:tabular-nums}
+.usage i{width:7px;height:7px;border-radius:50%;background:#4f9a6b;font-style:normal;flex:none}
+.usage .sep{color:#aab2c3}
+.usage.warn{background:#fff4d8;border-color:#ecd39a;color:#7a4e00}.usage.warn i{background:#e0a23a}
+.usage.out{background:#ffe2e2;border-color:#f0b4b4;color:#8c2020}.usage.out i{background:#d0453a}
+.usage.unknown{color:#8a93a6}.usage.unknown i{background:#c3c9d6}
+/* Popover */
+.pop-wrap{position:relative;display:inline-block}
+.popover{position:absolute;top:34px;left:0;width:340px;background:#fff;border:1px solid #d9deea;border-radius:12px;box-shadow:0 14px 40px #17203324;padding:14px 16px;z-index:5}
+.popover.static{position:static;display:inline-block;vertical-align:top;margin:6px 14px 14px 0}
+.popover h3{font-size:12.5px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.popover h3 small{margin-left:auto;font-weight:400;color:#8a93a6;font-size:10.5px}
+.win{margin:8px 0 12px}
+.win .lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px}
+.win .lbl b{font-weight:600}.win .lbl span{color:#58657d}
+.bar{height:8px;border-radius:999px;background:#eceff5;overflow:hidden}
+.bar div{height:100%;background:#4f9a6b;border-radius:999px}
+.bar.warn div{background:#e0a23a}.bar.out div{background:#d0453a}
+.win .reset{font-size:11px;color:#8a93a6;margin-top:4px}
+.popover .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.popover .row button{border:1px solid #b7c1d4;border-radius:8px;padding:5px 9px;background:#fff;font-size:11.5px}
+.popover .row span{margin-left:auto;font-size:11px;color:#8a93a6}
+.spent{border-top:1px solid #eef0f5;margin-top:12px;padding-top:12px}
+.spent h4{margin:0 0 6px;font-size:12px}
+.spent table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.spent td{padding:3px 0}.spent td:last-child{text-align:right;font-weight:600}
+.spent p{margin:7px 0 0;font-size:11px;color:#8a93a6;line-height:1.45}
+.spent .big{font-size:20px;font-weight:650;color:#2e6b45;margin:0 0 2px}
+/* Quota dialogs */
+.dim{background:#172033aa;padding:30px;border-radius:14px;display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.dialog{width:400px;background:#fff;border-radius:14px;box-shadow:0 24px 60px #17203355;padding:22px 24px;line-height:1.5}
+.dialog .eyebrow{font-size:10.5px;letter-spacing:1.3px;text-transform:uppercase;color:#7a4e00;font-weight:650}
+.dialog.week .eyebrow{color:#2f5bd3}
+.dialog h3{margin:6px 0 2px;font-size:17px}
+.dialog .renew{font-size:13px;color:#58657d;margin:0 0 14px}
+.dialog .renew b{color:#172033;font-variant-numeric:tabular-nums}
+.idea{background:#fff8e8;border:1px solid #f2dfae;border-radius:11px;padding:12px 14px;margin:0 0 14px}
+.dialog.week .idea{background:#edf1ff;border-color:#c7d3f5}
+.idea .k{font-size:10.5px;color:#8a7140;font-weight:650;letter-spacing:.8px;text-transform:uppercase}
+.dialog.week .idea .k{color:#3f58a0}
+.idea p{margin:4px 0 0;font-size:14px}
+.idea .em{font-size:22px;margin-right:6px;vertical-align:-3px}
+.dialog .actions{display:flex;gap:8px;align-items:center}
+.dialog .actions button{border:1px solid #b7c1d4;border-radius:8px;padding:7px 12px;background:#fff;font-size:12px}
+.dialog .actions .primary{background:#2f5bd3;border-color:#2f5bd3;color:#fff}
+.dialog .actions a{margin-left:auto;font-size:12px;color:#2f5bd3}
+.dialog .fine{font-size:11px;color:#8a93a6;margin:12px 0 0}
+.states{display:flex;flex-direction:column;gap:0}
+.cap{font-size:11px;color:#8a93a6;margin:0 0 4px}
+.twocol{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+</style>
+
+<div class="preview"><strong>DESIGN PREVIEW</strong><span>Usage left, cost readout and quota breaks · nothing here is live</span></div>
+<div class="page">
+<h1>Usage left for the live agent</h1>
+<p class="lead">A compact readout in the session header, a popover with the two quota windows and what Gloss itself has spent, and two break dialogs when a window runs out. Click the readouts and the "Another idea" buttons; the countdowns tick.</p>
+
+<h2>1 · Session header, three states</h2>
+<div class="states">
+<p class="cap">Healthy. Green dot, percent left of the 5-hour window and of the week.</p>
+<div class="session-header"><b>gloss / usages</b><span>Claude</span><span>Idle</span><span class="pop-wrap"><button class="usage" id="u1"><i></i>5h <b>63%</b> left<span class="sep">·</span>week <b>57%</b> left</button></span><span class="term">Show terminal</span><span class="lang">Hebrew ▾</span></div>
+
+<p class="cap">Running low. Amber under 20% left on either window.</p>
+<div class="session-header"><b>gloss / usages</b><span>Codex</span><span>Working</span><span class="usage warn"><i></i>5h <b>5%</b> left<span class="sep">·</span>week <b>57%</b> left</span><span class="term">Show terminal</span><span class="lang">Hebrew ▾</span></div>
+
+<p class="cap">Exhausted. Red, with the renewal countdown replacing the percent.</p>
+<div class="session-header"><b>gloss / usages</b><span>Claude</span><span>Idle</span><span class="usage out"><i></i>5h quota renews in <b data-count="9600">2h 40m</b><span class="sep">·</span>week <b>57%</b> left</span><span class="term">Show terminal</span><span class="lang">Hebrew ▾</span></div>
+
+<p class="cap">Before any data arrives (Claude only, until the first translation or a refresh).</p>
+<div class="session-header"><b>gloss / usages</b><span>Claude</span><span>Idle</span><span class="usage unknown"><i></i>usage —</span><span class="term">Show terminal</span><span class="lang">Hebrew ▾</span></div>
+</div>
+
+<h2>2 · Popover: the two windows and what Gloss has spent</h2>
+<div class="twocol">
+<div class="popover static">
+<h3>Claude Code usage <small>as of 14:03</small></h3>
+<div class="win"><div class="lbl"><b>5-hour window</b><span>63% left</span></div><div class="bar"><div style="width:37%"></div></div><div class="reset">Renews in 2h 40m · 16:43</div></div>
+<div class="win"><div class="lbl"><b>This week</b><span>57% left</span></div><div class="bar"><div style="width:43%"></div></div><div class="reset">Renews Sunday 02:00 · in 4d 12h</div></div>
+<div class="row"><button>Refresh</button><span>Updates on every translation</span></div>
+<div class="spent"><h4>What Gloss has spent</h4>
+<p class="big">$0.004 this session</p>
+<table><tr><td>Today</td><td>$0.09</td></tr><tr><td>All time, since install</td><td>$0.31</td></tr><tr><td>Model</td><td>haiku</td></tr></table>
+<p>Translations, summaries and instruction prep only. On a Claude subscription this is drawn from your plan, not billed; the figure is what it would cost at API prices.</p></div>
+</div>
+
+<div class="popover static">
+<h3>Codex usage <small>as of 14:03</small></h3>
+<div class="win"><div class="lbl"><b>5-hour window</b><span>5% left</span></div><div class="bar warn"><div style="width:95%"></div></div><div class="reset">Renews in 0h 51m · 14:54</div></div>
+<div class="win"><div class="lbl"><b>This week</b><span>57% left</span></div><div class="bar"><div style="width:43%"></div></div><div class="reset">Renews Thursday 11:25 · in 4d 2h</div></div>
+<div class="row"><button>Refresh</button><span>Updates after every turn of the agent</span></div>
+<div class="spent"><h4>What Gloss has spent</h4>
+<p class="big">41k tokens this session</p>
+<table><tr><td>In / out, this session</td><td>38.2k / 2.9k</td></tr><tr><td>All time, since install</td><td>1.2M tokens</td></tr><tr><td>Model</td><td>gpt-5.6-sol</td></tr></table>
+<p>Codex reports tokens, not dollars, so no price is guessed. Included in your ChatGPT plan.</p></div>
+</div>
+</div>
+<p class="note">The refresh button on Claude runs a one-word call that costs a fraction of a cent. On Codex it re-reads the newest session log.</p>
+
+<h2>3 · Quota break dialogs</h2>
+<div class="dim">
+<div class="dialog" role="dialog">
+<div class="eyebrow">5-hour window used up</div>
+<h3>Time for a break</h3>
+<p class="renew">Your Claude Code quota renews in <b data-count="9600">2h 40m</b>, at 16:43.</p>
+<div class="idea"><div class="k">Meanwhile</div><p id="idea5"><span class="em">🏃</span>Go for a run. Your 5-hour window will be fresh when you are back.</p></div>
+<div class="actions"><button class="primary">Dismiss</button><button onclick="nextIdea('idea5',IDEAS5)">Another idea</button><a href="#">Upgrade plan</a></div>
+<p class="fine">Shown once per exhaustion. A small "renews in …" note stays in the header until then.</p>
+</div>
+
+<div class="dialog week" role="dialog">
+<div class="eyebrow">Weekly quota used up</div>
+<h3>This is a real break</h3>
+<p class="renew">Your Codex weekly quota renews in <b data-count="360000">4d 4h</b>, Thursday 11:25.</p>
+<div class="idea"><div class="k">Meanwhile</div><p id="ideaW"><span class="em">✈️</span>Go on vacation. Travel somewhere you have never been and come back with stories, not commits.</p></div>
+<div class="actions"><button class="primary">Dismiss</button><button onclick="nextIdea('ideaW',IDEASW)">Another idea</button><a href="#">Upgrade plan</a></div>
+<p class="fine">When both windows are out, this dialog wins.</p>
+</div>
+</div>
+
+<h2>4 · The suggestion lists</h2>
+<div class="twocol">
+<div class="popover static" style="width:340px"><h3>5-hour break (about twenty)</h3><p class="note" id="list5"></p></div>
+<div class="popover static" style="width:340px"><h3>Weekly break</h3><p class="note" id="listW"></p></div>
+</div>
+</div>
+
+<script>
+const IDEAS5=[['🏃','Go for a run. Your 5-hour window will be fresh when you are back.'],['🥗','Lunch break. Eat away from the screen.'],['📞','Call someone you love. They will be glad you did.'],['📚','Learn something new for an hour. A talk, a chapter, a tutorial.'],['🗓️','Plan tomorrow. Three things that matter, in order.'],['🔍','Review a teammate’s PR. They are waiting on you.'],['🧘','Stretch. Shoulders, neck, back. Then water.'],['🚶','Walk outside without headphones.'],['🧹','Tidy your desk and close the tabs you will never read.'],['📝','Write the README you keep postponing.'],['☕','Coffee with a colleague, not at the keyboard.'],['🎧','Listen to one album start to finish.'],['🛒','Groceries. Dinner tonight will thank you.'],['💤','A twenty-minute nap. Set an alarm.'],['🧠','Sketch the architecture of the next thing on paper.'],['🌱','Water the plants. Check on the ones that look sad.'],['✉️','Answer the three emails you have been avoiding.'],['🎨','Draw something badly. Nobody is watching.'],['🚲','Bike ride. Short and fast or long and slow.'],['👋','Say hi to a neighbour.']];
+const IDEASW=[['✈️','Go on vacation. Travel somewhere you have never been and come back with stories, not commits.'],['🏔️','A hike with a summit. Phone on airplane mode.'],['🏖️','A beach, a book, no laptop.'],['🚆','Take a train somewhere and decide the rest on the way.'],['👨‍👩‍👧','Spend the days with family. The backlog keeps.'],['🏕️','Camp for a weekend. No signal is a feature.'],['🍳','Cook a long, slow meal for people you like.'],['🌍','Visit a city you keep saying you will visit.']];
+function nextIdea(id,list){const el=document.getElementById(id);const cur=el.textContent;let pick;do{pick=list[Math.floor(Math.random()*list.length)]}while(list.length>1&&cur.includes(pick[1]));el.innerHTML='<span class="em">'+pick[0]+'</span>'+pick[1];}
+document.getElementById('list5').textContent=IDEAS5.map(i=>i[0]+' '+i[1]).join('  ·  ');
+document.getElementById('listW').textContent=IDEASW.map(i=>i[0]+' '+i[1]).join('  ·  ');
+const start=Date.now();function fmt(s){s=Math.max(0,s);const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),sec=s%60;return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m ${String(sec).padStart(2,'0')}s`}
+setInterval(()=>{document.querySelectorAll('[data-count]').forEach(el=>{el.textContent=fmt(Math.round(+el.dataset.count-(Date.now()-start)/1000))})},1000);
+document.getElementById('u1').addEventListener('click',e=>{const w=e.currentTarget.parentElement;let p=w.querySelector('.popover');if(p){p.remove();return}p=document.querySelector('.popover.static').cloneNode(true);p.classList.remove('static');w.appendChild(p)});
+</script>
+</html>
