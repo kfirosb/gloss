@@ -387,3 +387,25 @@ it('baselines a session with no history at 0 so its first live completed reply i
   f.agent.emit(reply('m1', 1)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
   expect(f.catalog.snapshot().entries[0]!.latestResponseSequence).toBe(1);
 });
+
+it('markSeen clamps to the latest response so a buggy client cannot suppress future badges', async () => {
+  const f = setup(); f.agent.historyMessages.set('A', [{ sourceId: 'h1', revision: 1, role: 'assistant', text: 'old', complete: true }]);
+  f.setScan({ candidates: [candidate('A')], complete: true }); f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  f.agent.emit(reply('m2', 3)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.markSeen(id, 1_000_000)).toBe('updated');
+  expect(f.store.seenSequence(id)).toBe(3);
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  f.agent.emit(reply('m4', 4)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+});
+it('ignores a Claude channel reply revision and flags the next native completed reply', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true }); f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.agent.emit(reply('channel:r1', 5_000_000)); await vi.advanceTimersByTimeAsync(10);
+  expect(f.catalog.snapshot().entries[0]!.latestResponseSequence).toBeUndefined();
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  f.agent.emit(reply('m2', 7)); await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.snapshot().entries[0]!.latestResponseSequence).toBe(7);
+});

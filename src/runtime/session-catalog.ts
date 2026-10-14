@@ -259,7 +259,9 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     markSeen(sessionId, sequence) {
       if (!options.seen || !current.entries.some(entry => entry.sessionId === sessionId)) return 'unknown';
       const before = options.seen.seenSequence(sessionId);
-      options.seen.markSeen(sessionId, sequence);
+      // A buggy client must not be able to suppress future badges by reporting a sequence beyond anything received.
+      const entry = current.entries.find(e => e.sessionId === sessionId);
+      options.seen.markSeen(sessionId, Math.min(sequence, entry?.latestResponseSequence ?? 0));
       if (options.seen.seenSequence(sessionId) === before) return 'unchanged';
       publish(); return 'updated';
     },

@@ -40,6 +40,7 @@ test('an unfocused window never marks seen; focus marks it', async ({ page, cont
 });
 
 test('approval attention is never marked seen from the browser', async ({ page, context }) => {
+  await page.addInitScript(() => { document.hasFocus = () => true; });
   const f = await sessionFixture(context);
   const seen: unknown[] = [];
   await context.route('**/api/session-catalog/seen', r => { seen.push(r.request().postDataJSON()); return r.fulfill({ json: { result: 'updated' } }); });

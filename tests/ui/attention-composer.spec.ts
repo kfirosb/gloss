@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { basicSnapshot, mockSession } from './session-fixture.js';
 
-async function fixture(page: import('@playwright/test').Page, deliveryState: string) {
+async function fixture(page: import('@playwright/test').Page, deliveryState: string | string[]) {
+  let sends = 0;
   const snapshot: any = { ...basicSnapshot(), target: { agent: 'claude', sessionRef: '11111111-1111-4111-8111-111111111111', projectId: '/project' }, capabilities: { sendWhileBusy: true, fileReferences: true } };
   let sequence = 0; let replied = false; let failing = false;
   await mockSession(page, () => snapshot);
@@ -14,7 +15,7 @@ async function fixture(page: import('@playwright/test').Page, deliveryState: str
   await page.route('**/api/sessions/*/claude-channel', route => route.fulfill({ json: { state: 'connected' } }));
   await page.route('**/api/sessions/*/actions', route => {
     const action = route.request().postDataJSON();
-    if (action.type === 'send-composer') snapshot.deliveries.push({ id: action.requestId, draftId: 'composer-' + action.requestId, revision: 1, state: deliveryState, transport: action.transport, ...(deliveryState === 'failed' ? { reason: 'channel not connected' } : {}) });
+    if (action.type === 'send-composer') { const state = Array.isArray(deliveryState) ? deliveryState[Math.min(sends++, deliveryState.length - 1)]! : deliveryState; snapshot.deliveries.push({ id: action.requestId, draftId: 'composer-' + action.requestId, revision: 1, state, transport: action.transport, ...(state === 'failed' ? { reason: 'channel not connected' } : {}) }); }
     return route.fulfill({ json: { sessionId: snapshot.id, sequence: ++sequence, snapshot } });
   });
   await page.goto('/#capability=test');
@@ -65,4 +66,20 @@ test('a queued channel delivery that fails on reconnect ends the waiting strip a
   // The composer attempt is released once the channel accepts the send, so a later failure has no composer delivery to show: the waiting strip just ends.
   await expect(strip).toHaveCount(0, { timeout: 10000 });
   expect(await page.evaluate(() => (window as any).__states)).not.toContain('received');
+});
+
+test('a newer failed send wins over a waiting reply, and the waiting line stays visible', async ({ page }) => {
+  await fixture(page, ['queued', 'failed']);
+  const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  const send = page.getByRole('button', { name: 'Send to Terminal in English', exact: true });
+  const strip = page.locator('.pane-composer .status-strip');
+  await input.fill('שלום');
+  await send.click();
+  await expect(strip).toHaveAttribute('data-state', 'waiting');
+  await input.fill('עוד אחד');
+  await send.click();
+  await expect(strip).toHaveAttribute('data-state', 'failed');
+  await expect(strip).toContainText('Failed: channel not connected');
+  await expect(strip.locator('.status-strip-waiting')).toHaveText('Waiting for Claude’s response');
+  await expect(page.locator('form.composer')).toHaveClass(/attn-ring/);
 });

@@ -3,11 +3,11 @@ import type { AgentMessage, CodingState } from './contracts.js';
 /** What a session needs from the user. Red on every surface means one of the two non-none values. */
 export type Attention = 'none' | 'response' | 'approval';
 
-/** Revision of the newest completed assistant message; undefined when there is none. Translation state is irrelevant: the agent stopped when the English text completed. */
+/** Revision of the newest completed native assistant message; undefined when there is none. Claude channel replies (`channel:` sourceIds) are skipped: their revisions are global SQLite sequences while native revisions are transcript byte offsets, so the two are not comparable, and the native final message carries the answer since app 0.3.4. Translation state is irrelevant: the agent stopped when the English text completed. */
 export function latestResponseSequence(messages: readonly AgentMessage[]): number | undefined {
   let latest: number | undefined;
   for (const message of messages) {
-    if (message.role !== 'assistant' || message.complete !== true) continue;
+    if (message.role !== 'assistant' || message.complete !== true || message.sourceId.startsWith('channel:')) continue;
     if (latest === undefined || message.revision > latest) latest = message.revision;
   }
   return latest;

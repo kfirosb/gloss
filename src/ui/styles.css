@@ -469,7 +469,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 @keyframes attn-ring{0%,100%{box-shadow:0 0 0 2px #3b82f633}50%{box-shadow:0 0 0 3px #3b82f6aa,0 0 22px #3b82f680}}
 @keyframes attn-flash{0%{background:#dcf5e6;box-shadow:0 0 0 3px #1bb76880}100%{box-shadow:none}}
 .project-folder .attn-badge,.project-toggle .attn-badge{margin-left:4px}
-.session-rail button .attn-badge{position:absolute;top:-6px;right:-6px}
+.session-rail button .attn-badge{position:absolute;top:-4px;right:-6px}
 .session-rail button .attn-spinner{position:absolute;left:-4px;bottom:-4px}
 @media (prefers-reduced-motion:reduce){.attn-spinner,.attn-ring,.attn-flash{animation:none}.attn-ring{box-shadow:0 0 0 3px #3b82f6aa}}
 .session-tabs-empty{margin:0 0 8px;color:#647089;font-size:.85rem}
