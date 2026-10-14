@@ -42,7 +42,7 @@ export interface ApplicationOptions {
 export interface WorktreeListing { hasCommits: boolean; worktrees: WorktreeInfo[] }
 export interface WorktreeRemoval { removed: true; conversationsRemoved: number; skipped: number }
 /** What deleting a worktree would affect: its changes, plus sessions that would be ended (`launchedSessions`) or left running without a folder (`otherOpenSessions`). */
-export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; otherOpenSessions: number }
+export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; launchedTerminals: number; otherOpenSessions: number }
 export interface CreatedWorktree { path: string; branch: string; location: string; ignore?: { added: boolean; line: string } }
 export interface FolderListing extends ConnectedFolder { projectName: string; branch?: string; missing: boolean }
 export interface AboutInfo { name: string; version: string; platform: string; arch: string }
@@ -240,10 +240,12 @@ export function createApplication(options: ApplicationOptions): Application {
       const info = await worktrees.inspect(project.main, folder);
       // Launches inside the folder are ended on delete; other open sessions there are not ours to end.
       const live = options.launcher?.list().filter(l => l.state !== 'ended') ?? [];
-      const launched = (await Promise.all(live.map(l => insideFolderReal(l.folder, folder)))).flatMap((inside, i) => inside ? [live[i]!.id] : []);
-      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launched.includes(e.launchId)));
+      const inside = await Promise.all(live.map(l => insideFolderReal(l.folder, folder)));
+      const launched = live.filter((_, i) => inside[i]);
+      const launchedIds = launched.map(l => l.id);
+      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launchedIds.includes(e.launchId)));
       const others = (await Promise.all(open.map(e => insideFolderReal(recordFolder(e), folder)))).filter(Boolean).length;
-      return { ...info, launchedSessions: launched.length, otherOpenSessions: others };
+      return { ...info, launchedSessions: launched.filter(l => l.agent !== 'shell').length, launchedTerminals: launched.filter(l => l.agent === 'shell').length, otherOpenSessions: others };
     },
     async createWorktree(projectKey, input) {
       const project = await resolveProject(projectKey); requireGit(project);
