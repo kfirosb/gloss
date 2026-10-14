@@ -4,6 +4,7 @@ import type { ConversationSnapshot, AgentMessage } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import './styles.css';
+import './dark-styles.css';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
 import { FileBrowser, FilePreviewDialog, FILE_DRAG_TYPE } from './file-browser.js';
 import { FilePicker, type FilePickerHandle } from './file-picker.js';
@@ -48,7 +49,7 @@ import { useDictation } from './use-dictation.js';
 import { appendDictation, DICTATION_SHORTCUT_LABEL, isDictationShortcut } from './dictation-state.js';
 import { DictationButton } from './dictation-button.js';
 window.addEventListener('hashchange', () => window.location.reload());
-applyTheme(readDisplayPreferences().theme);
+applyTheme(readDisplayPreferences());
 const token = capabilityToken();
 const headers = token ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { 'content-type': 'application/json' };
 function Message({ message, original, replyLanguage, assist, client, onTranslate }: { message: AgentMessage; original: boolean; replyLanguage: string; assist: string; client:SessionClient; onTranslate?: () => void }) {
@@ -446,7 +447,7 @@ function App() {
   useKeystrokeTracker();
   const popupMode = usePopupMode(); const [dismissedToasts, setDismissedToasts] = useState<string[]>([]);
   const [displayPrefs, updateDisplayPrefs] = useDisplayPreferences();
-  useEffect(() => applyTheme(displayPrefs.theme), [displayPrefs.theme]);
+  useEffect(() => applyTheme(displayPrefs), [displayPrefs.theme, displayPrefs.darkStyle]);
   const allEntries = mergeSavedRecords(catalog?.entries ?? [], records);
   // One dismissible line in the sidebar: create/delete results, failed sidebar writes, a hidden project kept for its session.
   const [notice, setNotice] = useState('');

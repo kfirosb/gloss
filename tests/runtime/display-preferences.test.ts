@@ -1,28 +1,29 @@
 import {expect,it} from 'vitest';
-import {applyTheme,pruneDisplayPreferences,readDisplayPreferences,writeDisplayPreferences,type Theme} from '../../src/ui/display-preferences.js';
+import {readFileSync} from 'node:fs';
+import {applyTheme,DARK_STYLES,pruneDisplayPreferences,readDisplayPreferences,writeDisplayPreferences,type DarkStyle,type Theme} from '../../src/ui/display-preferences.js';
 const storage=(data:string|null=null)=>({getItem:()=>data,setItem:(_k:string,v:string)=>{data=v;}} as unknown as Storage);
 it('recovers from unavailable, corrupt and unknown-version preferences',()=>{
- for(const s of [storage('{'),storage('{"version":99}'),{getItem:()=>{throw Error('denied');}} as unknown as Storage])expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:false,assistantModes:{},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark'});
+ for(const s of [storage('{'),storage('{"version":99}'),{getItem:()=>{throw Error('denied');}} as unknown as Storage])expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:false,assistantModes:{},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark',darkStyle:'graphite'});
  expect(()=>writeDisplayPreferences(readDisplayPreferences(),{setItem:()=>{throw Error('denied');}} as unknown as Storage)).not.toThrow();
 });
 it('persists validated per-session modes and folder state without routing or capabilities',()=>{
- const s=storage();writeDisplayPreferences({version:1,collapsed:true,assistantModes:{A:'compact',B:'full'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark'},s);
- expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:true,assistantModes:{A:'compact',B:'full'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark'});
+ const s=storage();writeDisplayPreferences({version:1,collapsed:true,assistantModes:{A:'compact',B:'full'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark',darkStyle:'graphite'},s);
+ expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:true,assistantModes:{A:'compact',B:'full'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark',darkStyle:'graphite'});
  const bad=storage('{"version":1,"collapsed":"yes","grouping":"no","assistantModes":{"A":"compact","B":"bad"},"capability":"secret"}');
- expect(readDisplayPreferences(bad)).toEqual({version:1,collapsed:false,assistantModes:{A:'compact'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark'});
+ expect(readDisplayPreferences(bad)).toEqual({version:1,collapsed:false,assistantModes:{A:'compact'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark',darkStyle:'graphite'});
 });
 
 it('loads previous-version preferences and keeps new per-folder fields',()=>{
  const storage=new Map<string,string>();const s={getItem:(k:string)=>storage.get(k)??null,setItem:(k:string,v:string)=>{storage.set(k,v);}} as unknown as Storage;
  storage.set('language-assistant:display:v1',JSON.stringify({version:1,collapsed:true,grouping:'folder',assistantModes:{A:'compact'}}));
- expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:true,assistantModes:{A:'compact'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark'});
- writeDisplayPreferences({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'A',bad:1 as any},tabOrder:{'/f':['A','B'],x:'no' as any},sidebarWidth:300,theme:'dark'},s);
- expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'A'},tabOrder:{'/f':['A','B']},sidebarWidth:300,theme:'dark'});
+ expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:true,assistantModes:{A:'compact'},lastByFolder:{},tabOrder:{},sidebarWidth:300,theme:'dark',darkStyle:'graphite'});
+ writeDisplayPreferences({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'A',bad:1 as any},tabOrder:{'/f':['A','B'],x:'no' as any},sidebarWidth:300,theme:'dark',darkStyle:'graphite'},s);
+ expect(readDisplayPreferences(s)).toEqual({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'A'},tabOrder:{'/f':['A','B']},sidebarWidth:300,theme:'dark',darkStyle:'graphite'});
 });
 
 it('keeps long-lived tab order beyond 200 keys and prunes only vanished keys, folders and selections',()=>{
  const keys=Array.from({length:300},(_,i)=>'k'+i);const s=storage();
- writeDisplayPreferences({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'k0','/gone':'x'},tabOrder:{'/f':keys,'/gone':['x']},sidebarWidth:300,theme:'dark'},s);
+ writeDisplayPreferences({version:1,collapsed:false,assistantModes:{},lastByFolder:{'/f':'k0','/gone':'x'},tabOrder:{'/f':keys,'/gone':['x']},sidebarWidth:300,theme:'dark',darkStyle:'graphite'},s);
  const read=readDisplayPreferences(s);expect(read.tabOrder['/f']).toEqual(keys);
  const present={'/f':{keys:keys.filter(k=>k!=='k5'),ids:['k0']}};
  const pruned=pruneDisplayPreferences(read,present);
@@ -43,7 +44,24 @@ it('defaults the theme to dark, persists valid themes and rejects unknown ones',
  expect(t('light')).toBe('light');expect(t('auto')).toBe('auto');expect(t('dark')).toBe('dark');expect(t('sepia')).toBe('dark');
 });
 
-it('marks the root with the theme its stylesheet keys color-scheme on',()=>{
+it('defaults the dark style to Graphite and rejects unknown styles',()=>{
+ expect(readDisplayPreferences(storage()).darkStyle).toBe('graphite');
+ const s=storage();const d=(darkStyle:unknown)=>{writeDisplayPreferences({...readDisplayPreferences(),darkStyle:darkStyle as DarkStyle},s);return readDisplayPreferences(s).darkStyle;};
+ expect(d('dimmed')).toBe('dimmed');expect(d('midnight')).toBe('midnight');expect(d('navy')).toBe('graphite');
+});
+
+it('marks the root with the theme and dark style its stylesheets key on',()=>{
  const root={dataset:{}} as unknown as HTMLElement;
- for(const theme of ['dark','light','auto'] as const){applyTheme(theme,root);expect(root.dataset.theme).toBe(theme);}
+ for(const theme of ['dark','light','auto'] as const)for(const darkStyle of ['graphite','dimmed','midnight'] as const){applyTheme({theme,darkStyle},root);expect(root.dataset).toEqual({theme,darkStyle});}
+});
+
+it('defines every dark color variable the stylesheets use for each dark style',()=>{
+ const sheets=['styles.css','file-tree.css','file-content-preview.css'].map(f=>readFileSync(new URL('../../src/ui/'+f,import.meta.url),'utf8')).join('\n');
+ const used=new Set([...sheets.matchAll(/var\((--dk-[\w-]+)\)/g)].map(m=>m[1]!));
+ const dark=readFileSync(new URL('../../src/ui/dark-styles.css',import.meta.url),'utf8');
+ const blocks=[...dark.matchAll(/data-dark-style=(\w+)\] \{([^}]*)\}/g)].map(m=>[m[1],new Set([...m[2]!.matchAll(/(--dk-[\w-]+):/g)].map(x=>x[1]))] as const);
+ expect(blocks.map(([name])=>name)).toEqual(DARK_STYLES.map(s=>s.value));
+ expect(used.size).toBeGreaterThan(100);
+ for(const [,defined] of blocks)expect([...used].filter(v=>!defined.has(v))).toEqual([]);
+ expect(sheets).not.toMatch(/light-dark\([^,]+,\s*#/);
 });
