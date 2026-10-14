@@ -106,6 +106,16 @@ Workspace saves use revision checks. When two tabs edit the same session, a conf
 
 Existing conversation IDs and prepared work survive schema migration. Legacy global layout settings are adopted only by the launch session; another session starts with its default layout. Existing launch URLs need no session selector. Compatibility API routes stay pinned to the launch session; new workspace, file, action and event routes are session-scoped.
 
+## Terminals
+
+The "+" dialog offers **Terminal** beside Claude and Codex: a plain login shell in the chosen folder, shown as a `>_` tab named Terminal, Terminal 2 and so on per folder. The tab's dot is green at the prompt and amber while a command runs. A terminal has no conversation and no Saved entry; it disappears when the shell exits or when you choose **End terminal…** from the tab's menu. Terminals run in Gloss's private tmux and come back after an app restart.
+
+Commands in a reply get a **▶ Run** button beside Copy code when the block is untagged or tagged as shell, bash, zsh, console or terminal. Run types the block's text, exactly as shown and with leading `$ ` prompts removed, into the folder's idle terminal, or opens a new one when all are busy, and then opens that terminal. Nothing runs without the click. If the new terminal is not ready in time, Gloss opens it and says so; paste the command yourself.
+
+Terminals open as a popup over the conversation; **Expand** in the popup shows the terminal in place of the conversation panels, and **Shrink to popup** goes back. Both save the choice, also available in Settings → Sessions as **Terminal tabs open as**. In the workspace view, **Send output to Claude** (or Codex) puts the selected terminal text into the composer of the session the terminal last ran from, or, if that session is no longer open, the folder's last shown session or its first open one, without sending it.
+
+For Claude and Codex the dialog shows the **First message** sent as the launch prompt, prefilled with the usual setup prompt. Replace it to tell the agent what the session is about; it is sent in English exactly as written, up to 4,000 characters, and does not appear in Live Conversation. It cannot be empty, because the first prompt is what lets Gloss connect.
+
 ## File and image references
 
 Drop individual files into the composer, choose **Attach files**, or paste an image. On macOS, Control+Command+Shift+4 copies a screenshot for pasting; Command+Shift+4 saves a file to attach. Open **Files** for a collapsible sidebar scoped to the selected session's project/worktree. Expand nested folders in the compact file tree or search by filename/content. Folder expansion stays in place while browsing. Click a file, or choose an **@** result with the mouse or arrow keys and Enter, to open a read-only preview. Browsing never attaches a file or allocates a number. **Attach file** in the preview, or drag a sidebar file into the composer, adds the file and its stable **@File N**/**@Image N** text reference without sending. Repeated attachment keeps one membership and one reference token. Unresolved mentions remain ordinary text. Escape closes the picker.
