@@ -593,3 +593,5 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .sidebar-notice{display:flex;align-items:flex-start;gap:8px;margin:0 12px 10px;padding:7px 10px;border-radius:7px;background:#f0f5ec;color:#4f6a50;font-size:11px;line-height:1.5;flex-shrink:0}
 .sidebar-notice span{flex:1;min-width:0;overflow-wrap:anywhere}
 .sidebar-notice button{border:0;background:transparent;padding:0 2px;color:#6b7e6e;cursor:pointer;font-size:13px;line-height:1}
+.pane-toolbar .live-state{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;color:#2d5fb8;background:#e6efff;border-radius:999px;padding:3px 9px;flex:none}
+.reading-pane.attn-ring{transition:box-shadow .3s}
