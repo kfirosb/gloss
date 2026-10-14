@@ -447,6 +447,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .settings-dialog .language-field{grid-template-columns:190px 1fr;gap:3px 14px;margin:10px 0}.settings-dialog .language-field label{font-weight:600}
 .settings-dialog .language-field select,.settings-dialog .language-field input{width:100%;min-width:0;padding:7px 9px;border:1px solid #cfd6e4;border-radius:7px;font:inherit;background:white}
 .settings-dialog .language-field small{grid-column:2;font-size:.75rem}.settings-dialog .launch-settings{margin-top:14px;padding-top:10px}
+.settings-dialog .alert-settings label{display:block;margin:6px 0}.settings-row{display:flex;gap:8px;align-items:center;margin:6px 0 0 22px}.settings-row select{padding:6px 9px;border:1px solid #cfd6e4;border-radius:7px;font:inherit;background:white}
 /* One-time model download notice: a compact left-to-right dialog, never full-screen. */
 .instruction-review.dictation-download-dialog{width:min(480px,calc(100vw - 32px));height:fit-content;max-height:92dvh}
 .dictation-download-dialog .review-body{padding:4px 22px 12px;direction:ltr}.dictation-download-dialog p{margin:4px 0 8px;line-height:1.45}

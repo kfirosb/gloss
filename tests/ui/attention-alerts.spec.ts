@@ -50,3 +50,20 @@ test('an approval request says Approval needed, and switching both settings off 
   await expect(page.getByRole('status').filter({ hasText: 'Approval needed' })).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).__alerts)).toEqual([]);
 });
+test('Settings saves the alert switches and sound at once, and Try plays the chosen sound', async ({ page, context }) => {
+  const f = await sessionFixture(context);
+  await page.addInitScript(bridge);
+  await serve(context, catalogFor(f, 1), catalogFor(f, 1));
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByRole('checkbox', { name: /Show a message/ })).toBeChecked();
+  await dialog.getByRole('combobox', { name: 'Alert sound' }).selectOption('Submarine');
+  await dialog.getByRole('button', { name: 'Try sound' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__alerts)).toEqual([{ sound: 'Submarine', bounce: false }]);
+  await dialog.getByRole('checkbox', { name: /Show a message/ }).uncheck();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('language-assistant:alerts:v1')!))).toEqual({ version: 1, message: false, sound: true, soundName: 'Submarine' });
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Alert sound' })).toHaveValue('Submarine');
+});
