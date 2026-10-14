@@ -3,6 +3,7 @@ import { SAMPLE_RATE, type DictationLanguage, type DictationServerMessage, type 
 import { authHeaders, capabilityToken } from './session-client.js';
 import { initialDictationState, reduceDictation, type DictationEffect, type DictationUiEvent, type DictationUiState } from './dictation-state.js';
 import { PCM_PROCESSOR_NAME, workletUrl } from './pcm-worklet.js';
+import { PendingFrames } from './pcm-queue.js';
 
 export interface UseDictationOptions { sessionId: string; language: DictationLanguage; appendText(text: string): void; sendNow(): void; enabled: boolean }
 export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; /** Asks to send once dictation has finished; false (and nothing happens) when no recording is in progress, so the caller sends now. */ requestSend(): boolean; dismissNotice(): void;
@@ -17,6 +18,8 @@ export function useDictation(options: UseDictationOptions): Dictation {
   const latest = useRef(options); latest.current = options;
   const stream = useRef<MediaStream | undefined>(undefined); const context = useRef<AudioContext | undefined>(undefined);
   const socket = useRef<WebSocket | undefined>(undefined); const finishTimer = useRef<number | undefined>(undefined); const level = useRef(0);
+  // Frames captured while the socket is still connecting; flushed in order on open so the first words are not lost.
+  const pending = useRef(new PendingFrames());
   // Last known model presence from GET /api/dictation, and whether the download dialog was accepted in this page session.
   const modelPresent = useRef<boolean | undefined>(undefined); const downloadAccepted = useRef(false);
   const [confirmingDownload, setConfirmingDownload] = useState(false);
@@ -28,7 +31,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
   const readLevel = useCallback(() => level.current, []);
   const stopStream = () => { context.current?.close().catch(() => undefined); context.current = undefined; stream.current?.getTracks().forEach(t => t.stop()); stream.current = undefined; level.current = 0; };
   // Detach before closing so onclose never dispatches for a socket we abandoned on purpose.
-  const closeSocket = () => { const ws = socket.current; socket.current = undefined; ws?.close(1000); };
+  const closeSocket = () => { const ws = socket.current; socket.current = undefined; pending.current.clear(); ws?.close(1000); };
   function run(effect: DictationEffect) {
     const o = latest.current;
     switch (effect.type) {
@@ -42,7 +45,8 @@ export function useDictation(options: UseDictationOptions): Dictation {
         url.searchParams.set('capability', capabilityToken() ?? ''); url.searchParams.set('session', o.sessionId); url.searchParams.set('language', o.language);
         const ws = new WebSocket(url); ws.binaryType = 'arraybuffer'; socket.current = ws;
         ws.onmessage = e => { if (socket.current !== ws || typeof e.data !== 'string') return; let m: DictationServerMessage; try { m = JSON.parse(e.data) as DictationServerMessage; } catch { return; } dispatch({ type: 'server', message: m }); };
-        ws.onclose = e => { if (socket.current === ws) { socket.current = undefined; dispatch({ type: 'socket-closed', clean: e.code === 1000 }); } };
+        ws.onclose = e => { if (socket.current === ws) { socket.current = undefined; pending.current.clear(); dispatch({ type: 'socket-closed', clean: e.code === 1000 }); } };
+        ws.addEventListener('open', () => { if (socket.current === ws) pending.current.flush(f => ws.send(f)); });
         ws.onerror = () => undefined;
         return;
       }
@@ -53,7 +57,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
         void ctx.audioWorklet.addModule(workletUrl()).then(() => {
           if (context.current !== ctx) return;
           const node = new AudioWorkletNode(ctx, PCM_PROCESSOR_NAME, { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
-          node.port.onmessage = e => { if (context.current !== ctx) return; const { pcm, level: frameLevel } = e.data as { pcm: Int16Array<ArrayBuffer>; level: number }; const ws = socket.current; if (ws?.readyState === WebSocket.OPEN) ws.send(pcm.buffer); level.current = frameLevel; };
+          node.port.onmessage = e => { if (context.current !== ctx) return; const { pcm, level: frameLevel } = e.data as { pcm: Int16Array<ArrayBuffer>; level: number }; const ws = socket.current; if (ws?.readyState === WebSocket.OPEN) ws.send(pcm.buffer); else if (ws?.readyState === WebSocket.CONNECTING) pending.current.push(pcm.buffer); level.current = frameLevel; };
           ctx.createMediaStreamSource(s).connect(node);
         }).catch(() => { if (context.current === ctx) dispatch({ type: 'server', message: { type: 'error', code: 'engine-failed', message: 'Audio capture could not start' } }); });
         return;
