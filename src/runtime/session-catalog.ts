@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SessionCatalog } from '../core/session-catalog.js';
 import { languageShortCode } from '../core/language-settings.js';
-import type { SessionRecord } from '../core/session-contracts.js';
+import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { SessionManager } from './session-manager.js';
 import type { SessionLauncher, LaunchRecord } from './session-launcher.js';
 import type { AttentionMonitor } from './attention-monitor.js';
@@ -37,7 +37,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   const metadata = new Map<string, { at: number; value: ProjectMetadata }>();
   const metadataReads = new Map<string, Promise<ProjectMetadata>>();
   const listeners = new Set<(snapshot: CatalogSnapshot) => void>();
-  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], discovery: { state: 'healthy' } };
+  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], terminals: [], discovery: { state: 'healthy' } };
   let started = false;
   let closed = false;
   let pending: Promise<void> | undefined;
@@ -92,6 +92,13 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     return result;
   };
+  const titleNumber = (title: string) => Number(/^Terminal(?: (\d+))?$/.exec(title)?.[1] ?? 1);
+  const terminalEntries = (): TerminalEntry[] => {
+    if (!options.launcher) return [];
+    return options.launcher.list().filter(l => l.agent === 'shell' && l.state !== 'ended')
+      .map(l => ({ key: 'terminal:' + l.id, launchId: l.id, title: l.title ?? 'Terminal', busy: l.busy === true, folder: l.folder, ...launchProject(l.folder), ...(l.originSessionId ? { originSessionId: l.originSessionId } : {}) }))
+      .sort((a, b) => a.projectKey.localeCompare(b.projectKey) || a.folder.localeCompare(b.folder) || titleNumber(a.title) - titleNumber(b.title));
+  };
   const publish = () => {
     if (closed) return;
     const entries = launchEntries([...rows.values()].map(row => {
@@ -101,8 +108,9 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     })).sort((a, b) => a.projectKey.localeCompare(b.projectKey) || Number(b.open) - Number(a.open) || a.key.localeCompare(b.key));
     // Cached metadata (30s TTL per folder) is the only source; no extra filesystem reads happen here.
     for (const entry of entries) { delete entry.folderMissing; if (metadata.get(entry.target.projectId)?.value.available === false) entry.folderMissing = true; }
-    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery)) return;
-    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health } };
+    const terminals = terminalEntries();
+    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(terminals, current.terminals ?? []) && isDeepStrictEqual(health, current.discovery)) return;
+    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), terminals: structuredClone(terminals), discovery: { ...health } };
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };

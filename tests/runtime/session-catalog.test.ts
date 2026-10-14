@@ -341,3 +341,20 @@ it('merges a Codex launch placeholder with its discovered row once the launch is
   await settle(() => f.catalog.snapshot().entries.length === 1);
   expect(f.catalog.snapshot().entries[0]).toMatchObject({ key: 'codex:A', sessionId, launchId: 'L1', launchState: 'running' });
 });
+
+it('publishes live terminals separately from sessions, with project metadata, and drops ended ones', async () => {
+  let launches: LaunchRecord[] = []; const launchListeners = new Set<(r: LaunchRecord[]) => void>();
+  const launcher = { list: () => launches, subscribe: (l: (r: LaunchRecord[]) => void) => { launchListeners.add(l); return () => { launchListeners.delete(l); }; } };
+  const f = setup('codex', { launcher }); f.catalog.start();
+  launches = [{ id: 'T2', agent: 'shell', folder: process.cwd(), panePid: 5, state: 'running', createdAt: 0, title: 'Terminal 2', busy: true, originSessionId: 'p1' },
+    { id: 'T1', agent: 'shell', folder: process.cwd(), panePid: 4, state: 'running', createdAt: 0, title: 'Terminal', busy: false },
+    { id: 'T0', agent: 'shell', folder: process.cwd(), panePid: 3, state: 'ended', createdAt: 0, title: 'Terminal 3' }];
+  for (const l of launchListeners) l(launches);
+  await settle(() => (f.catalog.snapshot().terminals?.length ?? 0) === 2 && f.catalog.snapshot().terminals![0]!.projectName === 'Project');
+  expect(f.catalog.snapshot().terminals).toEqual([
+    { key: 'terminal:T1', launchId: 'T1', title: 'Terminal', busy: false, folder: process.cwd(), projectKey: '/common', projectName: 'Project' },
+    { key: 'terminal:T2', launchId: 'T2', title: 'Terminal 2', busy: true, folder: process.cwd(), projectKey: '/common', projectName: 'Project', originSessionId: 'p1' }]);
+  expect(f.catalog.snapshot().entries.some(e => e.key.startsWith('terminal:') || e.key === 'launch:T1')).toBe(false);
+  launches = launches.map(l => ({ ...l, state: 'ended' as const })); for (const l of launchListeners) l(launches);
+  await settle(() => f.catalog.snapshot().terminals?.length === 0);
+});

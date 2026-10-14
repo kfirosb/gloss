@@ -1,4 +1,5 @@
 import type { Target } from './contracts.js';
+import type { TerminalEntry } from './session-contracts.js';
 
 export interface OpenSessionCandidate {
   sessionTitle?: string;
@@ -45,6 +46,8 @@ export interface CatalogSnapshot {
   epoch: string;
   sequence: number;
   entries: CatalogEntry[];
+  /** Live terminals started from Gloss; never sessions, never saved. */
+  terminals?: TerminalEntry[];
   discovery: { state: 'healthy' | 'stale'; error?: string };
 }
 export interface SessionCatalog {
