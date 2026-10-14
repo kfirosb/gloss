@@ -26,20 +26,21 @@ export function createAttentionMonitor(options: { tmux: () => Promise<Tmux>; lau
     const value = options.agentVersion(a).catch(() => undefined); versions.set(a, { at: now(), value }); return value;
   };
   async function inspect(launch: LaunchRecord): Promise<Attention> {
-    if (launch.agent === 'shell') return { launchId: launch.id, state: 'clear' };
-    const table = markersFor(launch.agent, (await version(launch.agent)) ?? '');
-    if (!table) return { launchId: launch.id, state: 'unknown-version', reason: `Approval detection unavailable for this ${agentLabel(launch.agent)} version` };
+    // Shells are filtered out in poll(); only agents reach here.
+    const agent = launch.agent as AgentKind;
+    const table = markersFor(agent, (await version(agent)) ?? '');
+    if (!table) return { launchId: launch.id, state: 'unknown-version', reason: `Approval detection unavailable for this ${agentLabel(agent)} version` };
     const failed = captureFailedAt.get(launch.id);
     if (failed !== undefined && now() - failed < CAPTURE_RETRY_MS) return state.get(launch.id) ?? { launchId: launch.id, state: 'clear' };
     const screen = await options.tmux().then(t => t.capturePane(sessionNameFor(launch.id))).then(text => { captureFailedAt.delete(launch.id); return text; }, () => { captureFailedAt.set(launch.id, now()); return ''; });
     const kind = classifyScreen(table, screen);
-    return { launchId: launch.id, state: kind === 'none' ? 'clear' : 'needs-user', ...(kind === 'consent' ? { reason: `${agentLabel(launch.agent)} is asking for startup consent` } : {}) };
+    return { launchId: launch.id, state: kind === 'none' ? 'clear' : 'needs-user', ...(kind === 'consent' ? { reason: `${agentLabel(agent)} is asking for startup consent` } : {}) };
   }
   async function poll() {
     if (closed) return;
     try {
       let changed = false; const seen = new Set<string>();
-      for (const launch of options.launches().filter(l => l.state !== 'ended')) {
+      for (const launch of options.launches().filter(l => l.state !== 'ended' && l.agent !== 'shell')) {
         seen.add(launch.id);
         const next = await inspect(launch);
         if (closed) return;

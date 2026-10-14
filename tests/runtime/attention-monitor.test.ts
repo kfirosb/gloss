@@ -32,7 +32,7 @@ it('monitor reports needs-user, clears, and flags unknown versions without guess
   monitor.close();
 });
 it('drops ended launches and notifies subscribers of changes', async () => {
-  const timers: (() => void)[] = []; let launches = [{ id: 'L1', agent: 'codex' as const, folder: '/p', panePid: 2, state: 'running' as const, createdAt: 0 }];
+  const timers: (() => void)[] = []; let launches = [{ id: 'L1', agent: 'codex' as const, folder: '/p', panePid: 2, state: 'running' as const, createdAt: 0 }, { id: 'T1', agent: 'shell' as const, folder: '/p', panePid: 9, state: 'running' as const, createdAt: 0, title: 'Terminal' }];
   const monitor = createAttentionMonitor({ tmux: async () => ({ capturePane: async () => '' } as any), launches: () => launches,
     agentVersion: async () => '0.162.1', setTimer: ((fn: () => void) => { timers.push(fn); return 0 as any; }) as any });
   const seen: number[] = []; monitor.subscribe(m => seen.push(m.size));

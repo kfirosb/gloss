@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { basename, isAbsolute } from 'node:path';
 import type { AgentKind, Target } from '../core/contracts.js';
 import { validateLanguageOverride, type LanguageOverride } from '../core/language-settings.js';
 import type { SessionManager } from './session-manager.js';
@@ -24,7 +24,7 @@ export interface LaunchStore {
   readLaunchSettings(): LaunchSettings; writeLaunchSettings(settings: LaunchSettings): void;
 }
 export interface SessionLauncher {
-  launch(input: { agent: AgentKind; folder: string; languageOverride?: LanguageOverride }): Promise<LaunchRecord>;
+  launch(input: { agent: LaunchAgent; folder: string; languageOverride?: LanguageOverride; prompt?: string }): Promise<LaunchRecord>;
   list(): LaunchRecord[]; reconcile(): Promise<void>; end(launchId: string): Promise<void>;
   /** Retries connecting a launch that has no panel yet. */
   identify(launchId: string): Promise<void>;
@@ -53,6 +53,26 @@ export function splitArgs(text: string): string[] {
   if (started) out.push(current);
   return out;
 }
+export const MAX_PROMPT_LENGTH = 4000;
+/** A first message typed into the New session dialog; absent means the disclosed default. */
+export function validatePrompt(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('Invalid first message');
+  const text = value.trim();
+  if (!text || text.length > MAX_PROMPT_LENGTH) throw new Error('Invalid first message');
+  return text;
+}
+export function defaultShell(env: NodeJS.ProcessEnv = process.env): string {
+  const shell = env.SHELL;
+  return shell && isAbsolute(shell) ? shell : '/bin/zsh';
+}
+const TITLE = /^Terminal(?: (\d+))?$/;
+/** Lowest free number among live terminals of one folder: Terminal, Terminal 2, Terminal 3 … */
+export function nextTerminalTitle(existing: string[]): string {
+  const used = new Set(existing.map(t => { const m = TITLE.exec(t); return m ? Number(m[1] ?? 1) : 0; }));
+  let n = 1; while (used.has(n)) n++;
+  return n === 1 ? 'Terminal' : `Terminal ${n}`;
+}
 
 export function createSessionLauncher(options: {
   tmux: () => Promise<Tmux>; store: LaunchStore; sessions: Pick<SessionManager, 'register'>;
@@ -62,11 +82,15 @@ export function createSessionLauncher(options: {
   resolveExecutable(name: 'codex'): Promise<string>; knownFolder(folder: string): Promise<boolean>;
   applyLanguage?(panelId: string, override: LanguageOverride): void | Promise<void>;
   /** The marker table for the installed agent version, used to make sure End never answers a prompt. */
-  now?: () => number; sleep?: (ms: number) => Promise<void>; identifyTimeoutMs?: number; watchIntervalMs?: number;
+  shell?: string; now?: () => number; sleep?: (ms: number) => Promise<void>; identifyTimeoutMs?: number; watchIntervalMs?: number;
   /** Waits between identification attempts; after the last one the launch shows as not connected until Retry or new discovery. */
   retryDelaysMs?: number[];
 }): SessionLauncher {
   const now = options.now ?? Date.now;
+  const shell = options.shell ?? defaultShell(); const shellName = basename(shell);
+  const busy = new Map<string, boolean>();
+  const list = (): LaunchRecord[] => options.store.listLaunches().map(r => r.agent === 'shell' ? { ...r, busy: busy.get(r.id) ?? false } : r);
+  const notify = () => { if (!closed) for (const listener of listeners) { try { listener(list()); } catch { /* Subscribers do not control launch lifecycle. */ } } };
   const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const timeoutMs = options.identifyTimeoutMs ?? 60_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid identification timeout');
@@ -83,7 +107,7 @@ export function createSessionLauncher(options: {
   };
   const put = (record: LaunchRecord) => {
     options.store.putLaunch(record);
-    if (!closed) for (const listener of listeners) { try { listener(options.store.listLaunches()); } catch { /* Subscribers do not control launch lifecycle. */ } }
+    notify();
   };
   const cancel = (id: string) => { identification.get(id)?.abort(); identification.delete(id); };
   const active = (id: string, controller: AbortController) => !closed && !controller.signal.aborted && !ending.has(id) && get(id).state !== 'ended';
@@ -170,50 +194,73 @@ export function createSessionLauncher(options: {
   // the periodic watch only notices sessions that ended).
   async function reconcile(retry: boolean) {
     requireOpen();
-    let live: Map<string, number>;
-    try { live = new Map((await (await options.tmux()).listSessions()).map(s => [s.name, s.panePid])); }
+    let live: Map<string, { panePid: number; currentCommand: string }>;
+    try { live = new Map((await (await options.tmux()).listSessions()).map(s => [s.name, { panePid: s.panePid, currentCommand: s.currentCommand }])); }
     catch { return; } // A failed listing gives no evidence that sessions ended.
     if (closed) return;
+    let busyChanged = false;
     for (const record of options.store.listLaunches()) {
       if (ending.has(record.id)) continue;
-      const panePid = live.get(sessionNameFor(record.id));
+      const pane = live.get(sessionNameFor(record.id)); const panePid = pane?.panePid;
       if (record.state === 'ended') {
         // A launch marked missing while its tmux session lives on (a listing gap around a restart) is adopted back;
         // launches ended on purpose stay ended.
         if (panePid !== undefined && record.reason === MISSING_REASON) {
           const kept = { ...get(record.id) }; delete kept.reason;
+          if (kept.agent === 'shell') { busy.set(kept.id, pane!.currentCommand !== shellName); put({ ...kept, panePid, state: 'running' }); continue; }
           put({ ...kept, panePid, state: kept.panelSessionId ? 'running' : 'starting' });
           if (!kept.panelSessionId) void identify(record.id);
-        }
+        } else if (record.agent === 'shell') { options.store.deleteLaunch(record.id); busy.delete(record.id); notify(); }
         continue;
       }
-      if (panePid === undefined) { cancel(record.id); put({ ...get(record.id), state: 'ended', reason: MISSING_REASON }); continue; }
+      if (panePid === undefined) {
+        // A shell that exited is gone for good: no Saved entry, no history (spec: deleted on that reconcile).
+        if (record.agent === 'shell') { options.store.deleteLaunch(record.id); busy.delete(record.id); notify(); continue; }
+        cancel(record.id); put({ ...get(record.id), state: 'ended', reason: MISSING_REASON }); continue;
+      }
+      if (record.agent === 'shell') {
+        const next = pane!.currentCommand !== shellName;
+        if (busy.get(record.id) !== next) { busy.set(record.id, next); busyChanged = true; }
+        if (record.panePid !== panePid) put({ ...get(record.id), panePid });
+        continue;
+      }
       const moved = record.panePid !== panePid;
       if (moved) { cancel(record.id); put({ ...get(record.id), panePid }); }
       if ((retry || moved) && (!record.panelSessionId || record.state === 'unidentified')) void identify(record.id);
     }
+    if (busyChanged) notify();
   }
   // End must never answer a native prompt, so it never sends Enter or typed text: Ctrl+C twice cancels a prompt
   // or clears input and never selects a menu option. A session that survives is killed.
   async function askToExit(tmux: Tmux, name: string) {
     await tmux.sendKeys(name, ['C-c']); await sleep(300); await tmux.sendKeys(name, ['C-c']);
   }
+  const liveShells = (folder: string) => list().filter(r => r.agent === 'shell' && r.state !== 'ended' && r.folder === folder);
+  async function startShell(tmux: Tmux, cwd: string, originSessionId?: string): Promise<LaunchRecord> {
+    const id = randomUUID(); const title = nextTerminalTitle(liveShells(cwd).map(r => r.title ?? 'Terminal'));
+    const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, [shell, '-l'], { ELECTRON_RUN_AS_NODE: '' });
+    busy.set(id, false);
+    put({ id, agent: 'shell', folder: cwd, panePid, state: 'running', createdAt: now(), title, ...(originSessionId ? { originSessionId } : {}) });
+    return list().find(r => r.id === id)!;
+  }
   return {
-    async launch({ agent, folder, languageOverride }) {
+    async launch({ agent, folder, languageOverride, prompt }) {
       requireOpen();
-      if (agent !== 'claude' && agent !== 'codex') throw new Error('Unsupported agent');
+      if (agent !== 'claude' && agent !== 'codex' && agent !== 'shell') throw new Error('Unsupported agent');
+      const firstMessage = agent === 'shell' ? undefined : validatePrompt(prompt);
       const language = languageOverride === undefined ? undefined : validateLanguageOverride(languageOverride);
       if (language && Object.keys(language).length && !options.applyLanguage) throw new Error('Language settings unavailable');
       const cwd = await validFolder(folder); const tmux = await options.tmux();
+      if (agent === 'shell') return startShell(tmux, cwd);
       const extra = options.store.readLaunchSettings().extraArgs[agent];
       const id = randomUUID(); let sessionRef: string | undefined; let argv: string[];
       if (agent === 'claude') {
         const { claude, mcpConfigPath } = await options.prepareClaude(cwd); sessionRef = randomUUID();
         // The prompt must come first: --mcp-config and --dangerously-load-development-channels are variadic, so a trailing positional would be parsed as another option value. Extra args may be variadic too, so they go last.
-        argv = [claude, CLAUDE_SETUP_PROMPT, '--session-id', sessionRef, '--mcp-config', mcpConfigPath, '--dangerously-load-development-channels', 'server:language-assistant', ...extra];
+        argv = [claude, firstMessage ?? CLAUDE_SETUP_PROMPT, '--session-id', sessionRef, '--mcp-config', mcpConfigPath, '--dangerously-load-development-channels', 'server:language-assistant', ...extra];
       } else {
         // `codex [OPTIONS] [PROMPT]`: the prompt goes first so an extra option that takes a value cannot swallow it.
-        argv = [await options.resolveExecutable('codex'), CODEX_SETUP_PROMPT, ...extra];
+        argv = [await options.resolveExecutable('codex'), firstMessage ?? CODEX_SETUP_PROMPT, ...extra];
       }
       requireOpen();
       const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, argv, { ELECTRON_RUN_AS_NODE: '' });
@@ -222,10 +269,11 @@ export function createSessionLauncher(options: {
       if (agent === 'claude') await new Promise<void>(done => { void identify(id, done).finally(done); }); else void identify(id);
       return get(id);
     },
-    list: () => options.store.listLaunches(),
+    list,
     reconcile: () => reconcile(true),
     identify(launchId) {
       requireOpen(); const record = get(launchId);
+      if (record.agent === 'shell') throw new Error('Terminals have nothing to identify');
       if (record.state === 'ended' || ending.has(launchId)) throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' });
       if (record.state === 'unidentified' && !identification.has(launchId)) { const { reason: _reason, ...rest } = record; put({ ...rest, state: 'starting' }); }
       return identify(launchId);
@@ -253,6 +301,12 @@ export function createSessionLauncher(options: {
       cancel(launchId);
       const task = (async () => {
         const tmux = await options.tmux(); const name = sessionNameFor(launchId);
+        if (record.agent === 'shell') {
+          await tmux.sendKeys(name, ['C-c']).catch(() => undefined);
+          await tmux.killSession(name);
+          if (await tmux.hasSession(name)) throw new Error('Session is still running');
+          busy.delete(launchId); put({ ...get(launchId), state: 'ended', reason: 'Ended by you' }); return;
+        }
         const asked = await askToExit(tmux, name).then(() => true, () => false);
         if (asked) for (let i = 0; i < 20 && await tmux.hasSession(name); i++) await sleep(500);
         if (await tmux.hasSession(name)) {

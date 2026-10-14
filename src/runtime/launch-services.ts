@@ -9,7 +9,7 @@ import { createAttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup } from './claude-channel-setup.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
 import type { OpenSessionCandidate } from '../core/session-catalog.js';
-import { createSessionLauncher, type LaunchRecord, type LaunchStore } from './session-launcher.js';
+import { createSessionLauncher, defaultShell, type LaunchRecord, type LaunchStore } from './session-launcher.js';
 import type { SessionManager } from './session-manager.js';
 import { createTerminalBridge } from './terminal-bridge.js';
 import { createTmux, type Tmux } from './tmux.js';
@@ -134,7 +134,7 @@ export function createLaunchServices(options: {
   const channel = createClaudeChannelSetup();
   const live = () => options.application();
   const launcher = createSessionLauncher({
-    tmux, store: options.store,
+    shell: defaultShell(), tmux, store: options.store,
     sessions: { register: (...args) => live().sessions!.register(...args) },
     prepareClaude: folder => channel.prepareNewSessionConfig(folder),
     async findCodex(launch, signal): Promise<Target | undefined> {
