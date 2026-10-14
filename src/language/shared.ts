@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LanguageInput, LanguageSession, ImageAttachment } from '../core/contracts.js';
+import type { AgentKind, LanguageInput, LanguageSession, ImageAttachment } from '../core/contracts.js';
+import type { ProviderUsage, Spend } from '../core/usage.js';
 import { collectProcess, runProcess, type ProcessOutcome, type ProcessRunner } from '../runtime/process-runner.js';
 import { discussionPrompt, preparationPrompt, translationPrompt, summaryPrompt } from './prompts.js';
 
@@ -50,12 +51,18 @@ export function workerEnvironment(source: NodeJS.ProcessEnv = process.env): Node
   env.DISABLE_AUTOUPDATER = '1';
   return env;
 }
-export interface BackendOptions { runner?: ProcessRunner; executable?: string; timeoutMs?: number; maxConcurrent?: number; cachePath?: string }
+/** Receives what each language call reveals about the account: its quota windows and what the call cost. */
+export interface LanguageObserver {
+  usage(usage: ProviderUsage): void;
+  spend(entry: { provider: AgentKind; model: string; scope: string; spend: Spend }): void;
+}
+export interface BackendOptions { runner?: ProcessRunner; executable?: string; timeoutMs?: number; maxConcurrent?: number; cachePath?: string; observer?: LanguageObserver; now?: () => number }
+export interface SessionOptions { scope?: string }
 export interface ResponseParser {
   accept(event: Record<string, any>): string;
   finish(): string;
 }
-export interface ProviderSpec { executable: string; args(model: string, images?: ImageAttachment[]): string[]; input?(prompt:string,images:ImageAttachment[]):Promise<string>; parser(): ResponseParser }
+export interface ProviderSpec { provider: AgentKind; executable: string; args(model: string, images?: ImageAttachment[]): string[]; input?(prompt:string,images:ImageAttachment[]):Promise<string>; parser(): ResponseParser; observe?(event: Record<string, any>, observedAt: number): { usage?: ProviderUsage; spend?: Spend } | undefined }
 
 export async function requireSubscription(provider: 'claude' | 'codex', options: BackendOptions): Promise<void> {
   let cwd: string | undefined;
@@ -105,7 +112,8 @@ export class LanguageWorkers {
     this.active--;
     this.waiting.shift()?.();
   }
-  session(model: string): LanguageSession {
+  session(model: string, sessionOptions: SessionOptions = {}): LanguageSession & { raw(prompt: string, signal: AbortSignal): Promise<string> } {
+    const scope = sessionOptions.scope ?? 'unscoped';
     if (!model.trim() || model.length > 200 || /[\x00-\x1f]/.test(model)) throw new LanguageError('model-unavailable');
     const controllers = new Set<AbortController>();
     let closed = false;
@@ -139,6 +147,9 @@ export class LanguageWorkers {
           let data: unknown;
           try { data = JSON.parse(event.line); } catch { throw new LanguageError('invalid-output'); }
           if (!data || typeof data !== 'object' || Array.isArray(data)) throw new LanguageError('invalid-output');
+          const observed = workers.options.observer && workers.spec.observe?.(data as Record<string, any>, (workers.options.now ?? Date.now)());
+          if (observed?.usage) workers.options.observer!.usage(observed.usage);
+          if (observed?.spend) workers.options.observer!.spend({ provider: workers.spec.provider, model, scope, spend: observed.spend });
           const delta = parser.accept(data as Record<string, any>);
           if (delta) yield { delta };
         }
@@ -162,6 +173,7 @@ export class LanguageWorkers {
     }
     return {
       id: `language-${randomUUID()}`,
+      raw: (prompt, signal) => complete(prompt, signal),
       async *discuss(input: LanguageInput, signal: AbortSignal) {
         let emitted = false;
         for await (const item of request(discussionPrompt(input), signal, inputImages(input))) {

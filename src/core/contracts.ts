@@ -66,6 +66,9 @@ export interface AgentCapabilities {
 }
 export type AgentEvent =
   | { type: 'message'; message: AgentMessage }
+  | { type: 'usage'; usage: import('./usage.js').ProviderUsage }
+  /** Claude read this Gloss channel message into its context; its next finished turn answers it. */
+  | { type: 'channel-seen'; requestId: string }
   | { type: 'status'; state: CodingState }
   | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
   | { type: 'gap'; reason: string };
@@ -102,7 +105,10 @@ export interface LanguageSession {
 }
 export interface LanguageBackend {
   models(): Promise<{ id: string; label: string }[]>;
-  open(model: string, resumeId?: string): Promise<LanguageSession>;
+  /** `scope` attributes the session's spend, normally to the panel session that owns it. */
+  open(model: string, resumeId?: string, options?: { scope?: string }): Promise<LanguageSession>;
+  /** Asks the provider for fresh quota windows; absent when the provider cannot report them on demand. */
+  refreshUsage?(signal: AbortSignal): Promise<void>;
 }
 export interface HostAdapter {
   openPanel(url: string): Promise<void>;

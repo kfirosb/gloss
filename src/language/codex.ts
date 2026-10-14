@@ -2,7 +2,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { LanguageBackend, LanguageSession } from '../core/contracts.js';
-import { classifyError, LanguageError, LanguageWorkers, requireSubscription, type BackendOptions, type ResponseParser } from './shared.js';
+import { classifyError, LanguageError, LanguageWorkers, requireSubscription, type BackendOptions, type ResponseParser, type SessionOptions } from './shared.js';
+import { parseCodexSpend } from '../core/usage.js';
 export { LanguageError } from './shared.js';
 
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
@@ -32,7 +33,7 @@ export class CodexLanguageBackend implements LanguageBackend {
   private readonly cachePath: string;
   constructor(private readonly options: BackendOptions = {}) {
     this.cachePath = options.cachePath ?? join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'models_cache.json');
-    this.workers = new LanguageWorkers({ executable: 'codex', parser, args: (model, images = []) => [
+    this.workers = new LanguageWorkers({ provider: 'codex', executable: 'codex', parser, observe: event => { const spend = parseCodexSpend(event); return spend ? { spend } : undefined; }, args: (model, images = []) => [
       'exec', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check', '--sandbox', 'read-only', '--model', model,
       '-c', 'model_reasoning_effort="low"', '-c', 'agents.enabled=false', '-c', 'web_search="disabled"', '-c', 'skills.include_instructions=false', '-c', 'project_doc_max_bytes=0',
       ...disabledFeatures.flatMap(name => ['-c', `features.${name}=false`]), ...images.flatMap(image=>['--image',image.path]), '--json', '-',
@@ -52,5 +53,5 @@ export class CodexLanguageBackend implements LanguageBackend {
     } catch { /* Cache is optional; the explicit default was verified with subscription auth. */ }
     return [{ id: DEFAULT_CODEX_MODEL, label: `${DEFAULT_CODEX_MODEL} (default; local model cache unavailable)` }];
   }
-  async open(model: string = DEFAULT_CODEX_MODEL, _resumeId?: string): Promise<LanguageSession> { await requireSubscription('codex', this.options); return this.workers.session(model); }
+  async open(model: string = DEFAULT_CODEX_MODEL, _resumeId?: string, sessionOptions?: SessionOptions): Promise<LanguageSession> { await requireSubscription('codex', this.options); return this.workers.session(model, sessionOptions); }
 }

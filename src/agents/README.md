@@ -26,7 +26,7 @@ Everything else is **closed**: discovery omits it (so its tab moves to history a
 
 Known limits: the daemon offers no read-only, cheap query of attached clients (`codex agents` is an interactive browser), so attachment is inferred. A client that switched threads (`/new`, `/resume` picker, `codex resume` without an ID, `codex resume --last`) or a client attached through `--remote`, the Desktop app or an IDE is not recognized for an older daemon-held thread, which then reads as closed (unavailable for sending) — the safe direction. Two clients in the same folder may be paired with the wrong threads among their own. Command lines are split on spaces, so `-C` paths containing spaces are not resolved. macOS only, like the other liveness probes.
 
-New Codex launches pass the disclosed setup prompt `Reply with READY only. Do not run commands.` (`CODEX_SETUP_PROMPT`) as the positional `[PROMPT]` right after the executable and before the user's extra arguments, so Codex creates the thread immediately (one model request) and a value-taking extra option cannot consume it. Extra arguments that name a subcommand (for example `resume`) are incompatible with this prompt.
+New Codex launches pass the disclosed setup prompt `Reply with READY only. Do not run commands.` (`CODEX_SETUP_PROMPT`) as the positional `[PROMPT]` last, after the user's extra arguments and a `--` separator, so Codex creates the thread immediately (one model request), a value-taking extra option cannot consume it, and a first message starting with `-` is not read as an option. Extra arguments that name a subcommand (for example `resume`) are incompatible with this prompt.
 
 ## Experimental Claude channels (2026-10-07)
 

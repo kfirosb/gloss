@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.299
+▝▜██████▀  Fable 5.1 · Claude Max
+ ▝▝   ▝▝   /project
+
+▎ Channels (experimental) messages from server:language-assistant inject directly in this session · restart without
+▎ --dangerously-load-development-channels to stop
+▎ server:language-assistant · no MCP server configured with that name
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "how does <filepath> work?"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← 1 agent

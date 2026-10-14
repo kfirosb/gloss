@@ -43,6 +43,8 @@ export interface WorkflowDependencies {
   agents: AgentAdapter[];
   store: ConversationStore;
   createId?: (prefix: 'draft' | 'delivery') => string;
+  /** Account-level quota observations from the live agent's own transcript; never part of the conversation. */
+  onUsage?: (usage: import('./usage.js').ProviderUsage) => void;
 }
 
 export interface Workflow {
@@ -246,7 +248,11 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
   };
 
+  /** Channel deliveries Claude has read into its context and not yet answered with a finished turn. */
+  const seenChannel = new Set<string>();
   const consumeEvent = async (event: AgentEvent, active: CodingConnection) => {
+    if (event.type === 'usage') { deps.onUsage?.(event.usage); return; }
+    if (event.type === 'channel-seen') { seenChannel.add(event.requestId); if (seenChannel.size > 1000) seenChannel.delete(seenChannel.values().next().value!); return; }
     if (event.type === 'gap') {
       state.sourceGaps = [...new Set([...(state.sourceGaps ?? []), event.reason])].slice(-20);
       publish();
@@ -268,16 +274,20 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         // turn is still evidence that Claude answered the oldest handoff.
         if (event.message.role === 'assistant' && event.message.complete &&
             !event.message.sourceId.startsWith('channel:') && active.target.agent === 'claude') {
-          const delivery = state.deliveries.find(item =>
+          const pending = state.deliveries.filter(item =>
             item.transport === 'channel' && ['sending', 'queued'].includes(item.state) && sameTarget(item.target, active.target),
           );
-          if (delivery) {
+          // A turn answers every channel message Claude read during it. Without that
+          // evidence (older transcripts), it answers only the oldest handoff.
+          const seen = pending.filter(item => seenChannel.has(item.id));
+          for (const delivery of seen.length ? seen : pending.slice(0, 1)) {
             delivery.state = 'sent';
             delete delivery.reason;
+            seenChannel.delete(delivery.id);
             deps.store.updateDelivery(copy(delivery));
             clearSubmittedDraft(delivery);
-            publish();
           }
+          if (pending.length) publish();
         }
       }
       // Queue receipt IDs can differ from accepted native UserMessage client IDs.

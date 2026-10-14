@@ -11,6 +11,7 @@ export async function mockSidebarDefaults(target: Page | import('@playwright/tes
  await target.route('**/api/folders/search?*', route => route.fulfill({json:{hits:[],timedOut:false,unavailable:false}}));
  await target.route('**/api/projects/*/worktrees', route => route.fulfill({json:{hasCommits:true,worktrees:[]}}));
  await target.route('**/api/settings/sidebar', route => route.fulfill({json:route.request().method() === 'PUT' ? route.request().postDataJSON() : {order:[],hidden:[],collapsed:[],worktreeLocation:{}}}));
+ await target.route('**/api/dictation', route => route.fulfill({json:{available:false,reason:'engine-missing',model:{present:false},engine:'stopped'}}));
  await target.route('**/api/about', route => route.fulfill({json:{name:'language-assistant',version:'0.0.0-test',platform:'darwin',arch:'arm64'}}));
 }
 /** Modern scoped API fixture shared by the single-session regression suites. */

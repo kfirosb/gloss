@@ -149,7 +149,7 @@ describe('application session restoration', () => {
     const app = createApplication({ store, agents: [new FakeAgent(), new FakeAgent('claude')], conversationId: 'A', model: 'override-A', languageBackends: { codex: { open: codex, models: async () => [] }, claude: { open: claude, models: async () => [] } } });
     await app.restore!();
     expect(app.sessions!.list().map(r => r.id).sort()).toEqual(['A', 'B']);
-    expect(codex).toHaveBeenCalledWith('override-A', 'resume-A'); expect(claude).toHaveBeenCalledWith('model-B', 'resume-B');
+    expect(codex).toHaveBeenCalledWith('override-A', 'resume-A', { scope: 'A' }); expect(claude).toHaveBeenCalledWith('model-B', 'resume-B', { scope: 'B' });
     expect(app.snapshot().snapshot.discussion).toEqual([{ id:'A:legacy:0',complete:true,role: 'user', text: 'Saved A' }]);
     expect(app.sessions!.snapshot('B').snapshot.discussion).toEqual([{ id:'B:legacy:0',complete:true,role: 'user', text: 'Saved B' }]);
     await app.close();

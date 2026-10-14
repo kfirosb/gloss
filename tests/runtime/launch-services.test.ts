@@ -52,7 +52,7 @@ it('accepts folders of registered or discovered sessions, compared by real path'
     const tmux = { executable: '/t', socket: '/s', async newSession(name: string) { live.set(name, 77); return { panePid: 77 }; }, async listSessions() { return [...live].map(([name, panePid]) => ({ name, panePid })); }, async hasSession() { return false; }, async capturePane() { return ''; }, async sendKeys() {}, async resizeWindow() {}, async killSession() {}, attachArgv: () => [] };
     const launches: any[] = []; let entries: any[] = [];
     const services = createLaunchServices({
-      store: { listSessions: () => [], listLaunches: () => launches, putLaunch: (r: any) => { const i = launches.findIndex(l => l.id === r.id); if (i >= 0) launches[i] = r; else launches.push(r); }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto' }), writeLaunchSettings() {} } as any,
+      store: { listSessions: () => [], listLaunches: () => launches, putLaunch: (r: any) => { const i = launches.findIndex(l => l.id === r.id); if (i >= 0) launches[i] = r; else launches.push(r); }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' }), writeLaunchSettings() {}, deleteLaunch() {} } as any,
       codex: { discoverOpen: async () => ({ candidates: [], complete: true }) } as any,
       application: () => ({ catalog: { refresh() {}, snapshot: () => ({ entries }) } }), tmux: async () => tmux as any,
     });
@@ -101,7 +101,7 @@ describe('identifies a Codex launch whose writer is the shared app-server daemon
     const register = vi.fn(async (target: any) => ({ id: 'panel-' + target.sessionRef, target }));
     const calls: string[][] = []; const discoverOpen = vi.fn(async () => ({ candidates, complete: true }));
     const result = createLaunchServices({
-      store: { listSessions: () => sessions, listLaunches: () => structuredClone(launches), putLaunch: (r: any) => { const i = launches.findIndex(l => l.id === r.id); if (i >= 0) launches[i] = r; else launches.push(r); }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto' }), writeLaunchSettings() {} } as any,
+      store: { listSessions: () => sessions, listLaunches: () => structuredClone(launches), putLaunch: (r: any) => { const i = launches.findIndex(l => l.id === r.id); if (i >= 0) launches[i] = r; else launches.push(r); }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' }), writeLaunchSettings() {}, deleteLaunch() {} } as any,
       codex: { discoverOpen } as any,
       application: () => ({ sessions: { register } as any }), tmux: async () => tmux as any,
       // The daemon (4352) is a child of launchd, never of a launch pane.
@@ -157,7 +157,7 @@ describe('liveness of Codex threads Gloss launched', () => {
     let alive = true;
     const tmux = { executable: '/t', socket: '/s', async listSessions() { return alive ? [{ name: 'la-L', panePid: 7 }] : []; }, async hasSession() { return alive; }, async capturePane() { return ''; }, async sendKeys() {}, async resizeWindow() {}, async killSession() {}, async newSession() { throw new Error('never launches'); }, attachArgv: () => [] };
     const services = createLaunchServices({
-      store: { listSessions: () => [{ id: 'P', target: { agent: 'codex', sessionRef: 't1', projectId: '/p' } }], listLaunches: () => structuredClone(launches), putLaunch: (r: LaunchRecord) => { launches[0] = r; }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto' }), writeLaunchSettings() {} } as any,
+      store: { listSessions: () => [{ id: 'P', target: { agent: 'codex', sessionRef: 't1', projectId: '/p' } }], listLaunches: () => structuredClone(launches), putLaunch: (r: LaunchRecord) => { launches[0] = r; }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' }), writeLaunchSettings() {}, deleteLaunch() {} } as any,
       codex: { discoverOpen: async () => ({ candidates: [], complete: true }) } as any, application: () => ({}), tmux: async () => tmux as any, runner: ps({}),
     });
     try {
@@ -182,7 +182,7 @@ it('ends only the live launches in a folder', async () => {
   const tmux = { executable: '/t', socket: '/s', async listSessions() { return [...alive].map(name => ({ name, panePid: 1 })); }, async hasSession(name: string) { return alive.has(name); }, async capturePane() { return ''; },
     async sendKeys(name: string) { sent.push(name); alive.delete(name); }, async resizeWindow() {}, async killSession(name: string) { alive.delete(name); }, async newSession() { throw new Error('never launches'); }, attachArgv: () => [] };
   const services = createLaunchServices({
-    store: { listSessions: () => [], listLaunches: () => structuredClone(launches), putLaunch: (r: LaunchRecord) => { launches[launches.findIndex(l => l.id === r.id)] = r; }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto' }), writeLaunchSettings() {} } as any,
+    store: { listSessions: () => [], listLaunches: () => structuredClone(launches), putLaunch: (r: LaunchRecord) => { launches[launches.findIndex(l => l.id === r.id)] = r; }, readLaunchSettings: () => ({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' }), writeLaunchSettings() {}, deleteLaunch() {} } as any,
     codex: { discoverOpen: async () => ({ candidates: [], complete: true }) } as any, application: () => ({}), tmux: async () => tmux as any, runner: ps({}),
   });
   try {

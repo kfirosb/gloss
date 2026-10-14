@@ -7,7 +7,7 @@ import { FakeAgent } from '../helpers/fake-agent.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
 
 const cleanup: (() => Promise<void>)[] = []; afterEach(async () => { for (const c of cleanup.splice(0)) await c(); });
-const fakeLauncher = (over: Record<string, unknown> = {}) => ({ launch: vi.fn(async (input: any) => ({ id: 'L1', ...input, panePid: 2, state: 'starting', createdAt: 0 })), list: () => [{ id: 'L1' }], reconcile: vi.fn(async () => {}), end: vi.fn(async () => {}), identify: vi.fn(async (id: string) => { if (id !== 'L1') throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' }); }), watch: vi.fn(), subscribe: () => () => {}, close: vi.fn(), ...over });
+const fakeLauncher = (over: Record<string, unknown> = {}) => ({ launch: vi.fn(async (input: any) => ({ id: 'L1', ...input, panePid: 2, state: 'starting', createdAt: 0 })), run: vi.fn(async (input: any) => ({ launch: { id: 'T1', agent: 'shell', folder: input.folder, title: 'Terminal', state: 'running', panePid: 3, createdAt: 0, busy: true }, reused: false, typed: true })), list: () => [{ id: 'L1', agent: 'claude' }, { id: 'T1', agent: 'shell', folder: '/p' }], reconcile: vi.fn(async () => {}), end: vi.fn(async () => {}), identify: vi.fn(async (id: string) => { if (id !== 'L1') throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' }); }), watch: vi.fn(), subscribe: () => () => {}, close: vi.fn(), ...over });
 async function setup(launcher: any, terminals: any = { issueTicket: () => ({ ticket: 't', expiresAt: 1 }), handleUpgrade: () => {}, close: () => {} }, extra: Record<string, unknown> = {}) {
   const store = new SqliteStore(':memory:');
   const app = createApplication({ store, agents: [new FakeAgent()], conversationId: 'A', capability: 'cap', languageBackends: { codex: { open: vi.fn(async () => new FakeLanguageSession()), models: async () => [] } }, launcher, terminals, ...extra });
@@ -32,7 +32,7 @@ it('launch routes require the capability and pass only agent, folder and a valid
   expect((await request('launches', 'POST', { agent: 'codex', folder: '/p', languageOverride: { reply: 'en' }, argv: ['x'] })).status).toBe(200);
   expect(launcher.launch).toHaveBeenLastCalledWith({ agent: 'codex', folder: '/p', languageOverride: { reply: 'en' } });
   expect(await (await request('launches/L1/terminal-ticket', 'POST', {})).json()).toEqual({ ticket: 't', expiresAt: 1 });
-  expect(await (await request('launches')).json()).toEqual([{ id: 'L1' }]);
+  expect(await (await request('launches')).json()).toEqual([{ id: 'L1', agent: 'claude' }, { id: 'T1', agent: 'shell', folder: '/p' }]);
   expect((await request('launches/L1/end', 'POST', {})).status).toBe(200);
   expect(launcher.end).toHaveBeenCalledWith('L1');
 });
@@ -57,8 +57,8 @@ it('maps tmux-unavailable to a clear 400', async () => {
 it('reads and replaces launch settings', async () => {
   const { request } = await setup(fakeLauncher());
   expect((await request('settings/launch', 'GET', undefined, false)).status).toBe(401);
-  expect(await (await request('settings/launch')).json()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto' });
-  const next = { extraArgs: { claude: ['--x'], codex: [] }, popup: 'dot-only' };
+  expect(await (await request('settings/launch')).json()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' });
+  const next = { extraArgs: { claude: ['--x'], codex: [] }, popup: 'dot-only', terminalView: 'popup' };
   expect(await (await request('settings/launch', 'PUT', next)).json()).toEqual(next);
   expect((await request('settings/launch', 'PUT', { popup: 'nope', extraArgs: {} })).status).toBe(400);
   expect(await (await request('settings/launch')).json()).toEqual(next);
@@ -66,7 +66,7 @@ it('reads and replaces launch settings', async () => {
 it('splits extra-argument strings per agent with the launcher quoting rules', async () => {
   const { request } = await setup(fakeLauncher());
   const put = await request('settings/launch', 'PUT', { extraArgs: { claude: '--model "opus 4" --x', codex: '' }, popup: 'auto' });
-  expect(await put.json()).toEqual({ extraArgs: { claude: ['--model', 'opus 4', '--x'], codex: [] }, popup: 'auto' });
+  expect(await put.json()).toEqual({ extraArgs: { claude: ['--model', 'opus 4', '--x'], codex: [] }, popup: 'auto', terminalView: 'popup' });
   expect((await request('settings/launch', 'PUT', { extraArgs: { claude: '"open', codex: '' }, popup: 'auto' })).status).toBe(400);
 });
 it('routes only loopback /api/launches upgrades to the terminal bridge', async () => {
@@ -98,4 +98,25 @@ it('approves only real absolute directories picked in the native folder dialog',
   expect(approved).toEqual([]);
   const ok = await request('launch-folders', 'POST', { folder: link });
   expect(ok.status).toBe(200); expect(await ok.json()).toEqual({ folder: realpathSync(dir) }); expect(approved).toEqual([realpathSync(dir)]);
+});
+it('forwards a first message as prompt and nothing else new', async () => {
+  const launcher = fakeLauncher(); const { request } = await setup(launcher);
+  expect((await request('launches', 'POST', { agent: 'claude', folder: '/p', prompt: 'Fix the tests', argv: ['rm'] })).status).toBe(200);
+  expect(launcher.launch).toHaveBeenLastCalledWith({ agent: 'claude', folder: '/p', prompt: 'Fix the tests' });
+  expect((await request('launches', 'POST', { agent: 'shell', folder: '/p' })).status).toBe(200);
+  expect(launcher.launch).toHaveBeenLastCalledWith({ agent: 'shell', folder: '/p' });
+});
+it('run endpoint requires the capability and passes folder, command and origin only', async () => {
+  const launcher = fakeLauncher(); const { request } = await setup(launcher);
+  expect((await request('launches/run', 'POST', { folder: '/p', command: 'ls' }, false)).status).toBe(401);
+  const res = await request('launches/run', 'POST', { folder: '/p', command: 'npm test', originSessionId: 'S1', argv: ['x'] });
+  expect(res.status).toBe(200); expect(await res.json()).toMatchObject({ reused: false, typed: true, launch: { id: 'T1' } });
+  expect(launcher.run).toHaveBeenLastCalledWith({ folder: '/p', command: 'npm test', originSessionId: 'S1' });
+  expect((await request('launches/run', 'POST', { folder: '/p' })).status).toBe(400);
+  const big = await request('launches/run', 'POST', { folder: '/p', command: 'x'.repeat(9000) }); expect(big.status).toBe(400);
+});
+it('identify refuses a terminal with 400', async () => {
+  const launcher = fakeLauncher(); const { request } = await setup(launcher);
+  const res = await request('launches/T1/identify', 'POST', {});
+  expect(res.status).toBe(400); expect((await res.json()).error).toBe('Terminals have nothing to identify'); expect(launcher.identify).not.toHaveBeenCalled();
 });

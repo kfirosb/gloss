@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Terminals from Gloss · Feature preview</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#23322f;background:#f6f7fb;font-size:13px}
+*{box-sizing:border-box}body{margin:0;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #2f5bd3;outline-offset:2px}
+.preview{background:#243b33;color:#e0eee6;padding:9px 18px;display:flex;align-items:center;gap:14px;font-size:12px;flex-shrink:0}
+.preview strong{letter-spacing:1.4px;font-size:10px}.preview span{opacity:.85}
+.preview .opts{margin-left:auto;display:flex;gap:6px}
+.preview .opts button{border:1px solid #6f8f80;background:transparent;color:#e0eee6;border-radius:7px;padding:5px 11px;font-size:12px}
+.preview .opts button.on{background:#e0eee6;color:#243b33;border-color:#e0eee6;font-weight:600}
+.app{height:460px;display:grid;grid-template-columns:230px minmax(0,1fr);border:1px solid #d9deea;border-radius:12px;overflow:hidden;margin:0 18px 26px}
+.ex-h{margin:22px 18px 10px;font-size:15px;color:#172033}.ex-h small{display:block;font-weight:400;color:#58657d;font-size:12.5px;margin-top:4px;line-height:1.5}
+.shared{margin:0 18px 30px;font-size:12.5px;color:#44506a;line-height:1.6;max-width:760px}
+.side{background:#f1f5f2;border-right:1px solid #d6e0da;display:flex;flex-direction:column;min-height:0}
+.side h2{font-size:10px;letter-spacing:1.5px;color:#7a8a80;margin:16px 14px 8px;font-weight:650}
+.proj-name{display:flex;align-items:center;gap:8px;padding:7px 16px;font-weight:600;font-size:12.5px}
+.proj-name i{width:20px;height:20px;border-radius:5px;background:#dce9e1;color:#315f4b;display:grid;place-items:center;font-style:normal;font-size:11px}
+.wt{width:100%;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 44px;border:1px solid transparent;background:transparent;text-align:left;font-size:12px}
+.wt.sel{background:#dfece3;border-color:#b5cdbd;box-shadow:inset 3px 0 #478762}
+.wt small{margin-left:auto;color:#6c7d72;font-size:10.5px;background:#fff;border:1px solid #d6e0da;border-radius:10px;padding:0 6px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.tabs{display:flex;align-items:flex-end;gap:2px;padding:8px 12px 0;background:#eceff5;border-bottom:1px solid #d9deea;flex-shrink:0}
+.tab{display:flex;align-items:center;gap:8px;max-width:220px;min-width:120px;padding:9px 12px;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;background:transparent;font-size:12.5px;color:#4b566b;position:relative;top:1px}
+.tab:hover{background:#e3e7ef}
+.tab.sel{background:#fff;border-color:#d9deea;color:#172033;font-weight:600}
+.tab .ic{font-size:14px}.tab .claude{color:#d97757}
+.tab .term{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#172033;color:#9ef0b8;border-radius:4px;padding:1px 4px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;margin-left:auto}
+.dot.idle{background:#4f9a6b}.dot.working{background:#e0a23a;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.plus{margin:0 0 5px 6px;width:30px;height:30px;border:1px solid #c9d1e0;border-radius:8px;background:#fff;font-size:17px;line-height:1;color:#2f5bd3}
+.status-line{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:11.5px;color:#58657d;border-bottom:1px solid #e6e9f0;background:#fff;flex-shrink:0}
+.status-line b{color:#172033;font-weight:600}
+.status-line .right{margin-left:auto;display:flex;gap:8px}
+.status-line button{border:1px solid #b7c1d4;border-radius:7px;padding:4px 10px;background:#fff;font-size:11.5px}
+.pill{border-radius:999px;padding:2px 9px;font-size:10.5px;background:#d8f3e5;color:#2e6b45}
+.pill.shell{background:#e6e9f0;color:#44506a}
+.work{flex:1;min-height:0;display:grid;grid-template-columns:1.1fr 1fr;gap:14px;padding:14px;background:#fff}
+.panel{border:1px solid #d9deea;border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel h3{margin:0;padding:11px 14px;font-size:12.5px;color:#384761;border-bottom:1px solid #eef0f5}
+.feed{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:9px;background:#f6f8ff}
+.msg{background:#fff;border:1px solid #e0e4ed;border-radius:11px;padding:9px 12px;line-height:1.6}
+.msg small{display:block;color:#66718a;font-weight:600;font-size:10.5px;margin-bottom:3px}
+.msg.la{background:#edf1ff}
+.he{direction:rtl;text-align:right}
+.code{direction:ltr;text-align:left;background:#f3f5fa;border:1px solid #dfe3ec;border-radius:8px;margin-top:6px;position:relative}
+.code pre{margin:0;padding:10px 12px;font:11.5px/1.5 ui-monospace,Menlo,monospace;color:#172033;white-space:pre-wrap}
+.code .acts{display:flex;gap:6px;justify-content:flex-end;padding:6px 8px;border-top:1px solid #e4e8f0}
+.code .acts button{border:1px solid #b7c1d4;border-radius:6px;padding:3px 9px;background:#fff;font-size:11px}
+.code .acts .run{background:#172033;color:#9ef0b8;border-color:#172033;font-family:ui-monospace,Menlo,monospace}
+.composer{margin:0 14px 14px;border:1px solid #8d9fc4;border-radius:12px;padding:10px;flex-shrink:0;background:#fff}
+.composer textarea{width:100%;height:50px;border:1px solid #bbc5d8;border-radius:9px;padding:8px;font:inherit;direction:rtl;resize:none}
+.composer .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+.composer .row button{border:1px solid #b7c1d4;border-radius:8px;padding:7px 12px;background:#fff;font-size:12px}
+.composer .row .primary{background:#2f5bd3;border-color:#2f5bd3;color:#fff}
+/* Terminal surface (shared by both options) */
+.xterm{background:#0f1419;color:#d8e1ea;font:12.5px/1.55 ui-monospace,Menlo,monospace;padding:12px 14px;white-space:pre-wrap;overflow:auto;flex:1;min-height:0}
+.xterm .p{color:#9ef0b8}.xterm .d{color:#7f8da0}.xterm .c{color:#ffd479}.xterm .ok{color:#7fdc8f}.xterm .cur{display:inline-block;width:7px;height:14px;background:#d8e1ea;vertical-align:-2px;animation:pulse 1s infinite}
+/* Option A: terminal fills the workspace */
+.fill{flex:1;min-height:0;display:flex;flex-direction:column;background:#0f1419}
+.fill .bar{display:flex;align-items:center;gap:10px;padding:7px 14px;background:#172033;color:#b9c4d4;font-size:11.5px;flex-shrink:0}
+.fill .bar b{color:#fff;font-weight:600}.fill .bar span{opacity:.75}
+.fill .bar .right{margin-left:auto;display:flex;gap:6px}
+.fill .bar button{border:1px solid #3a4760;background:transparent;color:#d8e1ea;border-radius:6px;padding:3px 9px;font-size:11px}
+/* Option B: popup over the conversation */
+.dim{position:absolute;inset:46px 0 0 0;background:#17203344;display:flex;align-items:center;justify-content:flex-end;padding-right:22px;z-index:5}
+.popup{width:min(600px,66%);height:min(400px,78%);background:#0f1419;border-radius:12px;box-shadow:0 30px 80px #0008;display:flex;flex-direction:column;overflow:hidden;border:1px solid #2a3547}
+.popup .hd{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#172033;color:#b9c4d4;font-size:12px}
+.popup .hd b{color:#fff}.popup .hd span{opacity:.75;font-size:11px}.popup .hd .x{margin-left:auto;border:0;background:transparent;color:#d8e1ea;font-size:17px;line-height:1}
+.note{display:none;position:fixed;left:10px;bottom:10px;width:250px;background:#fff;border:1px solid #d9deea;border-radius:12px;box-shadow:0 14px 40px #17203322;padding:14px 16px;font-size:12px;line-height:1.55;z-index:9}
+.note h4{margin:0 0 6px;font-size:12.5px}.note p{margin:0 0 6px}
+[hidden]{display:none!important}
+@media(max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.work{grid-template-columns:1fr}.note{display:none}.tab{min-width:90px}}
+</style>
+<style>
+/* Feature-preview additions */
+.app{height:auto;min-height:420px}
+.app.short{min-height:0}
+.frame-note{margin:0 18px 10px;font-size:12px;color:#58657d;line-height:1.5;max-width:860px}
+.dlg-wrap{position:relative;min-height:560px;background:#eceff5}
+.dlg-dim{position:absolute;inset:0;background:#17203344}
+.dlg{position:absolute;left:50%;top:22px;transform:translateX(-50%);width:min(620px,92%);background:#fff;border-radius:14px;box-shadow:0 30px 80px #0005;border:1px solid #d9deea;overflow:hidden}
+.dlg .hd{display:flex;align-items:center;padding:14px 20px 8px;font-size:16px;font-weight:650}
+.dlg .hd .x{margin-left:auto;border:1px solid #c9d1e0;background:#fff;border-radius:7px;width:26px;height:26px;font-size:15px;line-height:1}
+.dlg .body{padding:6px 20px 14px;font-size:13px}
+.dlg label{display:block;margin:8px 0 4px;font-weight:600}
+.dlg select,.dlg textarea,.dlg input[type=text]{width:100%;border:1px solid #bbc5d8;border-radius:8px;padding:8px;font:inherit;background:#fff}
+.dlg textarea{height:72px;resize:none;direction:ltr}
+.dlg fieldset{border:1px solid #e0e4ed;border-radius:10px;margin:12px 0;padding:8px 12px}
+.dlg fieldset legend{font-weight:600;padding:0 4px}
+.dlg fieldset label{display:inline-flex;gap:6px;margin-right:16px;font-weight:400}
+.dlg .hint{color:#58657d;font-size:12px;margin:8px 0 0;line-height:1.5}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px;padding:10px 20px 16px;border-top:1px solid #eef0f5}
+.dlg .acts button{border:1px solid #b7c1d4;border-radius:8px;padding:7px 14px;background:#fff}
+.dlg .acts .primary{background:#2f5bd3;border-color:#2f5bd3;color:#fff}
+.tag{display:inline-block;background:#fff3c4;color:#6b4f00;border:1px solid #ecd27a;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:600;margin-left:8px;vertical-align:middle}
+.dot.running{background:#e0a23a;animation:pulse 1.2s infinite}
+.hd .exp,.bar .exp{border:1px solid #3a4760;background:transparent;color:#d8e1ea;border-radius:6px;padding:3px 9px;font-size:11px}
+.hd .exp{margin-left:auto}
+.settings{margin:0 18px 26px;border:1px solid #d9deea;border-radius:12px;background:#fff;padding:14px 20px;max-width:620px;font-size:13px}
+.settings h3{margin:0 0 10px;font-size:13.5px}
+.settings .row{display:grid;grid-template-columns:220px 1fr;align-items:center;gap:12px;margin:8px 0}
+.settings select{border:1px solid #bbc5d8;border-radius:8px;padding:6px 8px;font:inherit;background:#fff}
+.settings small{grid-column:2;color:#58657d}
+.steps{margin:0 18px 18px;padding:0;list-style:none;display:flex;gap:10px;flex-wrap:wrap}
+.steps li{background:#fff;border:1px solid #d9deea;border-radius:999px;padding:5px 12px;font-size:12px;color:#44506a}
+.steps li b{color:#2f5bd3;margin-right:6px}
+.ctx{position:absolute;z-index:6;background:#fff;border:1px solid #d9deea;border-radius:10px;box-shadow:0 14px 40px #17203324;padding:6px;width:190px;font-size:12.5px}
+.ctx div{padding:8px 10px;border-radius:7px}.ctx div:hover{background:#f0f3fb}.ctx div.danger{color:#b4342a}
+</style>
+<body>
+<div class="preview"><strong>FEATURE PREVIEW</strong><span>Terminals from Gloss · every screen of the feature · sample data, nothing is connected</span></div>
+<ul class="steps"><li><b>1</b>“+” gets Terminal and a first message</li><li><b>2</b>Run on a command in the conversation</li><li><b>3</b>Terminal popup with Expand</li><li><b>4</b>Terminal filling the workspace</li><li><b>5</b>The setting</li></ul>
+
+<h2 class="ex-h">1 · The “+” dialog<small>Agent gains a third choice, Terminal. Claude and Codex show a First message field prefilled with today's setup prompt; edit it to say what the session is about. It is sent on the command line, in English, exactly as written.</small></h2>
+<div class="app short"><aside class="side" aria-label="Projects"><h2>PROJECTS</h2><div class="proj-name"><i>G</i>gloss</div><button class="wt">main<small>1</small></button><button class="wt sel">terminal<small>2</small></button></aside>
+ <section class="main"><div class="tabs" role="tablist"><button class="tab sel" role="tab"><span class="ic claude">✳</span><span class="lbl">terminal-41</span><span class="dot idle"></span></button><button class="plus" aria-label="New session or terminal">+</button></div>
+  <div class="dlg-wrap"><div class="dlg-dim"></div>
+   <div class="dlg" role="dialog" aria-label="New session"><div class="hd">New session<button class="x" aria-label="Close">×</button></div>
+    <div class="body">
+     <label>Folder</label><select><option>terminal — /Users/kfir/.superset/projects/hebrow-for-terminal/.worktrees/terminal</option></select>
+     <fieldset><legend>Agent</legend><label><input type="radio" name="ag" checked> Claude</label><label><input type="radio" name="ag"> Codex</label><label><input type="radio" name="ag"> Terminal <span class="tag">new</span></label></fieldset>
+     <label>First message <span class="tag">new</span></label>
+     <textarea>Reply with READY only. Do not use tools.</textarea>
+     <p class="hint">Sent to Claude as its first prompt, in English, the moment the session starts. It does not appear in Live Conversation. Replace it to tell Claude what this session is about, for example “Fix the failing session-launcher tests, then explain the cause.”</p>
+     <p class="hint">Claude opens in the background. If it asks for approval, use Show terminal. Choosing <b>Terminal</b> hides this field and opens a plain shell in the folder.</p>
+    </div>
+    <div class="acts"><button>Cancel</button><button class="primary">Open session</button></div>
+   </div>
+  </div>
+ </section></div>
+
+<h2 class="ex-h">2 · Run from the conversation<small>Commands in Claude's reply get a ▶ Run button beside Copy code. One click types the text into this folder's terminal and opens it. A new <code>&gt;_</code> tab appears in the top bar, amber while the command runs, green at the prompt.</small></h2>
+<div class="app"><aside class="side" aria-label="Projects"><h2>PROJECTS</h2><div class="proj-name"><i>G</i>gloss</div><button class="wt">main<small>1</small></button><button class="wt sel">terminal<small>2</small></button></aside>
+ <section class="main"><div class="tabs" role="tablist"><button class="tab sel" role="tab"><span class="ic claude">✳</span><span class="lbl">terminal-41</span><span class="dot idle"></span></button><button class="tab" role="tab"><span class="ic term">&gt;_</span><span class="lbl">Terminal</span><span class="dot running"></span></button><button class="plus" aria-label="New session or terminal">+</button>
+   <div class="ctx" style="left:300px;top:46px"><div>Show terminal</div><div>Expand</div><div class="danger">End terminal…</div></div></div>
+  <div class="status-line"><b>gloss / terminal</b><span>Claude</span><span class="pill">Idle</span><div class="right"><button>Show terminal</button></div></div>
+  <div class="work">
+   <div class="panel"><h3>Live Conversation</h3><div class="feed">
+    <div class="msg he"><small>אתה</small>הטסטים של ה-launcher נופלים אצלי. תבדוק</div>
+    <div class="msg he"><small>Claude</small>מצאתי: הבדיקה מניחה ש-tmux מחזיר pid גם כשה-session נכשל. תיקנתי את ה-mock. תריץ אצלך:
+     <div class="code"><pre>npm test -- src/runtime/session-launcher.test.ts</pre><div class="acts"><button>Copy code</button><button class="run">▶ Run</button></div></div>
+     ואם תרצה את כל החבילה:
+     <div class="code"><pre>npm run typecheck
+npm test</pre><div class="acts"><button>Copy code</button><button class="run">▶ Run</button></div></div></div>
+   </div></div>
+   <div class="panel"><h3>Language Assistant</h3><div class="feed"><div class="msg la he"><small>Language Assistant</small>Claude תיקן את ה-mock של tmux בבדיקה. הוא מציע שתריץ את הבדיקה הזו ואז את כל החבילה. לחיצה על Run מריצה את הפקודה בטרמינל של התיקייה.</div></div></div>
+  </div>
+  <div class="composer"><textarea placeholder="כתוב בעברית…"></textarea><div class="row"><button>Discuss first</button><button class="primary">Send to agent</button></div></div>
+ </section></div>
+<p class="frame-note">Run shows on blocks tagged shell, bash, zsh, console or terminal, or with no tag. A block tagged TypeScript, JSON or similar only gets Copy code. A leading “$ ” is stripped. The folder's idle terminal is reused; if it is busy, Run opens “Terminal 2”.</p>
+
+<h2 class="ex-h">3 · The terminal popup<small>The default view. Opens on Run and on clicking a terminal tab. Close returns to the conversation; the terminal keeps running. Expand switches to the full-workspace view and remembers the choice.</small></h2>
+<div class="app"><aside class="side" aria-label="Projects"><h2>PROJECTS</h2><div class="proj-name"><i>G</i>gloss</div><button class="wt">main<small>1</small></button><button class="wt sel">terminal<small>2</small></button></aside>
+ <section class="main"><div class="tabs" role="tablist"><button class="tab sel" role="tab"><span class="ic claude">✳</span><span class="lbl">terminal-41</span><span class="dot idle"></span></button><button class="tab" role="tab"><span class="ic term">&gt;_</span><span class="lbl">Terminal</span><span class="dot running"></span></button><button class="plus" aria-label="New session or terminal">+</button></div>
+  <div class="status-line"><b>gloss / terminal</b><span>Claude</span><span class="pill">Idle</span><div class="right"><button>Show terminal</button></div></div>
+  <div class="work"><div class="panel"><h3>Live Conversation</h3><div class="feed"><div class="msg he"><small>Claude</small>…תריץ אצלך:<div class="code"><pre>npm test -- src/runtime/session-launcher.test.ts</pre><div class="acts"><button>Copy code</button><button class="run">▶ Run</button></div></div></div></div></div><div class="panel"><h3>Language Assistant</h3><div class="feed"></div></div></div>
+  <div class="composer"><textarea placeholder="כתוב בעברית…"></textarea><div class="row"><button>Discuss first</button><button class="primary">Send to agent</button></div></div>
+  <div class="dim" style="justify-content:center;padding-right:0">
+   <div class="popup" role="dialog" aria-label="Terminal" style="width:min(700px,84%)">
+    <div class="hd"><span class="ic term" style="font-family:ui-monospace,Menlo,monospace;background:#0f1419;color:#9ef0b8;border-radius:4px;padding:1px 4px">&gt;_</span><b>Terminal · gloss / terminal</b><span>Running · the conversation stays underneath</span><button class="exp">⤢ Expand</button><button class="x" aria-label="Close" style="margin-left:6px">×</button></div>
+    <div class="xterm"><span class="p">terminal ❯</span> <span class="c">npm test -- src/runtime/session-launcher.test.ts</span>
+
+<span class="d">&gt; gloss@0.4.0 test
+&gt; vitest run src/runtime/session-launcher.test.ts</span>
+
+ <span class="ok">✓</span> src/runtime/session-launcher.test.ts <span class="d">(18)</span> 412ms
+ <span class="d">◐ src/runtime/session-launcher.test.ts &gt; shell launch &gt; reuses the idle terminal</span><span class="cur"></span></div>
+   </div>
+  </div>
+ </section></div>
+
+<h2 class="ex-h">4 · Terminal filling the workspace<small>After Expand, or when the setting says so. Selecting the terminal tab replaces the conversation panels. Shrink returns to the popup view. Send output to Claude puts the selected text into the composer of the folder's Claude session.</small></h2>
+<div class="app"><aside class="side" aria-label="Projects"><h2>PROJECTS</h2><div class="proj-name"><i>G</i>gloss</div><button class="wt">main<small>1</small></button><button class="wt sel">terminal<small>2</small></button></aside>
+ <section class="main"><div class="tabs" role="tablist"><button class="tab" role="tab"><span class="ic claude">✳</span><span class="lbl">terminal-41</span><span class="dot idle"></span></button><button class="tab sel" role="tab"><span class="ic term">&gt;_</span><span class="lbl">Terminal</span><span class="dot idle"></span></button><button class="plus" aria-label="New session or terminal">+</button></div>
+  <div style="display:flex;flex-direction:column;flex:1;min-height:0">
+   <div class="status-line"><b>gloss / terminal</b><span class="pill shell">Terminal</span><span>zsh · at the prompt · last run from terminal-41</span><div class="right"><button>Send output to Claude</button><button>⤡ Shrink to popup</button><button>End terminal…</button></div></div>
+   <div class="fill"><div class="xterm"><span class="p">terminal ❯</span> <span class="c">npm test -- src/runtime/session-launcher.test.ts</span>
+
+<span class="d">&gt; gloss@0.4.0 test
+&gt; vitest run src/runtime/session-launcher.test.ts</span>
+
+ <span class="ok">✓</span> src/runtime/session-launcher.test.ts <span class="d">(18)</span> 412ms
+
+ <span class="d">Test Files</span>  <span class="ok">1 passed</span> (1)
+      <span class="d">Tests</span>  <span class="ok">18 passed</span> (18)
+   <span class="d">Duration</span>  1.02s
+
+<span class="p">terminal ❯</span> <span class="cur"></span></div></div>
+  </div>
+ </section></div>
+
+<h2 class="ex-h">5 · The setting<small>Settings → Sessions. Expand and Shrink change it too, so the view you used last is the one you get next time.</small></h2>
+<div class="settings"><h3>Sessions</h3>
+ <div class="row"><label>When a session needs approval</label><select><option>Open the terminal automatically</option></select><small>Applies to sessions started from Gloss</small></div>
+ <div class="row"><label>Terminal tabs open as <span class="tag">new</span></label><select><option>Popup over the conversation</option><option>Full workspace</option></select><small>Run and terminal tabs use this view. Expand and Shrink in the terminal update it.</small></div>
+ <div class="row"><label>Extra Claude launch arguments</label><input type="text" placeholder="--model opus" style="border:1px solid #bbc5d8;border-radius:8px;padding:6px 8px;font:inherit"></div>
+</div>
+<p class="frame-note"><b>Also in the design, not pictured:</b> terminals survive an app restart like sessions do; a shell that exits disappears from the tab row and has no Saved entry; nothing runs without your click and Run runs exactly the text shown; an empty First message is rejected because the prompt is what lets Gloss connect.</p>
+</body></html>

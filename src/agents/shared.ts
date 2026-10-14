@@ -3,6 +3,7 @@ import { open, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { canSendWhileWorking, orderAgentMessages } from '../core/contracts.js';
 import type { AgentCapabilities, AgentEvent, AgentMessage, CodingConnection, CodingState, DeliveryState, Target } from '../core/contracts.js';
+import type { ProviderUsage } from '../core/usage.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../runtime/process-runner.js';
 
 export interface AdapterOptions {
@@ -33,7 +34,7 @@ export async function observedOwner(path: string, command: string | readonly str
     return commands.some(name => line === `c${name}`) && (pid === undefined || currentPid === pid);
   });
 }
-export type Parsed = { message?: AgentMessage; state?: CodingState; delivery?: string };
+export type Parsed = { message?: AgentMessage; state?: CodingState; delivery?: string; usage?: ProviderUsage; channelSeen?: string };
 export type RecordParser = (value: any, offset: number) => Parsed;
 const CHUNK = 1024 * 1024;
 const MAX_SCAN = 8;
@@ -125,6 +126,8 @@ export class Transcript {
           if (previous?.signature !== signature) events.push({ type: 'message', message });
         }
         if (parsed.delivery) events.push({ type: 'delivery', requestId: parsed.delivery, state: 'sent' });
+        if (parsed.usage) events.push({ type: 'usage', usage: parsed.usage });
+        if (parsed.channelSeen) events.push({ type: 'channel-seen', requestId: parsed.channelSeen });
       }
       if (this.pending.length > CHUNK) this.failure('Transcript record exceeds read bound');
       this.fullyRead = this.offset === size;

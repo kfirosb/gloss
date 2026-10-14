@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CODEX_SETUP_PROMPT, createSessionLauncher, splitArgs, type LaunchRecord, type LaunchSettings, type SessionLauncher } from '../../src/runtime/session-launcher.js';
+import { CODEX_SETUP_PROMPT, createSessionLauncher, defaultShell, nextTerminalTitle, splitArgs, validateCommand, type LaunchRecord, type LaunchSettings, type SessionLauncher } from '../../src/runtime/session-launcher.js';
 import type { Tmux } from '../../src/runtime/tmux.js';
 import type { Target } from '../../src/core/contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
@@ -15,26 +15,27 @@ afterEach(async () => { for (const l of launchers.splice(0)) l.close(); for (con
 const screen = (name: string) => readFileSync(join(import.meta.dirname, '../fixtures/screens', name), 'utf8');
 const IDLE = screen('claude-2.1.296-idle.txt'); const PERMISSION = screen('claude-2.1.296-permission.txt');
 function fakeTmux() {
- const live = new Map<string, { cwd: string; argv: string[]; panePid: number; env?: Record<string,string> }>();
- const keys: [string, string[]][] = []; let pid = 1000; const view = { screen: IDLE }; const captures = { count: 0 };
+ const live = new Map<string, { cwd: string; argv: string[]; panePid: number; env?: Record<string,string>; currentCommand: string }>();
+ const keys: [string, string[]][] = []; const typed: [string, string][] = []; let pid = 1000; const view = { screen: IDLE }; const captures = { count: 0 };
  const tmux: Tmux = { executable: '/t', socket: '/s',
-  async newSession(name, cwd, argv, env) { const panePid = ++pid; live.set(name, { cwd, argv, panePid, ...(env ? { env } : {}) }); return { panePid }; },
-  async listSessions() { return [...live].map(([name, s]) => ({ name, panePid: s.panePid })); },
+  async newSession(name, cwd, argv, env) { const panePid = ++pid; live.set(name, { cwd, argv, panePid, currentCommand: 'zsh', ...(env ? { env } : {}) }); return { panePid }; },
+  async listSessions() { return [...live].map(([name, s]) => ({ name, panePid: s.panePid, currentCommand: s.currentCommand })); },
+  async typeText(n, text) { typed.push([n, text]); },
   async hasSession(n) { return live.has(n); }, async capturePane() { captures.count++; return view.screen; },
   async sendKeys(n, k) { keys.push([n, k]); if (k.includes('C-c')) live.delete(n); },
   async resizeWindow() {}, async killSession(n) { live.delete(n); }, attachArgv: n => ['/t', 'attach', n] };
- return { tmux, live, keys, view, captures };
+ return { tmux, live, keys, typed, view, captures };
 }
 function memoryStore(settings?: Partial<LaunchSettings>) {
  const launches = new Map<string, LaunchRecord>();
- let s: LaunchSettings = { extraArgs: { claude: [], codex: [] }, popup: 'auto', ...settings };
- return { launches, listLaunches: () => structuredClone([...launches.values()]), putLaunch: (r: LaunchRecord) => { launches.set(r.id, structuredClone(r)); }, readLaunchSettings: () => s, writeLaunchSettings: (n: LaunchSettings) => { s = n; } };
+ let s: LaunchSettings = { extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup', ...settings };
+ return { launches, listLaunches: () => structuredClone([...launches.values()]), putLaunch: (r: LaunchRecord) => { launches.set(r.id, structuredClone(r)); }, deleteLaunch: (id: string) => { launches.delete(id); }, readLaunchSettings: () => s, writeLaunchSettings: (n: LaunchSettings) => { s = n; } };
 }
 async function setup(overrides: { settings?: Partial<LaunchSettings>; findCodex?: (pid: number, signal: AbortSignal) => Promise<Target | undefined>; register?: (...args: any[]) => Promise<any>; applyLanguage?: (...args: any[]) => void | Promise<void>; timeout?: number; retryDelaysMs?: number[]; sleep?: (ms: number) => Promise<void> } = {}) {
  const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-launch-'))); dirs.push(folder);
  const t = fakeTmux(); const store = memoryStore(overrides.settings);
  const register = vi.fn(overrides.register ?? (async (target: Target) => ({ id: 'panel-' + target.sessionRef, target })));
- const options = { tmux: async () => t.tmux, store, sessions: { register } as any,
+ const options = { tmux: async () => t.tmux, store, shell: '/bin/zsh', sessions: { register } as any,
   prepareClaude: async () => ({ claude: '/bin/claude', mcpConfigPath: '/cfg/x.json' }),
   findCodex: overrides.findCodex ? (launch: LaunchRecord, signal: AbortSignal) => overrides.findCodex!(launch.panePid, signal) : (async () => ({ agent: 'codex' as const, sessionRef: 'codex-1', projectId: folder })),
   resolveExecutable: async () => '/bin/codex', knownFolder: async (f: string) => f === folder,
@@ -56,7 +57,7 @@ it('launches Claude with a preassigned identity and immediate panel registration
  const record = await launcher.launch({ agent: 'claude', folder });
  const [name, session] = [...t.live][0]!;
  expect(name).toBe('la-' + record.id); expect(session!.cwd).toBe(folder);
- expect(session!.argv).toEqual(['/bin/claude', CLAUDE_SETUP_PROMPT, '--session-id', record.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--model', 'opus 5']);
+ expect(session!.argv).toEqual(['/bin/claude', '--session-id', record.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--model', 'opus 5', '--', CLAUDE_SETUP_PROMPT]);
  expect(session!.env).toEqual({ ELECTRON_RUN_AS_NODE: '' });
  expect(register.mock.calls[0]![0]).toEqual({ agent: 'claude', sessionRef: record.sessionRef, projectId: folder });
  // Running once the panel is registered; the catalog shows Starting only for launches without a panel.
@@ -64,14 +65,14 @@ it('launches Claude with a preassigned identity and immediate panel registration
 });
 it('identifies Codex by pane ancestry and persists the registered target', async () => {
  const { launcher, folder, t } = await setup(); const record = await launcher.launch({ agent: 'codex', folder });
- // The disclosed setup prompt comes first so Codex creates its thread at once.
- expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', CODEX_SETUP_PROMPT]);
+ // The disclosed setup prompt is passed so Codex creates its thread at once.
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', '--', CODEX_SETUP_PROMPT]);
  await vi.waitFor(() => expect(launcher.list()[0]).toMatchObject({ id: record.id, state: 'running', sessionRef: 'codex-1', panelSessionId: 'panel-codex-1' }));
 });
-it('puts the Codex setup prompt before extra options so a value-taking option cannot swallow it', async () => {
+it('puts the Codex setup prompt after `--` so a value-taking extra option cannot swallow it', async () => {
  const { launcher, folder, t } = await setup({ settings: { extraArgs: { claude: [], codex: ['-m', 'gpt 5', '--add-dir'] } } });
  await launcher.launch({ agent: 'codex', folder });
- expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', CODEX_SETUP_PROMPT, '-m', 'gpt 5', '--add-dir']);
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/codex', '-m', 'gpt 5', '--add-dir', '--', CODEX_SETUP_PROMPT]);
  expect(CODEX_SETUP_PROMPT).toBe('Reply with READY only. Do not run commands.');
 });
 it('times out with a constant clock and an immediate sleep', async () => {
@@ -172,12 +173,22 @@ it('round-trips launches in stable insertion order and validates settings', () =
  try {
   const a: LaunchRecord = { id: 'a', agent: 'claude', folder: '/project', panePid: 12, state: 'starting', createdAt: 1 };
   const b: LaunchRecord = { ...a, id: 'b', agent: 'codex', panePid: 13, languageOverride: { reply: 'en' } };
-  store.putLaunch(a); store.putLaunch(b); store.putLaunch({ ...a, state: 'ended' });
-  expect(store.listLaunches()).toEqual([{ ...a, state: 'ended' }, b]);
-  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto' });
-  const settings: LaunchSettings = { extraArgs: { claude: ['--model', 'opus 5'], codex: ['$HOME'] }, popup: 'dot-only' }; store.writeLaunchSettings(settings); expect(store.readLaunchSettings()).toEqual(settings);
-  for (const bad of [{ ...settings, popup: 'always' }, { ...settings, extraArgs: { claude: [], codex: Array(33).fill('x') } }, { ...settings, extraArgs: { claude: ['x'.repeat(513)], codex: [] } }, { ...settings, extraArgs: { claude: [1], codex: [] } }]) expect(() => store.writeLaunchSettings(bad as any)).toThrow('Invalid launch settings');
+  const shell: LaunchRecord = { id: 's', agent: 'shell', folder: '/project', panePid: 14, state: 'running', createdAt: 2, title: 'Terminal 2', originSessionId: 'panel-1' };
+  store.putLaunch(a); store.putLaunch(b); store.putLaunch({ ...a, state: 'ended' }); store.putLaunch(shell);
+  expect(store.listLaunches()).toEqual([{ ...a, state: 'ended' }, b, shell]);
+  store.deleteLaunch('s'); store.deleteLaunch('missing');
+  expect(store.listLaunches().map(r => r.id)).toEqual(['a', 'b']);
+  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' });
+  const settings: LaunchSettings = { extraArgs: { claude: ['--model', 'opus 5'], codex: ['$HOME'] }, popup: 'dot-only', terminalView: 'workspace' }; store.writeLaunchSettings(settings); expect(store.readLaunchSettings()).toEqual(settings);
+  for (const bad of [{ ...settings, popup: 'always' }, { ...settings, terminalView: 'tab' }, { ...settings, extraArgs: { claude: [], codex: Array(33).fill('x') } }, { ...settings, extraArgs: { claude: ['x'.repeat(513)], codex: [] } }, { ...settings, extraArgs: { claude: [1], codex: [] } }]) expect(() => store.writeLaunchSettings(bad as any)).toThrow('Invalid launch settings');
   expect(store.readLaunchSettings()).toEqual(settings);
+ } finally { store.close(); }
+});
+it('reads launch settings saved before terminalView existed with the popup default', () => {
+ const store = new SqliteStore(':memory:');
+ try {
+  (store as any).database.prepare("INSERT OR REPLACE INTO app_settings(key,value_json) VALUES ('launch.settings',?)").run(JSON.stringify({ extraArgs: { claude: ['--model', 'opus'], codex: [] }, popup: 'dot-only' }));
+  expect(store.readLaunchSettings()).toEqual({ extraArgs: { claude: ['--model', 'opus'], codex: [] }, popup: 'dot-only', terminalView: 'popup' });
  } finally { store.close(); }
 });
 it('prepares distinct private MCP files for concurrent new sessions and preserves exact resume status', async () => {
@@ -234,9 +245,9 @@ it('skips a watch tick while the previous reconcile is still running', async () 
  const { launcher, folder, t } = await setup(); const record = await launcher.launch({ agent: 'claude', folder });
  vi.useFakeTimers();
  try {
-  const slow = deferred<{ name: string; panePid: number }[]>(); const list = vi.fn(() => slow.promise); t.tmux.listSessions = list;
+  const slow = deferred<{ name: string; panePid: number; currentCommand: string }[]>(); const list = vi.fn(() => slow.promise); t.tmux.listSessions = list;
   launcher.watch(); await vi.advanceTimersByTimeAsync(9000); expect(list).toHaveBeenCalledTimes(1);
-  slow.resolve([{ name: 'la-' + record.id, panePid: record.panePid }]); await vi.advanceTimersByTimeAsync(3000); expect(list).toHaveBeenCalledTimes(2);
+  slow.resolve([{ name: 'la-' + record.id, panePid: record.panePid, currentCommand: 'zsh' }]); await vi.advanceTimersByTimeAsync(3000); expect(list).toHaveBeenCalledTimes(2);
  } finally { vi.useRealTimers(); }
 });
 it('retries identification on request and rejects unknown or ended launches', async () => {
@@ -293,4 +304,133 @@ it('adopts a launch back when its tmux session reappears after a listing gap, bu
  expect(revived.state).not.toBe('ended'); expect(revived.reason).toBeUndefined(); expect(revived.panePid).toBe(entry.panePid);
  await launcher.end(a.id); t.live.set('la-' + a.id, entry); await launcher.reconcile(); await tick();
  expect(launcher.list()[0]!.state).toBe('ended');
+});
+
+it('starts a terminal as a login shell, titled per folder, running at once with no identification', async () => {
+ const { launcher, folder, t, register } = await setup();
+ const a = await launcher.launch({ agent: 'shell', folder });
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/zsh', '-l']);
+ expect(a).toMatchObject({ agent: 'shell', folder, state: 'running', title: 'Terminal', busy: false });
+ expect(a.sessionRef).toBeUndefined(); expect(register).not.toHaveBeenCalled();
+ const b = await launcher.launch({ agent: 'shell', folder });
+ expect(b.title).toBe('Terminal 2');
+ await launcher.end(a.id);
+ const c = await launcher.launch({ agent: 'shell', folder });
+ expect(c.title).toBe('Terminal'); // the lowest free number, not Terminal 3
+});
+it('tracks a terminal as busy from the pane command and notifies subscribers when it changes', async () => {
+ const { launcher, folder, t } = await setup();
+ const seen: (boolean | undefined)[] = []; launcher.subscribe(list => seen.push(list[0]?.busy));
+ const record = await launcher.launch({ agent: 'shell', folder });
+ t.live.get('la-' + record.id)!.currentCommand = 'node'; await launcher.reconcile();
+ expect(launcher.list()[0]!.busy).toBe(true);
+ t.live.get('la-' + record.id)!.currentCommand = 'zsh'; await launcher.reconcile();
+ expect(launcher.list()[0]!.busy).toBe(false);
+ expect(seen).toEqual([false, true, false]);
+});
+it('ends a terminal with one Ctrl+C and an immediate kill, and deletes it on the next reconcile', async () => {
+ const { launcher, folder, t, store } = await setup(); const record = await launcher.launch({ agent: 'shell', folder });
+ t.tmux.sendKeys = async (n, k) => { t.keys.push([n, k]); }; const kill = vi.spyOn(t.tmux, 'killSession');
+ await launcher.end(record.id);
+ expect(t.keys).toEqual([['la-' + record.id, ['C-c']]]); expect(kill).toHaveBeenCalledWith('la-' + record.id);
+ expect(launcher.list()[0]).toMatchObject({ state: 'ended', reason: 'Ended by you' });
+ await launcher.reconcile(); expect(store.listLaunches()).toEqual([]);
+});
+it('adopts a terminal back as running after a restart and deletes one whose shell exited', async () => {
+ const { launcher, folder, t, store } = await setup();
+ const alive = await launcher.launch({ agent: 'shell', folder }); const gone = await launcher.launch({ agent: 'shell', folder });
+ store.putLaunch({ ...store.listLaunches().find(r => r.id === alive.id)!, state: 'ended', reason: 'Session is no longer running' });
+ t.live.delete('la-' + gone.id);
+ await launcher.reconcile();
+ expect(launcher.list().map(r => [r.id, r.state])).toEqual([[alive.id, 'running']]);
+ expect(launcher.list()[0]!.sessionRef).toBeUndefined();
+});
+it('passes a custom first message as the launch prompt and validates it', async () => {
+ const { launcher, folder, t } = await setup();
+ await launcher.launch({ agent: 'claude', folder, prompt: '  Fix the tests, then explain.\nKeep it short.  ' });
+ expect([...t.live.values()][0]!.argv.slice(-2)).toEqual(['--', 'Fix the tests, then explain.\nKeep it short.']);
+ await launcher.launch({ agent: 'codex', folder, prompt: 'Review the diff' });
+ expect([...t.live.values()][1]!.argv).toEqual(['/bin/codex', '--', 'Review the diff']);
+ await launcher.launch({ agent: 'shell', folder, prompt: 'ignored' });
+ expect([...t.live.values()][2]!.argv).toEqual(['/bin/zsh', '-l']);
+ for (const bad of ['', '   ', 'x'.repeat(4001), 5]) await expect(launcher.launch({ agent: 'claude', folder, prompt: bad as any })).rejects.toThrow('Invalid first message');
+ expect(nextTerminalTitle([])).toBe('Terminal'); expect(nextTerminalTitle(['Terminal'])).toBe('Terminal 2'); expect(nextTerminalTitle(['Terminal 2', 'Terminal 3'])).toBe('Terminal');
+ expect(defaultShell({ SHELL: '/opt/homebrew/bin/fish' })).toBe('/opt/homebrew/bin/fish'); expect(defaultShell({ SHELL: 'fish' })).toBe('/bin/zsh'); expect(defaultShell({})).toBe('/bin/zsh');
+});
+it('passes a first message starting with "-" after `--`, so neither CLI reads it as an option', async () => {
+ const { launcher, folder, t } = await setup({ settings: { extraArgs: { claude: ['--add-dir', 'a', 'b'], codex: ['-m', 'gpt 5'] } } });
+ const prompt = '- fix the login bug\n- then explain';
+ const claude = await launcher.launch({ agent: 'claude', folder, prompt });
+ expect([...t.live.values()][0]!.argv).toEqual(['/bin/claude', '--session-id', claude.sessionRef, '--mcp-config', '/cfg/x.json', '--dangerously-load-development-channels', 'server:language-assistant', '--add-dir', 'a', 'b', '--', prompt]);
+ await launcher.launch({ agent: 'codex', folder, prompt });
+ expect([...t.live.values()][1]!.argv).toEqual(['/bin/codex', '-m', 'gpt 5', '--', prompt]);
+});
+it('run reuses the folder’s idle terminal, skips busy ones, and starts a second when all are busy', async () => {
+ const { launcher, folder, t } = await setup();
+ const first = await launcher.run({ folder, command: 'npm test\n', originSessionId: 'panel-1' });
+ expect(first).toMatchObject({ reused: false, typed: true, launch: { title: 'Terminal', originSessionId: 'panel-1' } });
+ expect(t.typed).toEqual([['la-' + first.launch.id, 'npm test']]);
+ const again = await launcher.run({ folder, command: 'npm run typecheck' });
+ expect(again).toMatchObject({ reused: true, launch: { id: first.launch.id } });
+ t.live.get('la-' + first.launch.id)!.currentCommand = 'node';
+ const second = await launcher.run({ folder, command: 'git status', originSessionId: 'panel-2' });
+ expect(second).toMatchObject({ reused: false, typed: true, launch: { title: 'Terminal 2', originSessionId: 'panel-2' } });
+ expect(t.typed.at(-1)).toEqual(['la-' + second.launch.id, 'git status']);
+ // A later run marks the reused terminal with the session that used it.
+ t.live.get('la-' + first.launch.id)!.currentCommand = 'zsh';
+ await launcher.run({ folder, command: 'ls', originSessionId: 'panel-3' });
+ expect(launcher.list().find(r => r.id === first.launch.id)!.originSessionId).toBe('panel-3');
+});
+it('run still types when the new shell is not ready in time, and reports typed: false', async () => {
+ const { launcher, folder, t } = await setup({ settings: {} });
+ t.tmux.newSession = async (name, cwd, argv) => { t.live.set(name, { cwd, argv, panePid: 7, currentCommand: 'login' }); return { panePid: 7 }; };
+ const result = await launcher.run({ folder, command: 'make' });
+ expect(result.typed).toBe(false); expect(t.typed).toEqual([['la-' + result.launch.id, 'make']]);
+});
+it('run validates the command and the folder', async () => {
+ const { launcher, folder } = await setup();
+ for (const bad of ['', '\n\n', 'x'.repeat(8193), 3]) await expect(launcher.run({ folder, command: bad as any })).rejects.toThrow('Invalid command');
+ // Control and invisible characters: a tab, ESC, a C1 control, CR inside, bidi overrides and marks, zero-width characters.
+ for (const bad of ['ls\t-la', 'echo \u001b[31m', 'ls\u0085', 'a\rb', 'rm \u202Eexe.txt', 'ls\u2066', 'ls\u200E', 'ls\u061C', 'ls\u200B', 'ls\u2060', '\uFEFFls', 'ls\u007F']) await expect(launcher.run({ folder, command: bad })).rejects.toThrow('Invalid command');
+ expect(validateCommand('echo "שלום"\nls\n')).toBe('echo "שלום"\nls');
+ await expect(launcher.run({ folder: '/nope', command: 'ls' })).rejects.toThrow('Choose a project folder');
+ expect(validateCommand('  ls -la \n\n')).toBe('  ls -la ');
+});
+it('run rejects when the new terminal disappears while waiting for its shell', async () => {
+ let launcher!: SessionLauncher; let name = '';
+ const ctx = await setup({ sleep: async () => { ctx.t.live.delete(name); await launcher.reconcile(); } });
+ launcher = ctx.launcher;
+ ctx.t.tmux.newSession = async (n, cwd, argv) => { name = n; ctx.t.live.set(n, { cwd, argv, panePid: 7, currentCommand: 'login' }); return { panePid: 7 }; };
+ await expect(launcher.run({ folder: ctx.folder, command: 'make' })).rejects.toThrow('Terminal is no longer running');
+});
+it('reconcile does not delete a shell started while its tmux listing was in flight', async () => {
+ const { launcher, folder, t, store } = await setup();
+ const listed = deferred<Awaited<ReturnType<Tmux['listSessions']>>>();
+ const realList = t.tmux.listSessions.bind(t.tmux);
+ t.tmux.listSessions = () => listed.promise; // a listing taken before the shell exists
+ const pending = launcher.reconcile(); await tick();
+ t.tmux.listSessions = realList;
+ const shell = await launcher.launch({ agent: 'shell', folder });
+ listed.resolve([]); await pending;
+ expect(store.listLaunches().map(r => r.id)).toEqual([shell.id]);
+ await launcher.reconcile(); // a later listing that includes it keeps it as well
+ expect(launcher.list()).toMatchObject([{ id: shell.id, state: 'running' }]);
+});
+it('run never picks a terminal that is being ended', async () => {
+ const { launcher, folder, t } = await setup();
+ const first = await launcher.launch({ agent: 'shell', folder });
+ const killed = deferred<void>();
+ t.tmux.killSession = async n => { await killed.promise; t.live.delete(n); };
+ t.tmux.sendKeys = async (n, k) => { t.keys.push([n, k]); };
+ const ended = launcher.end(first.id); await tick();
+ const result = await launcher.run({ folder, command: 'ls' });
+ expect(result.reused).toBe(false); expect(result.launch.id).not.toBe(first.id);
+ expect(t.typed).toEqual([['la-' + result.launch.id, 'ls']]);
+ killed.resolve(); await ended;
+});
+it('run reports typed: false with a defined launch when typing into a ready shell fails', async () => {
+ const { launcher, folder, t } = await setup();
+ t.tmux.typeText = async () => { throw new Error('no pane'); };
+ const result = await launcher.run({ folder, command: 'make' });
+ expect(result.typed).toBe(false); expect(result.launch).toMatchObject({ agent: 'shell', folder });
 });

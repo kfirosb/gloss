@@ -70,6 +70,25 @@ describe('portable workflow', () => {
     expect(workflow.snapshot().codingMessages.some(message => message.sourceId === 'native-answer')).toBe(true);
     await workflow.close();
   });
+  it('completes every channel delivery Claude saw during the turn when two messages share one answer', async () => {
+    const agent = new FakeAgent('claude'); agent.result = { state: 'queued' }; agent.capabilities.sendWhileBusy = true;
+    const language = new FakeLanguageSession(); language.translationReply = 'Ask Claude';
+    const workflow = createWorkflow({ conversationId: 'claude-panel', language: 'he', languageModel: 'test', languageSession: language, projectContext: '', agents: [agent], store: new MemoryConversationStore() });
+    await workflow.connect({ agent: 'claude', sessionRef: 'claude-session', projectId: 'p1' });
+    await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
+    await workflow.sendComposer('first', 'First question', [], 'channel');
+    await workflow.sendComposer('second', 'Second question', [], 'channel');
+    await workflow.sendComposer('third', 'Third question', [], 'channel');
+    const [first, second, third] = workflow.snapshot().deliveries;
+    agent.emit({ type: 'channel-seen', requestId: first!.id });
+    agent.emit({ type: 'channel-seen', requestId: second!.id });
+    agent.emit({ type: 'message', message: { sourceId: 'one-answer', revision: 1, role: 'assistant', text: 'Both answered', complete: true } });
+    await expect.poll(() => workflow.snapshot().deliveries.map(d => d.state)).toEqual(['sent', 'sent', 'queued']);
+    agent.emit({ type: 'channel-seen', requestId: third!.id });
+    agent.emit({ type: 'message', message: { sourceId: 'next-answer', revision: 2, role: 'assistant', text: 'Third answered', complete: true } });
+    await expect.poll(() => workflow.snapshot().deliveries.map(d => d.state)).toEqual(['sent', 'sent', 'sent']);
+    await workflow.close();
+  });
   describe('Claude channel send while working', () => {
     async function claudeApp(state: 'working' | 'approval-required' | 'disconnected') {
       const agent = new FakeAgent('claude'); agent.result = { state: 'queued' }; agent.capabilities.channelSendWhileBusy = true;

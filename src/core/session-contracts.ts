@@ -68,3 +68,13 @@ export function defaultWorkspace(): WorkspaceData {
     },
   };
 }
+
+/** Disclosed setup prompts for new launches. Each costs one model request and makes the agent create its transcript so Gloss can connect. */
+export const CLAUDE_SETUP_PROMPT = 'Reply with READY only. Do not use tools.';
+export const CODEX_SETUP_PROMPT = 'Reply with READY only. Do not run commands.';
+/** What a launch runs: an agent, or a plain login shell ("terminal"). */
+export type LaunchAgent = 'claude' | 'codex' | 'shell';
+/** How terminal tabs open: the popup over the conversation, or in place of the conversation panels. */
+export type TerminalView = 'popup' | 'workspace';
+/** A live terminal as the catalog publishes it; never a session. */
+export interface TerminalEntry { key: string; launchId: string; title: string; busy: boolean; folder: string; projectKey: string; projectName: string; originSessionId?: string }

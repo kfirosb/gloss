@@ -7,7 +7,7 @@ function fixture() {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let executions = 0;
-  const workers = new LanguageWorkers({ executable: 'fake', args: () => [], parser: () => ({ accept: () => '', finish: () => 'Translated source' }) }, {
+  const workers = new LanguageWorkers({ provider: 'codex', executable: 'fake', args: () => [], parser: () => ({ accept: () => '', finish: () => 'Translated source' }) }, {
     runner: async function* (_executable, _args, _input, signal) {
       executions++;
       await Promise.race([gate, new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); })]);

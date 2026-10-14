@@ -1,13 +1,35 @@
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { MARKER_TABLES, classifyScreen, markersFor } from '../../src/runtime/attention-markers.js';
 import { createAttentionMonitor } from '../../src/runtime/attention-monitor.js';
 
 const dir = 'tests/fixtures/screens';
-// Fixture names are <agent>-<version>-<kind>[-<detail>].txt.
-for (const file of readdirSync(dir)) {
-  const [agent, version, kind] = file.replace('.txt', '').split('-') as ['claude' | 'codex', string, string];
+// Every verified Claude version has its own captured fixtures: two consent screens, the permission prompt, and idle/working negatives.
+const CLAUDE_VERSIONS = ['2.1.296', '2.1.299'];
+const CLAUDE_FIXTURES = { consent: 'consent', 'consent-trust': 'consent', permission: 'approval', idle: 'none', working: 'none' } as const;
+it('the claude marker table lists exactly the versions with fixtures', () => {
+  expect(MARKER_TABLES.find(t => t.agent === 'claude')!.versions).toEqual(CLAUDE_VERSIONS);
+  const fixtureVersions = new Set(readdirSync(dir).filter(f => f.startsWith('claude-')).map(f => f.split('-')[1]));
+  expect([...fixtureVersions].sort()).toEqual([...CLAUDE_VERSIONS].sort());
+});
+describe.each(CLAUDE_VERSIONS)('claude %s', version => {
+  const table = () => { const t = markersFor('claude', version); expect(t, 'marker table for ' + version).toBeDefined(); return t!; };
+  it.each(Object.entries(CLAUDE_FIXTURES))('classifies its %s fixture as %s', (kind, expected) => {
+    expect(classifyScreen(table(), readFileSync(join(dir, `claude-${version}-${kind}.txt`), 'utf8'))).toBe(expected);
+  });
+  it('does not treat a prose question as an approval prompt', () => {
+    expect(classifyScreen(table(), '⏺ Do you want to proceed?\n  I can run it next.')).toBe('none');
+  });
+  it('ignores a permission prompt that has scrolled above the bottom of the screen', () => {
+    const lines = readFileSync(join(dir, `claude-${version}-permission.txt`), 'utf8').split('\n');
+    const quoted = lines.slice(lines.findIndex(l => l.includes('Do you want to proceed?'))).join('\n') + '\n' + Array.from({ length: 25 }, (_, i) => `  reply line ${i}`).join('\n') + '\n❯ \n';
+    expect(classifyScreen(table(), quoted)).toBe('none');
+  });
+});
+// Other agents' fixture names are <agent>-<version>-<kind>[-<detail>].txt.
+for (const file of readdirSync(dir).filter(f => !f.startsWith('claude-'))) {
+  const [agent, version, kind] = file.replace('.txt', '').split('-') as ['codex', string, string];
   it(`classifies ${file}`, () => {
     const table = markersFor(agent, version); expect(table, 'marker table for ' + version).toBeDefined();
     const expected = kind === 'consent' ? 'consent' : kind === 'permission' || kind === 'approval' ? 'approval' : 'none';
@@ -16,8 +38,7 @@ for (const file of readdirSync(dir)) {
 }
 it('unknown versions have no table', () => { expect(markersFor('codex', '0.0.1')).toBeUndefined(); expect(MARKER_TABLES.length).toBeGreaterThan(0); });
 it('does not treat prose questions as approval prompts', () => {
-  const claude = markersFor('claude', '2.1.296')!; const codex = markersFor('codex', '0.162.1')!;
-  expect(classifyScreen(claude, '⏺ Do you want to proceed?\n  I can run it next.')).toBe('none');
+  const codex = markersFor('codex', '0.162.1')!;
   expect(classifyScreen(codex, '• Would you like to run the following command? I can if you agree.')).toBe('none');
 });
 it('monitor reports needs-user, clears, and flags unknown versions without guessing', async () => {
@@ -32,7 +53,7 @@ it('monitor reports needs-user, clears, and flags unknown versions without guess
   monitor.close();
 });
 it('drops ended launches and notifies subscribers of changes', async () => {
-  const timers: (() => void)[] = []; let launches = [{ id: 'L1', agent: 'codex' as const, folder: '/p', panePid: 2, state: 'running' as const, createdAt: 0 }];
+  const timers: (() => void)[] = []; let launches = [{ id: 'L1', agent: 'codex' as const, folder: '/p', panePid: 2, state: 'running' as const, createdAt: 0 }, { id: 'T1', agent: 'shell' as const, folder: '/p', panePid: 9, state: 'running' as const, createdAt: 0, title: 'Terminal' }];
   const monitor = createAttentionMonitor({ tmux: async () => ({ capturePane: async () => '' } as any), launches: () => launches,
     agentVersion: async () => '0.162.1', setTimer: ((fn: () => void) => { timers.push(fn); return 0 as any; }) as any });
   const seen: number[] = []; monitor.subscribe(m => seen.push(m.size));
@@ -41,13 +62,10 @@ it('drops ended launches and notifies subscribers of changes', async () => {
   monitor.close();
 });
 it('classifies only the bottom of the screen, where prompts sit', () => {
-  const codex = markersFor('codex', '0.162.1')!; const claude = markersFor('claude', '2.1.296')!;
+  const codex = markersFor('codex', '0.162.1')!;
   const approval = readFileSync(join(dir, 'codex-0.162.1-approval.txt'), 'utf8');
   const quoted = approval.split('\n').slice(26) .join('\n') + '\n' + Array.from({ length: 25 }, (_, i) => `  reply line ${i}`).join('\n') + '\n\n› Ask Codex to do anything\n';
   expect(classifyScreen(codex, quoted)).toBe('none');
-  const permission = readFileSync(join(dir, 'claude-2.1.296-permission.txt'), 'utf8');
-  const claudeQuoted = permission.split('\n').slice(29).join('\n') + '\n' + Array.from({ length: 25 }, (_, i) => `  reply line ${i}`).join('\n') + '\n❯ \n';
-  expect(classifyScreen(claude, claudeQuoted)).toBe('none');
 });
 it('never captures the pane of a launch whose agent version is unknown', async () => {
   const capturePane = vi.fn(async () => ''); const timers: (() => void)[] = [];

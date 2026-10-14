@@ -148,3 +148,41 @@ test('dot-only never opens a waiting launch automatically', async ({ page, conte
   await page.waitForTimeout(3500);
   await expect(page.getByRole('dialog', { name: /Terminal:/ })).toHaveCount(0);
 });
+test('the first message is prefilled per agent, sent only when edited, and required', async ({ page, context }) => {
+  const f = await sessionFixture(context); await serve(context, [entryFor(f, 0)]);
+  const launched: any[] = [];
+  await context.route('**/api/settings/language', r => r.fulfill({ json: { write: 'he', send: 'en', reply: 'he', assist: 'he' } }));
+  await context.route('**/api/launches', r => { if (r.request().method() !== 'POST') return r.fallback(); const body = r.request().postDataJSON(); launched.push(body); return r.fulfill({ json: { id: 'L9', ...body, panePid: 5, state: 'starting', createdAt: 0 } }); });
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'New session' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New session' });
+  const message = dialog.getByLabel('First message');
+  await expect(message).toHaveValue('Reply with READY only. Do not use tools.');
+  await dialog.getByRole('radio', { name: 'Codex' }).check();
+  await expect(message).toHaveValue('Reply with READY only. Do not run commands.');
+  await message.fill('');
+  await expect(dialog.getByRole('button', { name: 'Open session' })).toBeDisabled();
+  await expect(dialog.getByText('A first message is required: it is what lets Gloss connect to the session')).toBeVisible();
+  await message.fill('Review the diff');
+  await dialog.getByRole('radio', { name: 'Claude' }).check();
+  await expect(message).toHaveValue('Review the diff'); // an edited message survives switching agents
+  await dialog.getByRole('button', { name: 'Open session' }).click();
+  await expect(dialog).toBeHidden();
+  expect(launched).toEqual([{ agent: 'claude', folder: '/repo', prompt: 'Review the diff' }]);
+});
+test('Terminal hides the message and languages and opens a shell', async ({ page, context }) => {
+  const f = await sessionFixture(context); await serve(context, [entryFor(f, 0)]);
+  const launched: any[] = [];
+  await context.route('**/api/settings/language', r => r.fulfill({ json: { write: 'he', send: 'en', reply: 'he', assist: 'he' } }));
+  await context.route('**/api/launches', r => { if (r.request().method() !== 'POST') return r.fallback(); const body = r.request().postDataJSON(); launched.push(body); return r.fulfill({ json: { id: 'T9', ...body, title: 'Terminal', panePid: 5, state: 'running', createdAt: 0 } }); });
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'New session' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New session' });
+  await dialog.getByRole('radio', { name: 'Terminal' }).check();
+  await expect(dialog.getByLabel('First message')).toHaveCount(0);
+  await expect(dialog.getByLabel('Show agent replies in')).toHaveCount(0);
+  await expect(dialog.getByText('Opens a shell in this folder. Nothing is launched inside it.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Open terminal' }).click();
+  await expect(dialog).toBeHidden();
+  expect(launched).toEqual([{ agent: 'shell', folder: '/repo' }]);
+});

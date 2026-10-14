@@ -13,6 +13,7 @@ Gloss is a local macOS app that sits next to the coding-agent sessions already r
 - **Finds your sessions.** Open Codex sessions are discovered automatically and grouped by project and worktree. Closed sessions stay available under *Saved*. You can also start new sessions from inside the app.
 - **Translates the conversation live.** Completed agent replies are translated into your language as they arrive. No separate chat, no copy-paste.
 - **You write Hebrew, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
+- **Dictation.** Press the mic button and speak Hebrew or English. Speech is transcribed on your Mac, with no cloud and no extra account, and the text lands in the composer for you to review and send.
 - **Files and images.** A project file sidebar with search, read-only previews, *TL;DR* and full translation of files, and image or screenshot paste straight into the conversation.
 - **Skills and MCP at your fingertips.** Type `/` in the composer to search the skills your agent can use, or `$` to search its MCP servers. Global, project and plugin entries are listed together, and Gloss sends your pick in the form the agent understands.
 - **Uses the accounts you already have.** Translation runs on an inexpensive model in the same ecosystem as your agent (Claude or OpenAI). No extra API key.
@@ -72,6 +73,7 @@ To build the installer:
 
 ```sh
 npm run build:tmux
+npm run build:whisper
 npm run desktop:dmg -- --arm64
 # the DMG is written to release/
 ```

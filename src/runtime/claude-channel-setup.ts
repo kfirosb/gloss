@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Target } from '../core/contracts.js';
+import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelStatus } from '../agents/claude/channel-types.js';
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
 import { validateTarget } from '../agents/shared.js';
@@ -25,7 +26,7 @@ export interface ChannelSetupOptions {
  runner?: ProcessRunner; now?: () => number;
  registry?: { resolveChannel(target: Target): Promise<unknown> };
 }
-export const CLAUDE_SETUP_PROMPT = 'Reply with READY only. Do not use tools.';
+export { CLAUDE_SETUP_PROMPT };
 const serverName = 'language-assistant';
 const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';

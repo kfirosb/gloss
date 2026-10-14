@@ -1,4 +1,5 @@
 import { createSessionCatalog, type SessionCatalog } from './session-catalog.js';
+import type { SeenStore } from '../core/session-catalog.js';
 import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
 import type { ImageAttachment } from '../core/contracts.js';
@@ -6,6 +7,7 @@ import { createFileRegistry } from './file-registry.js';
 import { splitArgs } from './session-launcher.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
+import { PACKAGE_NAME, packageRoot } from './package-root.js';
 import { realpath, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -14,7 +16,7 @@ import { searchFolders, type FolderSearchResult } from './folder-search.js';
 import { validateSidebarSettings, type ConnectedFolder, type ConnectedFolderStore, type FolderKind, type SidebarSettings } from './connected-folders.js';
 import type { ProjectMetadata } from './project-metadata.js';
 import type { AgentAdapter, AgentKind, HostAdapter, LanguageBackend, ConversationStore, Target } from '../core/contracts.js';
-import type { SessionStore, WorkspaceData, WorkspaceRecord } from '../core/session-contracts.js';
+import type { SessionRecord, SessionStore, WorkspaceData, WorkspaceRecord } from '../core/session-contracts.js';
 import { createWorkflow, type Workflow } from '../core/workflow.js';
 import { buildProjectContext } from '../core/project-context.js';
 import { catalogFrom } from '../core/invocations.js';
@@ -25,6 +27,9 @@ import { readProjectMetadata } from './project-metadata.js';
 import { effectiveLanguageSettings, validateLanguageOverride, validateLanguageSettings, type LanguageOverride, type LanguageSettings, type LanguageSettingsStore } from '../core/language-settings.js';
 import type { SessionLauncher, LaunchSettings, LaunchStore } from './session-launcher.js';
 import type { TerminalBridge } from './terminal-bridge.js';
+import type { DictationBridge } from './dictation/bridge.js';
+import { createUsageService, type SessionUsageReport, type UsageService } from './usage.js';
+import type { UsageSnapshot } from '../core/usage.js';
 import type { AttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
 import { createInventoryService, sessionInventoryRoot, type InventoryService } from './inventory-service.js';
@@ -33,9 +38,12 @@ import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, ty
 
 export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
-  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore>; agents: AgentAdapter[];
+  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore> & Partial<SeenStore>; agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>; host?: HostAdapter;
+  /** Shared with the language backends so their calls feed the same tracker; created here when absent. */
+  usage?: UsageService;
   launcher?: SessionLauncher; terminals?: TerminalBridge; attention?: AttentionMonitor; approveLaunchFolder?(folder: string): void;
+  dictation?: DictationBridge;
   conversationId?: string; language?: string; model?: string; projectPath?: string; attachmentRoot?: string;
   folderSearch?: (query: string) => Promise<FolderSearchResult>;
   /** Ends every live launch whose folder is `folder` (used before deleting a worktree). */
@@ -46,20 +54,18 @@ export interface ApplicationOptions {
 export interface WorktreeListing { hasCommits: boolean; worktrees: WorktreeInfo[] }
 export interface WorktreeRemoval { removed: true; conversationsRemoved: number; skipped: number }
 /** What deleting a worktree would affect: its changes, plus sessions that would be ended (`launchedSessions`) or left running without a folder (`otherOpenSessions`). */
-export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; otherOpenSessions: number }
+export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; launchedTerminals: number; otherOpenSessions: number }
 export interface CreatedWorktree { path: string; branch: string; location: string; ignore?: { added: boolean; line: string } }
 export interface FolderListing extends ConnectedFolder { projectName: string; branch?: string; missing: boolean }
 export interface AboutInfo { name: string; version: string; platform: string; arch: string }
-// source runs from src/runtime and the build from dist/server/runtime; walk up to the package.json named language-assistant (bounded).
+/** This package's name and version, read from the package root's package.json (see packageRoot). */
 function readPackage(): { name: string; version: string } {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (let level = 0; level < 4; level += 1, dir = dirname(dir)) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
-      if (pkg.name === 'language-assistant' && typeof pkg.version === 'string') return { name: pkg.name, version: pkg.version };
-    } catch { /* keep walking up */ }
-  }
-  return { name: 'language-assistant', version: '0.0.0' };
+  const root = packageRoot(dirname(fileURLToPath(import.meta.url)));
+  if (root) try {
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof version === 'string') return { name: PACKAGE_NAME, version };
+  } catch { /* fall back */ }
+  return { name: PACKAGE_NAME, version: '0.0.0' };
 }
 export interface SessionLanguage { defaults: LanguageSettings; override: LanguageOverride; effective: LanguageSettings }
 export interface Application {
@@ -73,6 +79,7 @@ export interface Application {
   readonly capability: string;
   readonly launcher?: SessionLauncher;
   readonly terminals?: TerminalBridge;
+  readonly dictation?: DictationBridge;
   approveLaunchFolder?(folder: string): void;
   about?(): AboutInfo;
   listFolders?(): Promise<FolderListing[]>;
@@ -99,6 +106,10 @@ export interface Application {
   /** Removes a closed session from this app's history only; agent transcripts are never touched. */
   removeSession?(id: string): Promise<void>;
   readonly catalog?: SessionCatalog;
+  readonly usage?: UsageService;
+  /** The selected session's provider quota and what Gloss spent for it, today and overall. */
+  sessionUsage?(id: string): SessionUsageReport;
+  refreshUsage?(provider: unknown): Promise<UsageSnapshot>;
   restore?(preferredId?: string): Promise<void>;
   discoverSessions?(projectPath: string): Promise<DiscoveredTarget[]>;
   createSession?(target: Target): Promise<RuntimeSnapshot>;
@@ -125,7 +136,10 @@ export function createApplication(options: ApplicationOptions): Application {
     if (!record) throw Object.assign(new Error('Unknown session'), { code: 'not-found' });
     return record;
   };
+  const usage = options.usage ?? createUsageService({ store: options.store as Partial<import('../core/usage.js').SpendStore> });
   const files = createFileRegistry({store: options.store, nestedWorktrees: createNestedWorktreeLookup(worktrees), ...(options.attachmentRoot ? {attachmentRoot:options.attachmentRoot} : {})});
+  /** The model a session's language calls use: the launch flag for the launch session, else its saved choice, else the provider default. */
+  const languageModelFor = (record: SessionRecord): string => { const saved = options.store.load(record.id); return (record.id === id ? options.model : undefined) ?? (saved?.languageModel !== 'default' ? saved?.languageModel : undefined) ?? (record.target.agent === 'claude' ? 'haiku' : 'gpt-5.6-sol'); };
   const sessions = createSessionManager({ store: options.store, agents: options.agents, files,
     ...(settingsStore.readLanguageDefaults ? { languageSettings: (sessionId: string) => effectiveLanguageSettings(readDefaults()!, readOverride(sessionId)) } : {}),
     async createWorkflowForSession(record) {
@@ -134,21 +148,22 @@ export function createApplication(options: ApplicationOptions): Application {
       if (!backend) throw Object.assign(new Error('No language backend available'), { code: 'model-unavailable' });
       const project = record.target.projectId;
       if (!(await readProjectMetadata(project)).available) throw Object.assign(new Error('Project directory is unavailable'), { code: 'project-unavailable' });
-      const selectedModel = (record.id === id ? options.model : undefined) ?? (current?.languageModel !== 'default' ? current?.languageModel : undefined) ?? (record.target.agent === 'claude' ? 'haiku' : 'gpt-5.6-sol');
-      const session = await backend.open(selectedModel, current?.languageSessionId);
+      const selectedModel = languageModelFor(record);
+      const session = await backend.open(selectedModel, current?.languageSessionId, { scope: record.id });
       let workflow: Workflow | undefined;
       try {
         workflow = createWorkflow({ files, readFileContext,
           invocations: async () => catalogFrom((await inventoryService.read(record.target.agent, sessionInventoryRoot(record))).entries),
           conversationId: record.id, language: current?.language ?? options.language ?? 'he', languageModel: selectedModel, languageSession: session,
-          projectContext: () => buildProjectContext({ notes: options.store.readContext(project) ?? '', messages: workflow?.snapshot().codingMessages ?? [], maxCharacters: 12000 }), agents: options.agents, store: options.store,
+          projectContext: () => buildProjectContext({ notes: options.store.readContext(project) ?? '', messages: workflow?.snapshot().codingMessages ?? [], maxCharacters: 12000 }), agents: options.agents, store: options.store, onUsage: value => usage.tracker.observe(value),
           ...(readDefaults() ? { languageSettings: () => effectiveLanguageSettings(readDefaults()!, readOverride(record.id)) } : {}) });
         await workflow.connect(record.target);
         return workflow;
       } catch (error) { if (workflow) await workflow.close(); else await session.close(); throw error; }
     },
   });
-  const catalog = createSessionCatalog({ sessions, agents: options.agents, ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}) });
+  const catalog = createSessionCatalog({ sessions, agents: options.agents, usage: () => usage.tracker.snapshot(), ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}), ...(options.store.markSeen && options.store.seenSequence ? { seen: options.store as SeenStore } : {}) });
+  const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
   const channelSetup = options.channelSetup ?? createClaudeChannelSetup();
   const savedTarget = (id: string) => { sessions.snapshot(id); return sessions.list().find(record => record.id === id)!.target; };
   const pkg = readPackage();
@@ -200,7 +215,7 @@ export function createApplication(options: ApplicationOptions): Application {
   return {
     capability: options.capability ?? randomUUID(), sessions, files, catalog,
     async inventory(sessionId) { const record = sessionRecord(sessionId); return inventoryService.read(record.target.agent, sessionInventoryRoot(record)); },
-    ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.terminals ? { terminals: options.terminals } : {}), ...(options.approveLaunchFolder ? { approveLaunchFolder: options.approveLaunchFolder } : {}),
+    ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.terminals ? { terminals: options.terminals } : {}), ...(options.dictation ? { dictation: options.dictation } : {}), ...(options.approveLaunchFolder ? { approveLaunchFolder: options.approveLaunchFolder } : {}),
     async removeSession(sessionId) {
       requireOpen(); sessions.snapshot(sessionId);
       const conflict = (message: string) => Object.assign(new Error(message), { code: 'session-open' });
@@ -214,6 +229,9 @@ export function createApplication(options: ApplicationOptions): Application {
       await Promise.all(uploads.map(file => unlink(file.path).catch(() => {})));
     },
     about() { requireOpen(); return { name: pkg.name, version: pkg.version, platform: process.platform, arch: process.arch }; },
+    usage,
+    sessionUsage(sessionId) { requireOpen(); const record = sessions.list().find(r => r.id === sessionId); if (!record) throw Object.assign(new Error('Unknown session'), { code: 'unknown-session' }); return usage.report(sessionId, record.target.agent, languageModelFor(record)); },
+    async refreshUsage(provider) { requireOpen(); if (provider !== 'claude' && provider !== 'codex') throw new Error('Unknown provider'); return usage.refresh(provider, options.languageBackends, AbortSignal.timeout(60_000)); },
     searchFolders(query) { requireOpen(); return (options.folderSearch ?? ((q: string) => searchFolders(q, { home: homedir() })))(query); },
     async listFolders() {
       requireOpen();
@@ -255,10 +273,12 @@ export function createApplication(options: ApplicationOptions): Application {
       const info = await worktrees.inspect(project.main, folder);
       // Launches inside the folder are ended on delete; other open sessions there are not ours to end.
       const live = options.launcher?.list().filter(l => l.state !== 'ended') ?? [];
-      const launched = (await Promise.all(live.map(l => insideFolderReal(l.folder, folder)))).flatMap((inside, i) => inside ? [live[i]!.id] : []);
-      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launched.includes(e.launchId)));
+      const inside = await Promise.all(live.map(l => insideFolderReal(l.folder, folder)));
+      const launched = live.filter((_, i) => inside[i]);
+      const launchedIds = launched.map(l => l.id);
+      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launchedIds.includes(e.launchId)));
       const others = (await Promise.all(open.map(e => insideFolderReal(recordFolder(e), folder)))).filter(Boolean).length;
-      return { ...info, launchedSessions: launched.length, otherOpenSessions: others };
+      return { ...info, launchedSessions: launched.filter(l => l.agent !== 'shell').length, launchedTerminals: launched.filter(l => l.agent === 'shell').length, otherOpenSessions: others };
     },
     async createWorktree(projectKey, input) {
       const project = await resolveProject(projectKey); requireGit(project);
@@ -417,7 +437,7 @@ export function createApplication(options: ApplicationOptions): Application {
     close() {
       closing ??= (async () => {
         closed = true;
-        try { options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
+        try { unsubscribeUsage(); options.dictation?.close(); options.attention?.close(); options.terminals?.close(); options.launcher?.close(); await catalog.close(); await sessions.close(); }
         finally { (options.store as ConversationStore & { close?: () => void }).close?.(); }
       })();
       return closing;

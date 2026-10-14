@@ -10,6 +10,7 @@ import type { Application } from './application.js';
 import type { Action } from './protocol.js';
 import { readProjectMetadata, type ProjectMetadata } from './project-metadata.js';
 import { validateLanguageOverride } from '../core/language-settings.js';
+import { isLoopbackHost, isLoopbackOrigin, LOOPBACK_HOST } from './loopback.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -98,6 +99,7 @@ async function sessionRoute(app: Application, req: IncomingMessage, res: ServerR
     if (req.method === 'PUT' && app.setSessionLanguage) { const body = await readBody(req, 4096); if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid language settings'); respond(res, 200, app.setSessionLanguage(id, body)); return true; }
     if (req.method === 'DELETE' && app.setSessionLanguage) { respond(res, 200, app.setSessionLanguage(id, null)); return true; }
   }
+  if (route === 'usage' && req.method === 'GET' && app.sessionUsage) { res.setHeader('cache-control', 'no-store'); respond(res, 200, app.sessionUsage(id)); return true; }
   if (route === 'snapshot' && req.method === 'GET') { respond(res, 200, snapshot); return true; }
   if (route === 'events' && req.method === 'GET') {
     events(res, snapshot, listener => app.sessions!.subscribe(id, listener)); return true;
@@ -209,11 +211,17 @@ async function launchRoute(app: Application, req: IncomingMessage, res: ServerRe
   res.setHeader('cache-control', 'no-store');
   if (path === '/api/launches' && req.method === 'GET') { respond(res, 200, app.launcher.list()); return true; }
   if (path === '/api/launches' && req.method === 'POST') {
-    const body = await readBody(req, 4096);
+    const body = await readBody(req, 16384);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid launch request');
     // Only these fields are forwarded; argv, executables and environment are never client-controlled.
     const languageOverride = body.languageOverride === undefined ? undefined : validateLanguageOverride(body.languageOverride);
-    respond(res, 200, await app.launcher.launch({ agent: body.agent, folder: body.folder, ...(languageOverride ? { languageOverride } : {}) })); return true;
+    respond(res, 200, await app.launcher.launch({ agent: body.agent, folder: body.folder, ...(body.prompt !== undefined ? { prompt: body.prompt } : {}), ...(languageOverride ? { languageOverride } : {}) })); return true;
+  }
+  if (path === '/api/launches/run' && req.method === 'POST') {
+    const body = await readBody(req, 16384);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid run request');
+    if (typeof body.command !== 'string' || body.command.length > 8192) throw new Error('Invalid command');
+    respond(res, 200, await app.launcher.run({ folder: body.folder, command: body.command, ...(typeof body.originSessionId === 'string' ? { originSessionId: body.originSessionId } : {}) })); return true;
   }
   const match = /^\/api\/launches\/([^/]+)\/(terminal-ticket|end|identify)$/.exec(path);
   if (match && req.method === 'POST') {
@@ -221,6 +229,7 @@ async function launchRoute(app: Application, req: IncomingMessage, res: ServerRe
     if (match[2] === 'end') { await app.launcher.end(id); respond(res, 200, {}); return true; }
     // Retrying can take up to the identification timeout; the catalog reports the outcome.
     if (match[2] === 'identify') {
+      if (app.launcher.list().some(r => r.id === id && r.agent === 'shell')) throw new Error('Terminals have nothing to identify');
       if (!app.launcher.list().some(r => r.id === id && r.state !== 'ended')) throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' });
       void app.launcher.identify(id).catch(() => {}); respond(res, 202, {}); return true;
     }
@@ -272,9 +281,9 @@ export async function startServer(application: Application, options: { port?: nu
   const server = createServer(async (req, res) => {
     try {
       const host = req.headers.host ?? '';
-      if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return respond(res, 403, { error: 'Loopback host required', code: 'host-unavailable' });
+      if (!isLoopbackHost(host)) return respond(res, 403, { error: 'Loopback host required', code: 'host-unavailable' });
       const origin = req.headers.origin;
-      if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return respond(res, 403, { error: 'Origin is not allowed', code: 'origin-rejected' });
+      if (origin && !isLoopbackOrigin(origin)) return respond(res, 403, { error: 'Origin is not allowed', code: 'origin-rejected' });
       const url = new URL(req.url ?? '/', 'http://' + host);
       if (await staticRoute(req, res, url.pathname)) return;
       if (req.headers.authorization !== 'Bearer ' + application.capability) return respond(res, 401, { error: 'Unauthorized', code: 'unauthorized' });
@@ -284,6 +293,21 @@ export async function startServer(application: Application, options: { port?: nu
         if (url.pathname.endsWith('/events')) return events(res, catalog.snapshot(), listener => catalog.subscribe(listener));
         res.setHeader('cache-control', 'no-store');
         return respond(res, 200, catalog.snapshot());
+      }
+      if (url.pathname === '/api/usage/refresh' && req.method === 'POST' && application.refreshUsage) {
+        const body = await readBody(req, 1024) as { provider?: unknown } | null;
+        if (!body || typeof body !== 'object' || (body.provider !== 'claude' && body.provider !== 'codex')) { respond(res, 400, { error: 'Unknown provider' }); return; }
+        res.setHeader('cache-control', 'no-store'); return respond(res, 200, await application.refreshUsage(body.provider));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/session-catalog/seen') {
+        const catalog = application.catalog;
+        if (!catalog) return respond(res, 501, { error: 'Session catalog unavailable' });
+        const body = await readBody(req, 4096) as { sessionId?: unknown; sequence?: unknown };
+        if (!body || typeof body.sessionId !== 'string' || !Number.isSafeInteger(body.sequence) || (body.sequence as number) < 0) return respond(res, 400, { error: 'Invalid seen request', code: 'bad-request' });
+        const result = catalog.markSeen(body.sessionId, body.sequence as number);
+        if (result === 'unknown') return respond(res, 404, { error: 'Unknown session', code: 'unknown-session' });
+        res.setHeader('cache-control', 'no-store');
+        return respond(res, 200, { result });
       }
       if (url.pathname === '/api/about' && req.method === 'GET' && application.about) { res.setHeader('cache-control', 'no-store'); return respond(res, 200, application.about()); }
       if (url.pathname === '/api/folders/search' && req.method === 'GET' && application.searchFolders) {
@@ -305,6 +329,15 @@ export async function startServer(application: Application, options: { port?: nu
         res.setHeader('cache-control', 'no-store');
         if (req.method === 'GET' && application.languageDefaults) return respond(res, 200, application.languageDefaults());
         if (req.method === 'PUT' && application.setLanguageDefaults) return respond(res, 200, application.setLanguageDefaults(await readBody(req, 4096)));
+      }
+      if (url.pathname === '/api/dictation' && req.method === 'GET') {
+        res.setHeader('cache-control', 'no-store');
+        if (!application.dictation) return respond(res, 404, { error: 'Dictation unavailable', code: 'not-found' });
+        return respond(res, 200, await application.dictation.status());
+      }
+      if (url.pathname === '/api/dictation/model/cancel' && req.method === 'POST') {
+        if (!application.dictation) return respond(res, 404, { error: 'Dictation unavailable', code: 'not-found' });
+        application.dictation.cancelDownload(); return respond(res, 200, { cancelled: true });
       }
       if (url.pathname === '/api/settings/launch') {
         res.setHeader('cache-control', 'no-store');
@@ -335,17 +368,19 @@ export async function startServer(application: Application, options: { port?: nu
       });
     }
   });
-  // The terminal ticket travels in this URL's query string, so the URL is never logged.
+  // Tickets and capabilities travel in these URLs' query strings, so the URLs are never logged.
   server.on('upgrade', (req, socket, head) => {
-    const host = req.headers.host ?? '';
-    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || !application.terminals || !(req.url ?? '').startsWith('/api/launches/')) { socket.destroy(); return; }
-    application.terminals.handleUpgrade(req, socket, head);
+    const host = req.headers.host ?? ''; const url = req.url ?? '';
+    if (!isLoopbackHost(host)) { socket.destroy(); return; }
+    if (url.startsWith('/api/launches/') && application.terminals) { application.terminals.handleUpgrade(req, socket, head); return; }
+    if (url.startsWith('/api/dictation/') && application.dictation) { application.dictation.handleUpgrade(req, socket, head); return; }
+    socket.destroy();
   });
   return new Promise<{ url: string; close(): Promise<void> }>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => {
+    server.listen(options.port ?? 0, options.host ?? LOOPBACK_HOST, () => {
       const address = server.address(); const port = typeof address === 'object' && address ? address.port : options.port;
-      resolve({ url: 'http://' + (options.host ?? '127.0.0.1') + ':' + port + '/#capability=' + application.capability, close: () => new Promise(done => { server.close(() => done()); server.closeAllConnections(); }) });
+      resolve({ url: 'http://' + (options.host ?? LOOPBACK_HOST) + ':' + port + '/#capability=' + application.capability, close: () => new Promise(done => { server.close(() => done()); server.closeAllConnections(); }) });
     });
   });
 }

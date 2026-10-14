@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { LanguageBackend, LanguageSession } from '../core/contracts.js';
-import { classifyError, LanguageError, LanguageWorkers, requireSubscription, type BackendOptions, type ResponseParser } from './shared.js';
+import { classifyError, LanguageError, LanguageWorkers, requireSubscription, type BackendOptions, type ResponseParser, type SessionOptions } from './shared.js';
+import { parseClaudeRateLimit, parseClaudeSpend } from '../core/usage.js';
 export { LanguageError } from './shared.js';
 
 export const DEFAULT_CLAUDE_MODEL = 'haiku';
@@ -23,7 +24,7 @@ function parser(): ResponseParser {
 export class ClaudeLanguageBackend implements LanguageBackend {
   private readonly workers: LanguageWorkers;
   constructor(private readonly options: BackendOptions = {}) {
-    this.workers = new LanguageWorkers({ executable: 'claude', parser, args: (model, images=[]) => [
+    this.workers = new LanguageWorkers({ provider: 'claude', executable: 'claude', parser, observe: (event, at) => ({ ...(parseClaudeRateLimit(event, at) ? { usage: parseClaudeRateLimit(event, at)! } : {}), ...(parseClaudeSpend(event) ? { spend: parseClaudeSpend(event)! } : {}) }), args: (model, images=[]) => [
       '--safe-mode', '-p', '--model', model, '--tools', '', '--no-session-persistence',
       ...(images.length?['--input-format','stream-json']:[]), '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     ], async input(prompt,images) {
@@ -36,5 +37,10 @@ export class ClaudeLanguageBackend implements LanguageBackend {
     // Documented CLI aliases, not a claim that every subscription has access.
     return ['haiku', 'sonnet', 'opus'].map(id => ({ id, label: `${id} (CLI alias; account access checked on use)` }));
   }
-  async open(model: string = DEFAULT_CLAUDE_MODEL, _resumeId?: string): Promise<LanguageSession> { await requireSubscription('claude', this.options); return this.workers.session(model); }
+  async open(model: string = DEFAULT_CLAUDE_MODEL, _resumeId?: string, sessionOptions?: SessionOptions): Promise<LanguageSession> { await requireSubscription('claude', this.options); return this.workers.session(model, sessionOptions); }
+  /** A one-word call on the cheapest model: the CLI answers it with the account's current rate-limit windows. */
+  async refreshUsage(signal: AbortSignal): Promise<void> {
+    const session = this.workers.session(DEFAULT_CLAUDE_MODEL, { scope: 'usage-probe' });
+    try { await session.raw('Reply with the single word OK.', signal); } finally { await session.close(); }
+  }
 }
