@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import type { AgentAdapter, Target } from '../core/contracts.js';
-import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SessionCatalog } from '../core/session-catalog.js';
+import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
+import { attentionFor, latestResponseSequence } from '../core/attention.js';
+import type { CatalogEntry, CatalogSnapshot, OpenSessionCandidate, SeenStore, SessionCatalog } from '../core/session-catalog.js';
 import { languageShortCode } from '../core/language-settings.js';
-import type { SessionRecord } from '../core/session-contracts.js';
+import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { SessionManager } from './session-manager.js';
 import type { SessionLauncher, LaunchRecord } from './session-launcher.js';
 import type { AttentionMonitor } from './attention-monitor.js';
@@ -16,6 +17,7 @@ export interface CatalogClock {
   clearInterval(timer: ReturnType<typeof setInterval>): void;
 }
 export interface SessionCatalogOptions {
+  seen?: SeenStore;
   sessions: SessionManager;
   agents: AgentAdapter[];
   readProjectMetadata?: (path: string) => Promise<ProjectMetadata>;
@@ -39,7 +41,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   const metadata = new Map<string, { at: number; value: ProjectMetadata }>();
   const metadataReads = new Map<string, Promise<ProjectMetadata>>();
   const listeners = new Set<(snapshot: CatalogSnapshot) => void>();
-  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], discovery: { state: 'healthy' } };
+  let current: CatalogSnapshot = { epoch: randomUUID(), sequence: 0, entries: [], terminals: [], discovery: { state: 'healthy' } };
   let started = false;
   let closed = false;
   let pending: Promise<void> | undefined;
@@ -75,7 +77,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
   };
   const launchEntries = (entries: CatalogEntry[]): CatalogEntry[] => {
     if (!options.launcher) return entries;
-    const launches = options.launcher.list().filter(launch => launch.state !== 'ended');
+    const launches = options.launcher.list().filter((launch): launch is LaunchRecord & { agent: AgentKind } => launch.state !== 'ended' && launch.agent !== 'shell');
     const attention = options.attention?.current() ?? new Map();
     // A launch owns the row registered for its panel, or the row discovered under its native session.
     const owner = (entry: CatalogEntry) => launches.find(l => (entry.sessionId !== undefined && l.panelSessionId === entry.sessionId)
@@ -94,6 +96,13 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     return result;
   };
+  const titleNumber = (title: string) => Number(/^Terminal(?: (\d+))?$/.exec(title)?.[1] ?? 1);
+  const terminalEntries = (): TerminalEntry[] => {
+    if (!options.launcher) return [];
+    return options.launcher.list().filter(l => l.agent === 'shell' && l.state !== 'ended')
+      .map(l => ({ key: 'terminal:' + l.id, launchId: l.id, title: l.title ?? 'Terminal', busy: l.busy === true, folder: l.folder, ...launchProject(l.folder), ...(l.originSessionId ? { originSessionId: l.originSessionId } : {}) }))
+      .sort((a, b) => a.projectKey.localeCompare(b.projectKey) || a.folder.localeCompare(b.folder) || titleNumber(a.title) - titleNumber(b.title));
+  };
   const publish = () => {
     if (closed) return;
     const entries = launchEntries([...rows.values()].map(row => {
@@ -103,16 +112,26 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     })).sort((a, b) => a.projectKey.localeCompare(b.projectKey) || Number(b.open) - Number(a.open) || a.key.localeCompare(b.key));
     // Cached metadata (30s TTL per folder) is the only source; no extra filesystem reads happen here.
     for (const entry of entries) { delete entry.folderMissing; if (metadata.get(entry.target.projectId)?.value.available === false) entry.folderMissing = true; }
+    for (const entry of entries) {
+      const attention = attentionFor(entry, entry.sessionId && options.seen ? options.seen.seenSequence(entry.sessionId) : undefined);
+      if (attention === 'none') delete entry.attention; else entry.attention = attention;
+    }
+    const terminals = terminalEntries();
     const usage = options.usage?.();
-    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(health, current.discovery) && isDeepStrictEqual(usage, current.usage)) return;
-    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), discovery: { ...health }, ...(usage ? { usage } : {}) };
+    if (isDeepStrictEqual(entries, current.entries) && isDeepStrictEqual(terminals, current.terminals ?? []) && isDeepStrictEqual(health, current.discovery) && isDeepStrictEqual(usage, current.usage)) return;
+    current = { epoch: current.epoch, sequence: current.sequence + 1, entries: structuredClone(entries), terminals: structuredClone(terminals), discovery: { ...health }, ...(usage ? { usage } : {}) };
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };
   const updateActivity = (record: SessionRecord) => {
     const row = rows.get(nativeKey(record.target));
     if (!row || closed || candidates.get(row.key)?.support === 'unsupported') return;
-    const state = sessions.snapshot(record.id).snapshot.codingState;
+    const live = sessions.snapshot(record.id).snapshot; // `current` is the published catalog snapshot
+    const state = live.codingState;
+    const latest = latestResponseSequence(live.codingMessages);
+    if (latest === undefined) delete row.latestResponseSequence; else row.latestResponseSequence = latest;
+    // A session never seen before starts seen at whatever history was present when Gloss first connected it (0 when none), so only responses arriving after that count.
+    if (options.seen && state !== 'disconnected' && options.seen.seenSequence(record.id) === undefined) options.seen.markSeen(record.id, latest ?? 0);
     // A manually connected Claude row has no discovery result; its connection is the liveness signal.
     if (record.target.agent === 'claude' && !candidates.has(row.key)) row.open = state !== 'disconnected';
     if (metadata.get(record.target.projectId)?.value.available === false) {
@@ -248,6 +267,15 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       publish();
     },
     entryFor(sessionId) { return current.entries.find(entry => entry.sessionId === sessionId); },
+    markSeen(sessionId, sequence) {
+      if (!options.seen || !current.entries.some(entry => entry.sessionId === sessionId)) return 'unknown';
+      const before = options.seen.seenSequence(sessionId);
+      // A buggy client must not be able to suppress future badges by reporting a sequence beyond anything received.
+      const entry = current.entries.find(e => e.sessionId === sessionId);
+      options.seen.markSeen(sessionId, Math.min(sequence, entry?.latestResponseSequence ?? 0));
+      if (options.seen.seenSequence(sessionId) === before) return 'unchanged';
+      publish(); return 'updated';
+    },
     subscribe(listener) { if (closed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
     async close() {
       closed = true; controller.abort(); if (timer) clock.clearInterval(timer);

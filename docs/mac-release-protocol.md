@@ -2,7 +2,7 @@
 
 Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
 
-As of 2026-10-08, version 0.1.0 is running and in use. Its source is tagged `v0.1.0` at `ec752e5`; it includes local `main` through `519e6dd`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
+As of 2026-10-14, version 0.6.0 is installed and in use. Its source is tagged `v0.6.0` at `9f6c9a8` on branch `release/0.6.0`; it includes local `main` through `dcf2737` (0.5.1). While it was being released, `main` gained the unreleased attention-cues work (schema 23), so the release was merged into `main` with merge commit `fce1c3d`; `main` therefore holds 0.6.0 plus that unreleased work, and the next release should get a new version. The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/Gloss-backups/2026-10-14-before-0.6.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
 
 ## 1. Establish the source and protect current work
 
@@ -52,7 +52,7 @@ npm version --no-git-tag-version <new-version>
 npm ci
 ```
 
-Replace placeholders before running commands. Use Node.js 24 or newer for the current project. Update the Mac release paragraph in `docs/reference.md` with the new version and relevant changes.
+Replace placeholders before running commands. Use Node.js 24 or newer for the current project. A worktree created by an agent tool may hold only a stub `node_modules` that resolves packages from the parent checkout; tests and type checks can pass that way, but `electron-builder` packages the worktree's own `node_modules`, so always run `npm ci` in the release worktree before building. Update the Mac release paragraph in `docs/reference.md` with the new version and relevant changes.
 
 ## 4. Validate source and build the DMG
 
@@ -69,6 +69,13 @@ git diff --check
 `build:whisper` builds the bundled speech engine (whisper-server); the engine is bundled in the app, while the speech model is downloaded by the app on first use.
 
 Check every exit code and resolve failures before labeling the release ready. Report test counts from this run, not a previous release. Use an isolated test server if a running development server could cause browser tests to exercise a different checkout.
+
+Notes from building on this Mac:
+
+- **Browser tests and other worktrees.** `playwright.config.ts` serves on port 4173 with `reuseExistingServer: true`, so a dev server from another worktree on that port makes the suite test that worktree's code. Check the port's owner first (`lsof -nP -iTCP:4173 -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). Never stop another worktree's server; instead run with a scratch config kept outside Git (for example under the ignored `.superpowers/`) that uses an absolute `testDir`, another port with `--strictPort`, `cwd` set to the release worktree and `reuseExistingServer: false`.
+- **Flaky tests.** The real-tmux case in `tests/runtime/tmux.test.ts`, the channel-privacy timing test and `tests/ui/sessions.spec.ts:44` can fail under load. `npx vitest run --maxWorkers=4` is reliable; rerun a failing browser spec on its own once before investigating, and report the rerun.
+- **Native builds.** This Mac has Command Line Tools only. `build:whisper` already sets its own flags; the node-pty rebuild inside `desktop:dmg` needs `CXXFLAGS="-nostdinc++ -isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"`.
+- **Bundled tmux.** `build:tmux` downloads and compiles tmux 3.5a. Copying `vendor/tmux` from an earlier release worktree is acceptable when `vendor/tmux/bin/tmux -V` reports 3.5a, `file` reports arm64 and `otool -L` lists only `/usr/lib` libraries; say so in the release notes.
 
 The expected output is `release/Gloss-<version>-arm64.dmg`. Verify its integrity and create a checksum beside it:
 
@@ -103,7 +110,8 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 1. Commit the release changes on the release branch.
 2. Create a new annotated tag `v<version>` at that commit.
 3. Record the commit, included `main` revision, requirements, release changes, verification results, and known limitations in `release/RELEASE-NOTES-<version>.txt`.
-4. Provide clickable local links to the DMG and, when useful, its checksum and release notes.
+4. Provide clickable local links to the DMG and, when useful, its checksum and release notes. If the user asks for the release to be delivered, move the DMG, its `.sha256` and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
+5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires Apple Silicon and macOS 13+, and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
@@ -114,8 +122,8 @@ Building a DMG can happen while the user works. Replacing or restarting the inst
 For installation:
 
 1. Let active work finish, then quit the app normally. Identify and stop any separately launched Gloss backend using the same data. Closing a Chrome tab does not stop its server. Do not kill unrelated Node, Codex, Claude, or Electron processes.
-2. With all writers stopped, back up the full `~/.language-assistant` directory and the installed `.app` to a private, timestamped location. Preserve desktop settings separately if changing them. Backups include private conversations and attachments and must not be packaged or shared.
-3. Copy the verified app from this release to `/Applications/Gloss.app` (or the established per-user installation path). Do not rebuild a different artifact during replacement. Keep the previous app until the new version is verified.
+2. With all writers stopped, back up the full `~/.language-assistant` directory and the installed `.app` to a private, timestamped location. Processes running `cli.js --claude-channel` from the installed app belong to open Claude sessions (possibly the one doing the release): pause them with `kill -STOP` during the copy and resume them with `kill -CONT` afterwards; never kill them. In zsh, pass several pids as an array (`${(f)"$(pgrep -f …)"}`), not an unquoted string. Preserve desktop settings separately if changing them. Backups include private conversations and attachments and must not be packaged or shared.
+3. Copy the verified app from this release to `/Applications/Gloss.app` (or the established per-user installation path). Copy from the mounted DMG with `rsync -a <volume>/Gloss.app/ /Applications/Gloss.app/`; `ditto` has failed partway under the agent sandbox and left a bundle that fails `codesign --verify`. Check `codesign --verify --deep --strict` on the result. Do not rebuild a different artifact during replacement. Keep the previous app until the new version is verified.
 4. Launch the installed copy. Confirm the version, backend startup, saved conversations, and composer. Check from an Applications/Dock launch too, since shell PATH differs from terminal launches.
 5. Keep the backup and report the installed version and location.
 

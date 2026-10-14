@@ -1,6 +1,7 @@
-import { useRef, useState, useContext, type ReactNode } from 'react';
+import { useRef, useState, useContext, isValidElement, type ReactNode } from 'react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import { FileLinkContext, isLocalFileLink } from './file-links.js';
+import { RunCommandContext, runnableCommand } from './run-command.js';
 import remarkGfm from 'remark-gfm';
 import type { Root, RootContent } from 'mdast';
 import { isHebrew } from '../core/language-style.js';
@@ -26,9 +27,16 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
-  return <div className="code-block" dir="ltr"><button type="button" onClick={() => {
+  const runner = useContext(RunCommandContext);
+  const [run, setRun] = useState<'idle' | 'running' | string>('idle');
+  const code = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children.props : undefined;
+  const language = /(?:^|\s)language-(\S+)/.exec(code?.className ?? '')?.[1];
+  const command = runner ? runnableCommand(language, typeof code?.children === 'string' ? code.children : Array.isArray(code?.children) ? code.children.filter(c => typeof c === 'string').join('') : '') : undefined;
+  return <div className="code-block" dir="ltr"><div className="code-actions"><button type="button" onClick={() => {
     void navigator.clipboard.writeText(ref.current?.textContent ?? '').then(() => { setCopied(true); setFailed(false); }, () => setFailed(true));
-  }}>{failed ? 'Copy unavailable' : copied ? 'Copied' : 'Copy code'}</button><pre ref={ref} tabIndex={0}>{children}</pre></div>;
+  }}>{failed ? 'Copy unavailable' : copied ? 'Copied' : 'Copy code'}</button>
+  {command !== undefined && <button type="button" className="run-command" disabled={run === 'running'} aria-label={`Run: ${command.split('\n')[0]}`} onClick={() => { setRun('running'); runner!.run(command).then(() => setRun('idle'), e => setRun(e instanceof Error ? e.message : 'Could not run')); }}>{run === 'running' ? 'Running…' : run === 'idle' ? '▶ Run' : run}</button>}
+  </div><pre ref={ref} tabIndex={0}>{children}</pre></div>;
 }
 export function RichText({ text, language = 'auto' }: { text: string; language?: string }) {
   const files = useContext(FileLinkContext);

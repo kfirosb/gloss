@@ -105,7 +105,10 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .rich-text mark { background:#ffed9b; color:#382d00; padding:0 3px; border-radius:3px; }
 .rich-text :not(pre) > code { background:#e9edf5; padding:2px 4px; border-radius:4px; unicode-bidi:isolate; direction:ltr; }
 .code-block { min-width:0; max-width:100%; border:1px solid #cfd6e5; border-radius:8px; background:#f4f5f8; overflow:hidden; margin:10px 0; }
-.code-block > button { display:block; margin:5px 6px 0 auto; font-size:.75rem; }
+.code-block .code-actions { display:flex; justify-content:flex-end; gap:6px; margin:5px 6px 0; }
+.code-block .code-actions button { font-size:.75rem; }
+.code-block .run-command { background:#172033; color:#9ef0b8; border-color:#172033; font-family:ui-monospace, Menlo, monospace; }
+.code-block .run-command:disabled { opacity:.7; }
 .code-block pre { direction:ltr; text-align:left; white-space:pre; overflow-wrap:normal; overflow:auto; max-height:420px; margin:0; padding:12px; tab-size:2; }
 .code-block code { font:13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .table-scroll { overflow:auto; max-width:100%; } .rich-text table { border-collapse:collapse; } .rich-text th, .rich-text td { border:1px solid #cfd6e5; padding:6px 10px; }
@@ -174,6 +177,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 /* The discussion column now contains a single pane; delivery lives in the review. */
 .conversation-sections > .pane-assistant { flex:1 1 auto; }
 .review-body { direction:rtl; }
+.review-body[dir="ltr"] { direction:ltr; }
 .review-body textarea { direction:rtl; font-family:inherit; font-size:1.1rem; }
 .selection-count { margin-inline-end:auto; text-decoration:underline; }
 .composer-actions { display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0; margin-top:0; }
@@ -457,10 +461,24 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .session-tab[aria-disabled="true"]{opacity:.6;cursor:default}
 .session-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .activity-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
-.activity-dot.idle{background:#4f9a6b}.activity-dot.working{background:#e0a23a;animation:activity-pulse 1.2s infinite}.activity-dot.approval{background:#d0453a}
+.activity-dot.idle{background:#4f9a6b}.activity-dot.working{background:#e0a23a;animation:activity-pulse 1.2s infinite}.activity-dot.needs-you{background:#e5372b}
 .activity-dot.connecting,.activity-dot.unknown{background:#9aa4b8}.activity-dot.disconnected{background:transparent;border:1.5px solid #9aa4b8}
 @keyframes activity-pulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.activity-dot.working{animation:none}}
+/* Attention cues: red = needs you, amber = working, blue = arriving now, green = just completed. */
+.attn-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#e5372b;color:#fff;font-size:10.5px;font-weight:700;line-height:1;box-shadow:0 0 0 2px #fff;flex:none}
+.attn-badge.small{min-width:15px;height:15px;font-size:9px}
+.attn-dot{width:8px;height:8px;border-radius:50%;background:#e5372b;flex:none;display:inline-block}
+.attn-spinner{width:12px;height:12px;border-radius:50%;border:2px solid #d9c38f;border-top-color:#e0a23a;animation:attn-spin .9s linear infinite;flex:none;display:inline-block}
+.attn-ring{animation:attn-ring 1.6s ease-in-out infinite}
+.attn-flash{animation:attn-flash 1.4s ease-out 1}
+@keyframes attn-spin{to{transform:rotate(360deg)}}
+@keyframes attn-ring{0%,100%{box-shadow:0 0 0 2px #3b82f633}50%{box-shadow:0 0 0 3px #3b82f6aa,0 0 22px #3b82f680}}
+@keyframes attn-flash{0%{background:#dcf5e6;box-shadow:0 0 0 3px #1bb76880}100%{box-shadow:none}}
+.project-folder .attn-badge,.project-toggle .attn-badge{margin-left:4px}
+.session-rail button .attn-badge{position:absolute;top:-4px;right:-6px}
+.session-rail button .attn-spinner{position:absolute;left:-4px;bottom:-4px}
+@media (prefers-reduced-motion:reduce){.attn-spinner,.attn-ring,.attn-flash{animation:none}.attn-ring{box-shadow:0 0 0 3px #3b82f6aa}}
 .session-tabs-empty{margin:0 0 8px;color:#647089;font-size:.85rem}
 .session-saved{position:relative;margin-bottom:5px;flex:none}.session-saved>button{font-size:.78rem;padding:5px 9px}
 .session-saved-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid #d9deea;border-radius:10px;box-shadow:0 14px 40px #17203324;padding:6px;min-width:220px;display:flex;flex-direction:column}
@@ -496,6 +514,7 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .session-context{position:absolute;z-index:40}.folder-context{position:fixed;z-index:60}.session-context-menu{position:static;right:auto;top:auto}
 .new-session label{display:block;margin:8px 0 4px;font-weight:600}
 .new-session fieldset{border:1px solid #e0e4ed;border-radius:10px;margin:12px 0;padding:8px 12px}
+.new-session .first-message{width:100%;min-height:72px;max-height:200px;resize:vertical;direction:ltr;font:13px/1.5 ui-monospace, Menlo, monospace;border:1px solid #bbc5d8;border-radius:8px;padding:8px}
 .new-session fieldset label{display:inline-flex;gap:6px;margin-right:16px;font-weight:400}
 .new-session-folder{display:flex;gap:8px}.new-session-folder select{flex:1;min-width:0}
 .new-session .language-field label{display:block;margin:0;font-weight:400}
@@ -582,6 +601,22 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .sidebar-notice{display:flex;align-items:flex-start;gap:8px;margin:0 12px 10px;padding:7px 10px;border-radius:7px;background:#f0f5ec;color:#4f6a50;font-size:11px;line-height:1.5;flex-shrink:0}
 .sidebar-notice span{flex:1;min-width:0;overflow-wrap:anywhere}
 .sidebar-notice button{border:0;background:transparent;padding:0 2px;color:#6b7e6e;cursor:pointer;font-size:13px;line-height:1}
+.pane-toolbar .live-state{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;color:#2d5fb8;background:#e6efff;border-radius:999px;padding:3px 9px;flex:none}
+.reading-pane.attn-ring{transition:box-shadow .3s}
+.status-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:7px 10px;border-radius:8px;font-size:.8rem;margin-bottom:8px;transition:opacity .6s}
+.status-strip[data-state="waiting"]{background:#e6efff;color:#2d5fb8}
+.status-strip[data-state="queued"],.status-strip[data-state="sending"],.status-strip[data-state="unconfirmed"]{background:#f0f3fa;color:#58657d}
+.status-strip[data-state="failed"]{background:#fde8e6;color:#a8291f;font-weight:600}
+.status-strip[data-state="delivered"],.status-strip[data-state="received"]{background:#dcf5e6;color:#1f6b45}
+.status-strip[data-fading="true"]{opacity:.45}
+.status-strip small{flex-basis:100%;margin:0}
+form.composer.attn-ring{border-color:#8fb0ea}
+.session-tab-agent.terminal{font:11px/1 ui-monospace, Menlo, monospace;background:#172033;color:#9ef0b8;border-radius:4px;padding:2px 4px}
+.terminal-workspace{display:flex;flex-direction:column;flex:1;min-height:0;background:#0f1420}
+.terminal-workspace .session-header{background:#fff}
+.terminal-workspace-host{flex:1;min-height:0;display:flex;flex-direction:column;padding:6px 8px}
+.terminal-workspace-host .terminal-host{flex:1;min-height:0}
+.pill.shell{border-radius:999px;padding:2px 9px;font-size:.72rem;background:#e6e9f0;color:#44506a}
 .composer.composer-recording textarea { outline:2px solid #d33; outline-offset:-2px; }
 /* The mic sits in the textarea's end corner so the action row keeps its width in narrow panes. */
 .composer-input { position:relative; flex:1; display:flex; flex-direction:column; min-height:48px; }

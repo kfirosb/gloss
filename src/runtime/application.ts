@@ -1,4 +1,5 @@
 import { createSessionCatalog, type SessionCatalog } from './session-catalog.js';
+import type { SeenStore } from '../core/session-catalog.js';
 import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
 import type { ImageAttachment } from '../core/contracts.js';
@@ -34,7 +35,7 @@ import { createNestedWorktreeLookup, createWorktreeService, insideFolderReal, ty
 
 export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
-  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore>; agents: AgentAdapter[];
+  capability?: string; store: ConversationStore & SessionStore & FileReferenceStore & Partial<LanguageSettingsStore> & Partial<LaunchStore> & Partial<ConnectedFolderStore> & Partial<SeenStore>; agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>; host?: HostAdapter;
   /** Shared with the language backends so their calls feed the same tracker; created here when absent. */
   usage?: UsageService;
@@ -49,7 +50,7 @@ export interface ApplicationOptions {
 export interface WorktreeListing { hasCommits: boolean; worktrees: WorktreeInfo[] }
 export interface WorktreeRemoval { removed: true; conversationsRemoved: number; skipped: number }
 /** What deleting a worktree would affect: its changes, plus sessions that would be ended (`launchedSessions`) or left running without a folder (`otherOpenSessions`). */
-export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; otherOpenSessions: number }
+export interface WorktreeDeletePreview extends WorktreeInspection { launchedSessions: number; launchedTerminals: number; otherOpenSessions: number }
 export interface CreatedWorktree { path: string; branch: string; location: string; ignore?: { added: boolean; line: string } }
 export interface FolderListing extends ConnectedFolder { projectName: string; branch?: string; missing: boolean }
 export interface AboutInfo { name: string; version: string; platform: string; arch: string }
@@ -147,7 +148,7 @@ export function createApplication(options: ApplicationOptions): Application {
       } catch (error) { if (workflow) await workflow.close(); else await session.close(); throw error; }
     },
   });
-  const catalog = createSessionCatalog({ sessions, agents: options.agents, usage: () => usage.tracker.snapshot(), ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}) });
+  const catalog = createSessionCatalog({ sessions, agents: options.agents, usage: () => usage.tracker.snapshot(), ...(options.launcher ? { launcher: options.launcher } : {}), ...(options.attention ? { attention: options.attention } : {}), ...(options.store.markSeen && options.store.seenSequence ? { seen: options.store as SeenStore } : {}) });
   const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
   const channelSetup = options.channelSetup ?? createClaudeChannelSetup();
   const savedTarget = (id: string) => { sessions.snapshot(id); return sessions.list().find(record => record.id === id)!.target; };
@@ -257,10 +258,12 @@ export function createApplication(options: ApplicationOptions): Application {
       const info = await worktrees.inspect(project.main, folder);
       // Launches inside the folder are ended on delete; other open sessions there are not ours to end.
       const live = options.launcher?.list().filter(l => l.state !== 'ended') ?? [];
-      const launched = (await Promise.all(live.map(l => insideFolderReal(l.folder, folder)))).flatMap((inside, i) => inside ? [live[i]!.id] : []);
-      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launched.includes(e.launchId)));
+      const inside = await Promise.all(live.map(l => insideFolderReal(l.folder, folder)));
+      const launched = live.filter((_, i) => inside[i]);
+      const launchedIds = launched.map(l => l.id);
+      const open = catalog.snapshot().entries.filter(e => e.open && !(e.launchId && launchedIds.includes(e.launchId)));
       const others = (await Promise.all(open.map(e => insideFolderReal(recordFolder(e), folder)))).filter(Boolean).length;
-      return { ...info, launchedSessions: launched.length, otherOpenSessions: others };
+      return { ...info, launchedSessions: launched.filter(l => l.agent !== 'shell').length, launchedTerminals: launched.filter(l => l.agent === 'shell').length, otherOpenSessions: others };
     },
     async createWorktree(projectKey, input) {
       const project = await resolveProject(projectKey); requireGit(project);

@@ -27,7 +27,7 @@ it('tab order is first-seen and stable when activity changes',()=>{
  expect(tree[0]!.folders[0]!.open.map(e=>e.key)).toEqual(['B','A','C']);
 });
 it('chooses the last selected open session, else the first open, else none',()=>{
- const folder={key:'/f',name:'f',path:'/f',main:true,git:true,missing:false,open:[at('A','/r/.git','/f'),at('B','/r/.git','/f')],saved:[at('S','/r/.git','/f',false)]};
+ const folder={key:'/f',name:'f',path:'/f',main:true,git:true,missing:false,terminals:[],open:[at('A','/r/.git','/f'),at('B','/r/.git','/f')],saved:[at('S','/r/.git','/f',false)]};
  expect(chooseSessionForFolder(folder,'B')).toBe('B');
  expect(chooseSessionForFolder(folder,'S')).toBe('S');
  expect(chooseSessionForFolder(folder,'gone')).toBe('A');
@@ -118,4 +118,21 @@ it('lists worktrees of a discovered Git project that was never connected, and ma
  const sub={path:'/r/sub',projectKey:'/r/.git',kind:'worktree' as const,createdByApp:false,connectedAt:1,projectName:'r',missing:false};
  const tree=buildProjectTree([],{},projectSources([sub],{'/r/.git':listing}));
  expect(tree[0]!.folders.map(f=>[f.key,f.worktree===true])).toEqual([['/r',true],['/r/.worktrees/other',true],['/r/sub',false]]);
+});
+
+import {folderAttention,projectAttention,attentionLabel} from '../../src/ui/session-navigation.js';
+it('folder and project attention count sessions, not responses, and label them',()=>{
+ const tree=buildProjectTree([
+  {...at('A','/r/.git','/r'),attention:'response',latestResponseSequence:3},
+  {...at('B','/r/.git','/r'),activity:'approval-required',attention:'approval'},
+  {...at('C','/r/.git','/r'),activity:'working'},
+  {...at('D','/r/.git','/wt/x'),attention:'response'},
+  {...at('E','/r/.git','/wt/x',false),attention:'response'}]);
+ const project=tree[0]!;const main=project.folders.find(f=>f.key==='/r')!;const wt=project.folders.find(f=>f.key==='/wt/x')!;
+ expect(folderAttention(main)).toEqual({waiting:2,responses:1,approvals:1,working:true});
+ expect(folderAttention(wt)).toEqual({waiting:1,responses:1,approvals:0,working:false});
+ expect(projectAttention(project)).toEqual({waiting:3,responses:2,approvals:1,working:true});
+ expect(attentionLabel(folderAttention(main))).toBe('2 sessions waiting: 1 response, 1 approval');
+ expect(attentionLabel(folderAttention(wt))).toBe('1 session waiting: 1 response');
+ expect(attentionLabel({waiting:0,responses:0,approvals:0,working:true})).toBe('');
 });

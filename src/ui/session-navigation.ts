@@ -1,11 +1,11 @@
 import type {CatalogEntry} from '../core/session-catalog.js';
-import type {SessionRecord} from '../core/session-contracts.js';
+import type {SessionRecord,TerminalEntry} from '../core/session-contracts.js';
 import type {SidebarSettings} from '../runtime/connected-folders.js';
 export const agentName=(entry:CatalogEntry)=>entry.target.agent==='claude'?'Claude Code':'Codex';
 export const shortSessionId=(id:string)=>id.length>8?id.slice(0,8)+'…':id;
 export const sessionTitle=(entry:CatalogEntry)=>entry.sessionTitle || `${agentName(entry)} · ${shortSessionId(entry.target.sessionRef)}`;
 export const sessionIdentity=(entry:CatalogEntry)=>`${agentName(entry)} session: ${entry.target.sessionRef}; Project: ${entry.target.projectId}; Worktree: ${entry.worktreePath??entry.target.projectId}${entry.branch?`; Branch: ${entry.branch}`:''}${entry.reason?`; ${entry.reason}`:''}`;
-export interface FolderNode {key:string;name:string;path:string;open:CatalogEntry[];saved:CatalogEntry[];branch?:string;main:boolean;git:boolean;missing:boolean;/** Listed by `git worktree list` for its project (only these can be deleted as worktrees). */worktree?:boolean}
+export interface FolderNode {key:string;name:string;path:string;open:CatalogEntry[];saved:CatalogEntry[];terminals:TerminalEntry[];branch?:string;main:boolean;git:boolean;missing:boolean;/** Listed by `git worktree list` for its project (only these can be deleted as worktrees). */worktree?:boolean}
 export interface ProjectSource {key:string;name:string;path:string;git:boolean;main:string;/** From the worktree listing; undefined until it arrives or for plain folders. */hasCommits?:boolean;folders:{path:string;name:string;branch?:string;main:boolean;missing?:boolean;worktree?:boolean}[]}
 export interface ProjectNode {key:string;name:string;path:string;folders:FolderNode[]}
 export const folderKeyFor=(entry:CatalogEntry)=>entry.worktreePath??entry.target.projectId;
@@ -29,20 +29,29 @@ export function orderFolderTabs(folderKey:string,keys:string[],tabOrder:Record<s
  const known=tabOrder[folderKey]??[];const order=[...known,...keys.filter(key=>!known.includes(key))];
  return {ordered:order.filter(key=>keys.includes(key)),tabOrder:order.length===known.length?tabOrder:{...tabOrder,[folderKey]:order}};
 }
-export function buildProjectTree(entries:CatalogEntry[],tabOrder:Record<string,string[]>={},sources:ProjectSource[]=[]):ProjectNode[]{
+export function buildProjectTree(entries:CatalogEntry[],tabOrder:Record<string,string[]>={},sources:ProjectSource[]=[],terminals:TerminalEntry[]=[]):ProjectNode[]{
  const projects=new Map<string,ProjectNode>();
  for(const source of sources){
   const project:ProjectNode={key:source.key,name:source.name,path:source.path,folders:[]};projects.set(source.key,project);
-  for(const f of source.folders)project.folders.push({key:f.path,name:f.name,path:f.path,open:[],saved:[],...(f.branch?{branch:f.branch}:{}),main:f.main,git:source.git,missing:f.missing===true,...(f.worktree?{worktree:true}:{})});
+  for(const f of source.folders)project.folders.push({key:f.path,name:f.name,path:f.path,open:[],saved:[],terminals:[],...(f.branch?{branch:f.branch}:{}),main:f.main,git:source.git,missing:f.missing===true,...(f.worktree?{worktree:true}:{})});
  }
  for(const entry of entries){
   let project=projects.get(entry.projectKey);
   if(!project){const path=entry.projectKey.replace(/\/\.git$/,'');project={key:entry.projectKey,name:entry.projectName,path,folders:[]};projects.set(entry.projectKey,project);}
   const key=folderKeyFor(entry);let folder=project.folders.find(f=>f.key===key);
-  if(!folder){folder={key,name:lastSegment(key),path:key,open:[],saved:[],...(entry.branch?{branch:entry.branch}:{}),main:key===project.path,git:entry.projectKey.endsWith('/.git'),missing:false};project.folders.push(folder);}
+  if(!folder){folder={key,name:lastSegment(key),path:key,open:[],saved:[],terminals:[],...(entry.branch?{branch:entry.branch}:{}),main:key===project.path,git:entry.projectKey.endsWith('/.git'),missing:false};project.folders.push(folder);}
   else if(!folder.branch&&entry.branch)folder.branch=entry.branch;
   folder[entry.open?'open':'saved'].push(entry);
  }
+ const titleNumber=(t:string)=>Number(/^Terminal(?: (\d+))?$/.exec(t)?.[1]??1);
+ for(const terminal of terminals){
+  let project=projects.get(terminal.projectKey);
+  if(!project){const path=terminal.projectKey.replace(/\/\.git$/,'');project={key:terminal.projectKey,name:terminal.projectName,path,folders:[]};projects.set(terminal.projectKey,project);}
+  let folder=project.folders.find(f=>f.key===terminal.folder);
+  if(!folder){folder={key:terminal.folder,name:lastSegment(terminal.folder),path:terminal.folder,open:[],saved:[],terminals:[],main:terminal.folder===project.path,git:terminal.projectKey.endsWith('/.git'),missing:false};project.folders.push(folder);}
+  folder.terminals.push(terminal);
+ }
+ for(const project of projects.values())for(const folder of project.folders)folder.terminals.sort((a,b)=>titleNumber(a.title)-titleNumber(b.title));
  for(const project of projects.values()){
   for(const folder of project.folders){const all=[...folder.open,...folder.saved];if(all.length&&all.every(e=>e.folderMissing))folder.missing=true;}
   labelFolders(project);
@@ -87,7 +96,7 @@ export function chooseSessionForFolder(folder:FolderNode,lastSelected?:string){
 }
 export function activityLabel(entry:CatalogEntry){
  if(entry.activity==='connecting'||entry.activity==='unknown')return entry.activity==='connecting'?'Connecting':'Unknown';
- const label=entry.activity==='approval-required'?'Approval required':entry.activity[0]!.toUpperCase()+entry.activity.slice(1);
+ const label=entry.activity==='approval-required'?'Approval required':entry.attention==='response'?'New response':entry.activity[0]!.toUpperCase()+entry.activity.slice(1);
  return entry.availability==='unavailable'&&entry.activity!=='disconnected'?`${label} · Unavailable`:label;
 }
 export function mergeSavedRecords(entries:CatalogEntry[],records:SessionRecord[]):CatalogEntry[]{
@@ -96,4 +105,27 @@ export function mergeSavedRecords(entries:CatalogEntry[],records:SessionRecord[]
   const folder=record.worktreePath??record.target.projectId;const sibling=merged.find(e=>folderKeyFor(e)===folder)??(record.projectKey?merged.find(e=>e.projectKey===record.projectKey):undefined);
   merged.push({key:'saved:'+record.id,sessionId:record.id,target:record.target,projectKey:sibling?.projectKey??record.projectKey??record.canonicalRoot,projectName:sibling?.projectName??record.projectName,...(record.sessionTitle?{sessionTitle:record.sessionTitle}:{}),...(record.branch?{branch:record.branch}:{}),...(record.worktreePath?{worktreePath:record.worktreePath}:{}),open:false,activity:record.enabled?'unknown':'disconnected',availability:record.enabled?'available':'unavailable',...(record.folderMissing||(sibling&&folderKeyFor(sibling)===folder&&sibling.folderMissing)?{folderMissing:true}:{})});}
  return merged;
+}
+export interface AttentionSummary {waiting:number;responses:number;approvals:number;working:boolean}
+const plural=(n:number,word:string)=>`${n} ${word}${n===1?'':'s'}`;
+/** Open sessions in the folder that need the user, counted per session, plus whether any is working. Saved sessions never count. */
+export function folderAttention(folder:FolderNode):AttentionSummary{
+ const summary:AttentionSummary={waiting:0,responses:0,approvals:0,working:false};
+ for(const entry of folder.open){
+  if(entry.attention==='response'){summary.waiting++;summary.responses++;}
+  else if(entry.attention==='approval'){summary.waiting++;summary.approvals++;}
+  if(entry.activity==='working')summary.working=true;
+ }
+ return summary;
+}
+export function projectAttention(project:ProjectNode):AttentionSummary{
+ const total:AttentionSummary={waiting:0,responses:0,approvals:0,working:false};
+ for(const folder of project.folders){const s=folderAttention(folder);total.waiting+=s.waiting;total.responses+=s.responses;total.approvals+=s.approvals;total.working||=s.working;}
+ return total;
+}
+/** Hover and screen-reader text for a badge; empty when nothing is waiting. */
+export function attentionLabel(summary:AttentionSummary):string{
+ if(!summary.waiting)return '';
+ const parts=[summary.responses?plural(summary.responses,'response'):'',summary.approvals?plural(summary.approvals,'approval'):''].filter(Boolean);
+ return `${plural(summary.waiting,'session')} waiting: ${parts.join(', ')}`;
 }

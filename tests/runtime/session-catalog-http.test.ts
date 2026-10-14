@@ -7,12 +7,13 @@ import { SqliteStore } from '../../src/storage/sqlite-store.js';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 async function setup() {
- const app = createApplication({store:new SqliteStore(':memory:'), agents:[new FakeAgent('claude')], languageBackends:{claude:{open:async()=>new FakeLanguageSession(),models:async()=>[]}},capability:'cap'});
+ const agent=new FakeAgent('claude');
+ const app = createApplication({store:new SqliteStore(':memory:'), agents:[agent], languageBackends:{claude:{open:async()=>new FakeLanguageSession(),models:async()=>[]}},capability:'cap'});
  app.catalog!.start();
  const server = await startServer(app);
  cleanup.push(async()=>{await server.close();await app.close();});
  const request = (path:string, token='cap') => fetch(new URL(path,server.url),{headers:{Authorization:'Bearer '+token}});
- return {app,request};
+ return {app,agent,request,url:server.url};
 }
 it('protects both catalog routes and returns an authoritative snapshot',async()=>{
  const {app,request}=await setup();
@@ -38,4 +39,20 @@ it('streams one initial snapshot, membership and activity changes, and cleans up
  const activity=decoder.decode((await reader.read()).value);
  expect(activity).toContain('"activity":"idle"');
  await reader.cancel();await vi.waitFor(()=>expect(removed).toHaveBeenCalledTimes(1));
+});
+
+it('marks a session seen through the catalog route',async()=>{
+ const {app,agent,url}=await setup();
+ const post=(body:unknown,token='cap')=>fetch(new URL('/api/session-catalog/seen',url),{method:'POST',headers:{Authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(body)});
+ expect((await post({sessionId:'A',sequence:1},'wrong')).status).toBe(401);
+ expect((await post({sessionId:'A',sequence:1})).status).toBe(404);
+ await app.sessions!.register({agent:'claude',sessionRef:'A',projectId:process.cwd()},'A');
+ await app.sessions!.ensure('A');
+ await vi.waitFor(()=>expect(app.catalog!.entryFor('A')?.activity).toBe('idle'));
+ agent.emit({type:'message',message:{sourceId:'m3',revision:3,role:'assistant',text:'Done',complete:true}});
+ await vi.waitFor(()=>expect(app.catalog!.entryFor('A')?.latestResponseSequence).toBe(3));
+ expect((await post({sessionId:'A',sequence:'x'})).status).toBe(400);
+ const response=await post({sessionId:'A',sequence:3});
+ expect(response.status).toBe(200);expect(await response.json()).toEqual({result:'updated'});
+ expect((await (await post({sessionId:'A',sequence:2})).json())).toEqual({result:'unchanged'});
 });

@@ -19,6 +19,8 @@ export async function sessionRequest<T>(url: string, init: RequestInit = {}): Pr
  if (!response.ok) throw new Error(body.error ?? 'Request failed');
  return body as T;
 }
+/** Tells the server the user has looked at responses up to `sequence` for this session. */
+export const markSessionSeen = (sessionId: string, sequence: number) => sessionRequest<{ result: 'updated' | 'unchanged' }>('/api/session-catalog/seen', { method: 'POST', body: JSON.stringify({ sessionId, sequence }) });
 export class SessionClient {
  readonly base: string;
  constructor(readonly sessionId: string) { this.base = '/api/sessions/' + encodeURIComponent(sessionId); }

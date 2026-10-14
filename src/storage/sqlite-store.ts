@@ -167,25 +167,26 @@ const MIGRATIONS = [{
 ` }, { version: 19, sql: 'ALTER TABLE deliveries ADD COLUMN transport TEXT; ALTER TABLE deliveries ADD COLUMN channel_generation TEXT;' }, { version: 20, sql: `
   CREATE TABLE app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
   ALTER TABLE panel_sessions ADD COLUMN language_override_json TEXT;
-` }, { version: 21, sql: 'CREATE TABLE session_launches (id TEXT PRIMARY KEY, data_json TEXT NOT NULL);' }, { version: 22, sql: 'CREATE TABLE connected_folders (path TEXT PRIMARY KEY, project_key TEXT NOT NULL, kind TEXT NOT NULL, created_by_app INTEGER NOT NULL, connected_at INTEGER NOT NULL);' }, { version: 23, sql: 'CREATE TABLE IF NOT EXISTS language_spend (scope TEXT NOT NULL, provider TEXT NOT NULL, usd REAL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, PRIMARY KEY (scope, provider));' }, { version: 24, sql: 'ALTER TABLE language_spend ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0;' }] as const;
+` }, { version: 21, sql: 'CREATE TABLE session_launches (id TEXT PRIMARY KEY, data_json TEXT NOT NULL);' }, { version: 22, sql: 'CREATE TABLE connected_folders (path TEXT PRIMARY KEY, project_key TEXT NOT NULL, kind TEXT NOT NULL, created_by_app INTEGER NOT NULL, connected_at INTEGER NOT NULL);' }, { version: 23, sql: 'CREATE TABLE session_seen (session_id TEXT PRIMARY KEY, seen_sequence INTEGER NOT NULL, seen_at INTEGER NOT NULL);' }, { version: 24, sql: 'CREATE TABLE language_spend (scope TEXT NOT NULL, provider TEXT NOT NULL, usd REAL, input_tokens INTEGER NOT NULL, cached_input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL, PRIMARY KEY (scope, provider));' }] as const;
 
 import {summaryCacheKey, type SummaryKey} from '../core/summary-contracts.js';
 import { orderAgentMessages } from '../core/contracts.js';
+import type { SeenStore } from '../core/session-catalog.js';
 import { INITIAL_LANGUAGE_DEFAULTS, validateLanguageOverride, validateLanguageSettings, type LanguageOverride, type LanguageSettings, type LanguageSettingsStore } from '../core/language-settings.js';
 import type { Spend, SpendStore } from '../core/usage.js';
 import { DEFAULT_SIDEBAR_SETTINGS, validateSidebarSettings, type ConnectedFolder, type ConnectedFolderStore, type FolderKind, type SidebarSettings } from '../runtime/connected-folders.js';
 import type { LaunchRecord, LaunchSettings, LaunchStore } from '../runtime/session-launcher.js';
 function validateLaunchSettings(value: unknown): LaunchSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid launch settings');
-  const { popup, extraArgs } = value as LaunchSettings;
-  if (!['auto', 'current-tab', 'dot-only'].includes(popup) || !extraArgs || typeof extraArgs !== 'object' || Array.isArray(extraArgs)) throw new Error('Invalid launch settings');
+  const { popup, extraArgs, terminalView = 'popup' } = value as LaunchSettings;
+  if (!['auto', 'current-tab', 'dot-only'].includes(popup) || !['popup', 'workspace'].includes(terminalView) || !extraArgs || typeof extraArgs !== 'object' || Array.isArray(extraArgs)) throw new Error('Invalid launch settings');
   for (const agent of ['claude', 'codex'] as const) {
     const args = extraArgs[agent];
     if (!Array.isArray(args) || args.length > 32 || args.some(arg => typeof arg !== 'string' || arg.length > 512)) throw new Error('Invalid launch settings');
   }
-  return { popup, extraArgs: { claude: [...extraArgs.claude], codex: [...extraArgs.codex] } };
+  return { popup, terminalView, extraArgs: { claude: [...extraArgs.claude], codex: [...extraArgs.codex] } };
 }
-export class SqliteStore implements ConversationStore, SessionStore, FileReferenceStore, LanguageSettingsStore, LaunchStore, ConnectedFolderStore, SpendStore {
+export class SqliteStore implements ConversationStore, SessionStore, FileReferenceStore, LanguageSettingsStore, LaunchStore, ConnectedFolderStore, SeenStore, SpendStore {
   addSpend(scope: string, provider: string, spend: Spend): void {
     this.database.prepare(`INSERT INTO language_spend(scope, provider, usd, input_tokens, cached_input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(scope, provider) DO UPDATE SET usd = CASE WHEN excluded.usd IS NULL THEN usd ELSE coalesce(usd, 0) + excluded.usd END, input_tokens = input_tokens + excluded.input_tokens, cached_input_tokens = cached_input_tokens + excluded.cached_input_tokens, output_tokens = output_tokens + excluded.output_tokens`)
@@ -194,6 +195,16 @@ export class SqliteStore implements ConversationStore, SessionStore, FileReferen
   readSpend(scope: string, provider: string): Spend | undefined {
     const row = this.database.prepare('SELECT usd, input_tokens, cached_input_tokens, output_tokens FROM language_spend WHERE scope = ? AND provider = ?').get(scope, provider) as Row | undefined;
     return row ? { ...(row.usd === null ? {} : { usd: Number(row.usd) }), inputTokens: Number(row.input_tokens), ...(Number(row.cached_input_tokens) ? { cachedInputTokens: Number(row.cached_input_tokens) } : {}), outputTokens: Number(row.output_tokens) } : undefined;
+  }
+  seenSequence(sessionId: string): number | undefined {
+    const row = this.database.prepare('SELECT seen_sequence FROM session_seen WHERE session_id = ?').get(sessionId) as Row | undefined;
+    return row ? Number(row.seen_sequence) : undefined;
+  }
+  markSeen(sessionId: string, sequence: number, at = Date.now()): void {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('Invalid seen sequence');
+    this.database.prepare(`INSERT INTO session_seen(session_id, seen_sequence, seen_at) VALUES (?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET seen_sequence = excluded.seen_sequence, seen_at = excluded.seen_at
+      WHERE excluded.seen_sequence > session_seen.seen_sequence`).run(sessionId, sequence, at);
   }
   listConnectedFolders(): ConnectedFolder[] {
     return (this.database.prepare('SELECT * FROM connected_folders ORDER BY connected_at, path').all() as Row[]).map(r => ({ path: String(r.path), projectKey: String(r.project_key), kind: String(r.kind) as FolderKind, createdByApp: Number(r.created_by_app) === 1, connectedAt: Number(r.connected_at) }));
@@ -214,10 +225,11 @@ export class SqliteStore implements ConversationStore, SessionStore, FileReferen
   putLaunch(record: LaunchRecord): void {
     this.database.prepare('INSERT INTO session_launches(id,data_json) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json').run(record.id, json(record));
   }
+  deleteLaunch(id: string): void { this.database.prepare('DELETE FROM session_launches WHERE id = ?').run(id); }
   readLaunchSettings(): LaunchSettings {
     const row = this.database.prepare("SELECT value_json FROM app_settings WHERE key = 'launch.settings'").get() as Row | undefined;
     if (row) { try { return validateLaunchSettings(parse(row.value_json)); } catch { /* Invalid saved settings fall back to defaults. */ } }
-    return { extraArgs: { claude: [], codex: [] }, popup: 'auto' };
+    return { extraArgs: { claude: [], codex: [] }, popup: 'auto', terminalView: 'popup' };
   }
   writeLaunchSettings(settings: LaunchSettings): void {
     const valid = validateLaunchSettings(settings);
@@ -757,6 +769,7 @@ export class SqliteStore implements ConversationStore, SessionStore, FileReferen
       )
     `).run(id);
     this.database.prepare('DELETE FROM translations WHERE source_scope = ?').run(id);
+    this.database.prepare('DELETE FROM session_seen WHERE session_id = ?').run(id);
     this.database.prepare('DELETE FROM conversations WHERE id = ?').run(id);
   }
 

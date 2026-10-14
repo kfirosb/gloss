@@ -207,11 +207,17 @@ async function launchRoute(app: Application, req: IncomingMessage, res: ServerRe
   res.setHeader('cache-control', 'no-store');
   if (path === '/api/launches' && req.method === 'GET') { respond(res, 200, app.launcher.list()); return true; }
   if (path === '/api/launches' && req.method === 'POST') {
-    const body = await readBody(req, 4096);
+    const body = await readBody(req, 16384);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid launch request');
     // Only these fields are forwarded; argv, executables and environment are never client-controlled.
     const languageOverride = body.languageOverride === undefined ? undefined : validateLanguageOverride(body.languageOverride);
-    respond(res, 200, await app.launcher.launch({ agent: body.agent, folder: body.folder, ...(languageOverride ? { languageOverride } : {}) })); return true;
+    respond(res, 200, await app.launcher.launch({ agent: body.agent, folder: body.folder, ...(body.prompt !== undefined ? { prompt: body.prompt } : {}), ...(languageOverride ? { languageOverride } : {}) })); return true;
+  }
+  if (path === '/api/launches/run' && req.method === 'POST') {
+    const body = await readBody(req, 16384);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid run request');
+    if (typeof body.command !== 'string' || body.command.length > 8192) throw new Error('Invalid command');
+    respond(res, 200, await app.launcher.run({ folder: body.folder, command: body.command, ...(typeof body.originSessionId === 'string' ? { originSessionId: body.originSessionId } : {}) })); return true;
   }
   const match = /^\/api\/launches\/([^/]+)\/(terminal-ticket|end|identify)$/.exec(path);
   if (match && req.method === 'POST') {
@@ -219,6 +225,7 @@ async function launchRoute(app: Application, req: IncomingMessage, res: ServerRe
     if (match[2] === 'end') { await app.launcher.end(id); respond(res, 200, {}); return true; }
     // Retrying can take up to the identification timeout; the catalog reports the outcome.
     if (match[2] === 'identify') {
+      if (app.launcher.list().some(r => r.id === id && r.agent === 'shell')) throw new Error('Terminals have nothing to identify');
       if (!app.launcher.list().some(r => r.id === id && r.state !== 'ended')) throw Object.assign(new Error('Unknown launch'), { code: 'unknown-session' });
       void app.launcher.identify(id).catch(() => {}); respond(res, 202, {}); return true;
     }
@@ -287,6 +294,16 @@ export async function startServer(application: Application, options: { port?: nu
         const body = await readBody(req, 1024) as { provider?: unknown } | null;
         if (!body || typeof body !== 'object' || (body.provider !== 'claude' && body.provider !== 'codex')) { respond(res, 400, { error: 'Unknown provider' }); return; }
         res.setHeader('cache-control', 'no-store'); return respond(res, 200, await application.refreshUsage(body.provider));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/session-catalog/seen') {
+        const catalog = application.catalog;
+        if (!catalog) return respond(res, 501, { error: 'Session catalog unavailable' });
+        const body = await readBody(req, 4096) as { sessionId?: unknown; sequence?: unknown };
+        if (!body || typeof body.sessionId !== 'string' || !Number.isSafeInteger(body.sequence) || (body.sequence as number) < 0) return respond(res, 400, { error: 'Invalid seen request', code: 'bad-request' });
+        const result = catalog.markSeen(body.sessionId, body.sequence as number);
+        if (result === 'unknown') return respond(res, 404, { error: 'Unknown session', code: 'unknown-session' });
+        res.setHeader('cache-control', 'no-store');
+        return respond(res, 200, { result });
       }
       if (url.pathname === '/api/about' && req.method === 'GET' && application.about) { res.setHeader('cache-control', 'no-store'); return respond(res, 200, application.about()); }
       if (url.pathname === '/api/folders/search' && req.method === 'GET' && application.searchFolders) {

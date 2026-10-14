@@ -52,6 +52,15 @@ See the [decisions and session handoff](handoffs/2026-10-12-sidebar-worktrees.md
 - [x] Show the actual running version beside Settings, with an About panel.
 - [ ] Plan and verify persistence, session isolation, and safe worktree operations before a future Mac release.
 
+## 5. Terminals from Gloss
+
+Status: designed and approved on 2026-10-14; implemented on branch `terminal`. See the [feature preview](previews/terminal-feature.html).
+
+- [x] Plain shell terminals as tabs, started from "+" or by Run, surviving restarts.
+- [x] First message field on the New session dialog, replacing the setup prompt.
+- [x] Run button on shell code blocks, reusing the folder's idle terminal.
+- [x] Popup and full-workspace views with Expand/Shrink and the "Terminal tabs open as" setting.
+
 ## Shared constraints
 
 - Keep terminal output and instructions delivered to coding agents in English; Hebrew discussion and translations stay in the panel.
