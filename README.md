@@ -14,6 +14,7 @@ Gloss is a local macOS app that sits next to the coding-agent sessions already r
 - **Translates the conversation live.** Completed agent replies are translated into your language as they arrive. No separate chat, no copy-paste.
 - **You write Hebrew, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
 - **Files and images.** A project file sidebar with search, read-only previews, *TL;DR* and full translation of files, and image or screenshot paste straight into the conversation.
+- **Skills and MCP at your fingertips.** Type `/` in the composer to search the skills your agent can use, or `$` to search its MCP servers. Global, project and plugin entries are listed together, and Gloss sends your pick in the form the agent understands.
 - **Uses the accounts you already have.** Translation runs on an inexpensive model in the same ecosystem as your agent (Claude or OpenAI). No extra API key.
 - **Everything stays local.** Conversations, drafts and translations live under `~/.language-assistant` on your Mac. Native approval prompts stay in the coding tool and are never answered by Gloss.
 
