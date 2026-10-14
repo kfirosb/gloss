@@ -24,11 +24,41 @@ export const FILLER_OUTPUTS: Record<DictationLanguage, readonly string[]> = {
   he: ['תודה רבה', 'תודה', 'כתוביות', 'תרגום', 'כתוביות על ידי'],
   en: ['thank you', 'thanks for watching', 'subtitles by', 'you', 'thank you for watching', 'bye'],
 };
+/** Prompt for the first request of a recording, which has no transcribed context yet; plain sentences that set the language and register. */
+export const SEED_PROMPT: Record<DictationLanguage, string> = {
+  he: 'שיחה בעברית על עבודה עם קוד: הסבר קצר, שאלה, ובקשה.',
+  en: 'A conversation in English about working with code: a short explanation, a question, and a request.',
+};
+/** Longest run of the same word kept; whisper loops on repetitive speech. */
+export const MAX_WORD_RUN = 3;
+const TRAILING_PUNCTUATION = /[.!?,;:…׃]+$/u;
+const wordKey = (token: string) => token.replace(TRAILING_PUNCTUATION, '').toLowerCase();
+/** Collapses any run of the same word (ignoring trailing punctuation and case) longer than MAX_WORD_RUN to its first MAX_WORD_RUN tokens as written. */
+function collapseRuns(text: string): string {
+  const out: string[] = []; let previous = ''; let run = 0;
+  for (const token of text.split(' ')) {
+    const key = wordKey(token);
+    run = key && key === previous ? run + 1 : 1; previous = key;
+    if (run <= MAX_WORD_RUN) out.push(token);
+  }
+  return out.join(' ');
+}
+/** True when a transcription looks like a whisper loop: three identical consecutive words, or one word making up at least 60 % of three or more words. */
+export function isRepetitive(text: string): boolean {
+  const words = text.split(/\s+/).map(wordKey).filter(Boolean);
+  if (words.length < 3) return false;
+  for (let i = 2; i < words.length; i++) if (words[i] === words[i - 1] && words[i] === words[i - 2]) return true;
+  const counts = new Map<string, number>(); let top = 0;
+  for (const w of words) { const n = (counts.get(w) ?? 0) + 1; counts.set(w, n); top = Math.max(top, n); }
+  return top / words.length >= 0.6;
+}
 /** Returns the text to append, or null when the result should be dropped. */
 export function acceptTranscription(text: string, noSpeech: boolean, language: DictationLanguage): string | null {
   const trimmed = text.replace(/\s+/g, ' ').trim();
   if (noSpeech || !trimmed) return null;
-  const bare = trimmed.replace(/[.!?,;:…׃]+$/u, '').trim().toLowerCase();
+  const collapsed = collapseRuns(trimmed);
+  if (!collapsed) return null;
+  const bare = collapsed.replace(TRAILING_PUNCTUATION, '').trim().toLowerCase();
   if (FILLER_OUTPUTS[language].some(f => f.toLowerCase() === bare)) return null;
-  return trimmed;
+  return collapsed;
 }

@@ -5,7 +5,7 @@ import { createDictationBridge } from '../../src/runtime/dictation/bridge.js';
 import type { DictationEngine } from '../../src/runtime/dictation/engine.js';
 import type { ModelStore } from '../../src/runtime/dictation/model.js';
 import type { Segmenter } from '../../src/core/dictation-segmenter.js';
-import { DictationFailure, type DictationServerMessage } from '../../src/core/dictation-contracts.js';
+import { DictationFailure, SEED_PROMPT, type DictationServerMessage } from '../../src/core/dictation-contracts.js';
 
 const closers: (() => void)[] = []; afterEach(() => { for (const c of closers.splice(0)) c(); vi.useRealTimers(); });
 /** A segmenter that emits every frame whose first sample is nonzero as its own segment; stop() flushes a frame starting with 9. */
@@ -71,8 +71,22 @@ describe('createDictationBridge', () => {
     c.ws.send(frame(1)); c.ws.send(frame(0)); c.ws.send(frame(2)); c.ws.send(frame(9)); c.ws.send(JSON.stringify({ type: 'stop' }));
     expect(await c.closed).toBe(1000);
     expect(c.messages.slice(3)).toEqual([{ type: 'segment', sequence: 1, text: 'seg1' }, { type: 'segment', sequence: 2, text: 'seg2' }, { type: 'segment', sequence: 3, text: 'seg9' }, { type: 'state', state: 'finished' }]);
-    expect(calls.map(x => x.first)).toEqual([1, 2, 9]); expect(calls[0]!.language).toBe('he'); expect(calls[0]!.prompt).toBeUndefined(); expect(calls[1]!.prompt).toBe('seg1'); expect(calls[2]!.prompt).toBe('seg1 seg2');
+    expect(calls.map(x => x.first)).toEqual([1, 2, 9]); expect(calls[0]!.language).toBe('he'); expect(calls[0]!.prompt).toBe(SEED_PROMPT.he); expect(calls[1]!.prompt).toBe('seg1'); expect(calls[2]!.prompt).toBe('seg1 seg2');
     expect(engine.touch).toHaveBeenCalled();
+  });
+  it('sends a repetitive segment but keeps it out of the prompt for later requests', async () => {
+    const texts: Record<number, string> = { 1: 'שלום לכולם', 2: 'בדיקה, בדיקה, בדיקה, בדיקה, בדיקה', 3: 'מה שלומך', 4: 'אחרון' };
+    const { engine, calls } = fakeEngine({ transcribe: async (s, o) => { calls.push({ first: s[0]!, ...o }); return { text: texts[s[0]!]!, noSpeech: false }; } });
+    const { connect } = await setup(engine); const c = connect(); await opened(c.ws); await c.until(m => m.length === 3);
+    c.ws.send(frame(1)); c.ws.send(frame(2)); c.ws.send(frame(3)); c.ws.send(frame(4)); c.ws.send(JSON.stringify({ type: 'stop' })); await c.closed;
+    expect(c.messages.filter(m => m.type === 'segment')).toEqual([{ type: 'segment', sequence: 1, text: 'שלום לכולם' }, { type: 'segment', sequence: 2, text: 'בדיקה, בדיקה, בדיקה,' }, { type: 'segment', sequence: 3, text: 'מה שלומך' }, { type: 'segment', sequence: 4, text: 'אחרון' }]);
+    expect(calls.map(x => x.prompt)).toEqual([SEED_PROMPT.he, 'שלום לכולם', undefined, 'שלום לכולם מה שלומך']);
+  });
+  it('seeds with the recording language', async () => {
+    const { engine, calls } = fakeEngine(); const { connect } = await setup(engine);
+    const c = connect('capability=cap&session=s1&language=en'); await opened(c.ws); await c.until(m => m.length === 3);
+    c.ws.send(frame(1)); c.ws.send(JSON.stringify({ type: 'stop' })); await c.closed;
+    expect(calls[0]!.prompt).toBe(SEED_PROMPT.en);
   });
   it('drops filler and no-speech results without consuming a sequence number', async () => {
     const { engine } = fakeEngine({ transcribe: async s => s[0] === 1 ? { text: 'תודה רבה.', noSpeech: false } : s[0] === 2 ? { text: 'x', noSpeech: true } : { text: 'ok', noSpeech: false } });
