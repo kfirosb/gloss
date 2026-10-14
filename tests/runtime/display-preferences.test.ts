@@ -43,9 +43,7 @@ it('defaults the theme to dark, persists valid themes and rejects unknown ones',
  expect(t('light')).toBe('light');expect(t('auto')).toBe('auto');expect(t('dark')).toBe('dark');expect(t('sepia')).toBe('dark');
 });
 
-it('maps the theme onto the root color-scheme',()=>{
- const root={style:{colorScheme:''}} as unknown as HTMLElement;
- applyTheme('dark',root);expect(root.style.colorScheme).toBe('dark');
- applyTheme('light',root);expect(root.style.colorScheme).toBe('light');
- applyTheme('auto',root);expect(root.style.colorScheme).toBe('light dark');
+it('marks the root with the theme its stylesheet keys color-scheme on',()=>{
+ const root={dataset:{}} as unknown as HTMLElement;
+ for(const theme of ['dark','light','auto'] as const){applyTheme(theme,root);expect(root.dataset.theme).toBe(theme);}
 });

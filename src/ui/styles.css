@@ -1,4 +1,7 @@
 :root { font-family: system-ui, sans-serif; color: light-dark(#172033, #ccd5e8); background: light-dark(#f6f7fb, #13182b); }
+:root, :root[data-theme=dark] { color-scheme: dark; }
+:root[data-theme=light] { color-scheme: light; }
+:root[data-theme=auto] { color-scheme: light dark; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 :where(textarea, select, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file])) { background:light-dark(#fff, #1f2433); }

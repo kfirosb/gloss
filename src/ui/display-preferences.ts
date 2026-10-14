@@ -22,9 +22,10 @@ export function readDisplayPreferences(storage?:Storage):DisplayPreferences{
 export function writeDisplayPreferences(value:DisplayPreferences,storage?:Storage):void{
  try{(storage??globalThis.localStorage)?.setItem(key,JSON.stringify(validated(value)));}catch{/* In-memory controls remain usable. */}
 }
-// Stylesheet colors are light-dark() pairs; color-scheme on <html> picks one ('light dark' follows the system).
+// Stylesheet colors are light-dark() pairs picked by a color-scheme declared per data-theme in styles.css. It must stay
+// in CSS: the build's minifier rewrites light-dark() into variables that only CSS color-scheme declarations set.
 export function applyTheme(theme:Theme,root:HTMLElement=document.documentElement):void{
- root.style.colorScheme=theme==='auto'?'light dark':theme;
+ root.dataset.theme=theme;
 }
 let current:DisplayPreferences|undefined;
 const listeners=new Set<(value:DisplayPreferences)=>void>();
