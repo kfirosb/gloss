@@ -105,7 +105,10 @@ pre { background:#f4f5f8; padding:10px; white-space:pre-wrap; overflow-wrap:anyw
 .rich-text mark { background:#ffed9b; color:#382d00; padding:0 3px; border-radius:3px; }
 .rich-text :not(pre) > code { background:#e9edf5; padding:2px 4px; border-radius:4px; unicode-bidi:isolate; direction:ltr; }
 .code-block { min-width:0; max-width:100%; border:1px solid #cfd6e5; border-radius:8px; background:#f4f5f8; overflow:hidden; margin:10px 0; }
-.code-block > button { display:block; margin:5px 6px 0 auto; font-size:.75rem; }
+.code-block .code-actions { display:flex; justify-content:flex-end; gap:6px; margin:5px 6px 0; }
+.code-block .code-actions button { font-size:.75rem; }
+.code-block .run-command { background:#172033; color:#9ef0b8; border-color:#172033; font-family:ui-monospace, Menlo, monospace; }
+.code-block .run-command:disabled { opacity:.7; }
 .code-block pre { direction:ltr; text-align:left; white-space:pre; overflow-wrap:normal; overflow:auto; max-height:420px; margin:0; padding:12px; tab-size:2; }
 .code-block code { font:13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .table-scroll { overflow:auto; max-width:100%; } .rich-text table { border-collapse:collapse; } .rich-text th, .rich-text td { border:1px solid #cfd6e5; padding:6px 10px; }
