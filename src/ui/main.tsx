@@ -11,7 +11,7 @@ import { InventoryPicker, detectInvocation, type InvocationMention } from './inv
 import type { CardReference } from './attachment-cards.js';
 import type { FileReference } from '../core/file-references.js';
 import { MovableWorkspace } from './movable-workspace.js';
-import { useDisplayPreferences, pruneDisplayPreferences, type AssistantMode } from './display-preferences.js';
+import { useDisplayPreferences, pruneDisplayPreferences, readDisplayPreferences, applyTheme, type AssistantMode } from './display-preferences.js';
 import { SelectionDialog, ReplaceInstructionDialog, ResetInstructionDialog, PanelDialog } from './composer-dialogs.js';
 import { InstructionReviewDialog, type InstructionReview } from './instruction-review.js';
 import { FileLinkContext, localFilePath } from './file-links.js';
@@ -48,6 +48,7 @@ import { useDictation } from './use-dictation.js';
 import { appendDictation, DICTATION_SHORTCUT_LABEL, isDictationShortcut } from './dictation-state.js';
 import { DictationButton } from './dictation-button.js';
 window.addEventListener('hashchange', () => window.location.reload());
+applyTheme(readDisplayPreferences().theme);
 const token = capabilityToken();
 const headers = token ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { 'content-type': 'application/json' };
 function Message({ message, original, replyLanguage, assist, client, onTranslate }: { message: AgentMessage; original: boolean; replyLanguage: string; assist: string; client:SessionClient; onTranslate?: () => void }) {
@@ -445,6 +446,7 @@ function App() {
   useKeystrokeTracker();
   const popupMode = usePopupMode(); const [dismissedToasts, setDismissedToasts] = useState<string[]>([]);
   const [displayPrefs, updateDisplayPrefs] = useDisplayPreferences();
+  useEffect(() => applyTheme(displayPrefs.theme), [displayPrefs.theme]);
   const allEntries = mergeSavedRecords(catalog?.entries ?? [], records);
   // One dismissible line in the sidebar: create/delete results, failed sidebar writes, a hidden project kept for its session.
   const [notice, setNotice] = useState('');

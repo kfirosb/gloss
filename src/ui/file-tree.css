@@ -2,15 +2,15 @@
 .file-tree-list { list-style:none; padding:0; margin:0; min-width:0; }
 .file-tree-list .file-tree-list { margin-left:14px; }
 .file-tree-list li { padding:0; margin:0; min-width:0; }
-.file-entries .file-tree-row { display:flex; align-items:center; gap:5px; box-sizing:border-box; width:100%; height:26px; min-height:26px; margin:0; padding:0 5px; border:0; border-radius:3px; background:transparent; color:#334155; font:400 12px/26px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; text-align:left; cursor:pointer; }
-.file-entries .file-tree-row:hover { background:#f0f3f7; }
-.file-entries .file-tree-row[aria-current=true] { background:#e0ebfa; color:#163d70; }
-.file-entries .file-tree-row:focus-visible { outline:2px solid #7095c2; outline-offset:-2px; }
+.file-entries .file-tree-row { display:flex; align-items:center; gap:5px; box-sizing:border-box; width:100%; height:26px; min-height:26px; margin:0; padding:0 5px; border:0; border-radius:3px; background:transparent; color:light-dark(#334155, #aab8cc); font:400 12px/26px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; text-align:left; cursor:pointer; }
+.file-entries .file-tree-row:hover { background:light-dark(#f0f3f7, #18212d); }
+.file-entries .file-tree-row[aria-current=true] { background:light-dark(#e0ebfa, #16253a); color:light-dark(#163d70, #8fb6e9); }
+.file-entries .file-tree-row:focus-visible { outline:2px solid light-dark(#7095c2, #406796); outline-offset:-2px; }
 .file-entries .file-tree-name { display:block; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font:inherit; color:inherit; overflow-wrap:normal; }
 .file-tree-chevron,.file-tree-icon { display:block; flex:none; width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
 .file-tree-chevron { width:10px; color:#7b8797; }
-.folder-icon { color:#a17c35; fill:#f5e6c8; }
+.folder-icon { color:light-dark(#a17c35, #cfad6d); fill:#f5e6c8; }
 .document-icon { color:#8290a4; }
-.file-tree-list .file-tree-message { padding:3px 6px 3px 20px; font-size:11px; color:#68768a; overflow-wrap:anywhere; }
-.file-tree .file-tree-action { border:0; background:transparent; padding:3px 5px; margin-left:19px; border-radius:3px; font-size:11px; color:#355f93; text-align:left; }
-.file-tree .file-tree-action:hover { background:#f0f3f7; }
+.file-tree-list .file-tree-message { padding:3px 6px 3px 20px; font-size:11px; color:light-dark(#68768a, #909cac); overflow-wrap:anywhere; }
+.file-tree .file-tree-action { border:0; background:transparent; padding:3px 5px; margin-left:19px; border-radius:3px; font-size:11px; color:light-dark(#355f93, #7199cc); text-align:left; }
+.file-tree .file-tree-action:hover { background:light-dark(#f0f3f7, #18212d); }
