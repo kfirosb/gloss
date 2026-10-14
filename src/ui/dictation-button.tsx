@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { DictationLanguage } from '../core/dictation-contracts.js';
 import { dictationLabel } from './dictation-state.js';
 import type { Dictation } from './use-dictation.js';
 
@@ -15,7 +16,7 @@ function DictationLevel({ read }: { read(): number }) {
   useEffect(() => { const id = window.setInterval(() => setLevel(read()), LEVEL_METER_INTERVAL_MS); return () => window.clearInterval(id); }, [read]);
   return <span className="dictation-level" style={{ ['--level' as string]: Math.min(1, level * LEVEL_GAIN) }} />;
 }
-export function DictationButton({ dictation, language }: { dictation: Dictation; language: 'he' | 'en' }) {
+export function DictationButton({ dictation, language }: { dictation: Dictation; language: DictationLanguage }) {
   const { state } = dictation; const label = dictationLabel(state, language);
   // Re-render once per ELAPSED_TICK_MS while recording so the clock advances; nothing ticks in any other phase.
   const [, setTick] = useState(0);

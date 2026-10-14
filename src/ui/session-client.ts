@@ -9,7 +9,9 @@ export interface SessionEnvelope { epoch?: string; sessionId: string; sequence: 
 /** Keeps inserted @File/@Image references left-to-right in the RTL composer; never delivered. */
 export const REFERENCE_MARK = '\u200E';
 const outgoing = (action: Action): Action => (action.type === 'discuss' || action.type === 'send-composer') ? { ...action, text: action.text.replaceAll(REFERENCE_MARK, '') } : action;
-export const authHeaders = () => ({ 'content-type': 'application/json', Authorization: 'Bearer ' + new URLSearchParams(location.hash.slice(1)).get('capability') });
+/** The panel capability from the page's #capability= fragment, or null when the page was opened without one. */
+export const capabilityToken = () => new URLSearchParams(location.hash.slice(1)).get('capability');
+export const authHeaders = () => ({ 'content-type': 'application/json', Authorization: 'Bearer ' + capabilityToken() });
 export async function sessionRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
  const response = await fetch(url, { ...init, headers: authHeaders() });
  const body = await response.json();

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SAMPLE_RATE, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
-import { authHeaders } from './session-client.js';
+import { SAMPLE_RATE, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
+import { authHeaders, capabilityToken } from './session-client.js';
 import { initialDictationState, reduceDictation, type DictationEffect, type DictationUiEvent, type DictationUiState } from './dictation-state.js';
 import { PCM_PROCESSOR_NAME, workletUrl } from './pcm-worklet.js';
 
-export interface UseDictationOptions { sessionId: string; language: 'he' | 'en'; appendText(text: string): void; sendNow(): void; enabled: boolean }
-export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; requestSend(): void; dismissNotice(): void }
-const capability = () => new URLSearchParams(location.hash.slice(1)).get('capability') ?? '';
+export interface UseDictationOptions { sessionId: string; language: DictationLanguage; appendText(text: string): void; sendNow(): void; enabled: boolean }
+export interface Dictation { state: DictationUiState; /** Latest input level (0..1), kept outside React state so capture frames do not re-render the workspace. */ readLevel(): number; press(): void; escape(): boolean; /** Asks to send once dictation has finished; false (and nothing happens) when no recording is in progress, so the caller sends now. */ requestSend(): boolean; dismissNotice(): void }
 
 export function useDictation(options: UseDictationOptions): Dictation {
   const [state, setState] = useState<DictationUiState>(initialDictationState);
@@ -33,7 +32,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
       case 'open-socket': {
         closeSocket();
         const url = new URL('/api/dictation/audio', location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        url.searchParams.set('capability', capability()); url.searchParams.set('session', o.sessionId); url.searchParams.set('language', o.language);
+        url.searchParams.set('capability', capabilityToken() ?? ''); url.searchParams.set('session', o.sessionId); url.searchParams.set('language', o.language);
         const ws = new WebSocket(url); ws.binaryType = 'arraybuffer'; socket.current = ws;
         ws.onmessage = e => { if (socket.current !== ws || typeof e.data !== 'string') return; let m: DictationServerMessage; try { m = JSON.parse(e.data) as DictationServerMessage; } catch { return; } dispatch({ type: 'server', message: m }); };
         ws.onclose = e => { if (socket.current === ws) { socket.current = undefined; dispatch({ type: 'socket-closed', clean: e.code === 1000 }); } };
@@ -86,7 +85,7 @@ export function useDictation(options: UseDictationOptions): Dictation {
     readLevel,
     press: () => dispatch({ type: 'press', now: Date.now() }),
     escape: () => { const p = current.current.phase; if (p !== 'starting' && p !== 'recording') return false; dispatch({ type: 'escape' }); return true; },
-    requestSend: () => dispatch({ type: 'send-requested' }),
+    requestSend: () => { const p = current.current.phase; if (p !== 'starting' && p !== 'recording' && p !== 'finishing') return false; dispatch({ type: 'send-requested' }); return true; },
     dismissNotice: () => dispatch({ type: 'dismiss-notice' }),
   };
 }

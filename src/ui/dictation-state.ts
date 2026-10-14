@@ -1,4 +1,5 @@
-import { FINISH_TIMEOUT_MS, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
+import { FINISH_TIMEOUT_MS, type DictationLanguage, type DictationServerMessage, type DictationStatus } from '../core/dictation-contracts.js';
+import { languageName } from '../core/language-settings.js';
 
 export type DictationPhase = 'idle' | 'downloading' | 'starting' | 'recording' | 'finishing' | 'unavailable' | 'error';
 export interface DictationUiState { phase: DictationPhase; reason?: string; message?: string; notice?: string; received?: number; total?: number | null; startedAt?: number; sendAfterFinish: boolean; lastSequence: number }
@@ -76,10 +77,14 @@ export function reduceDictation(state: DictationUiState, event: DictationUiEvent
   }
 }
 
-export function dictationLabel(state: DictationUiState, language: 'he' | 'en'): { title: string; progress?: string } {
+/** The keyboard shortcut that toggles dictation: Cmd (or Ctrl) + Shift + M, matched by physical key or by character. */
+export const isDictationShortcut = (e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'shiftKey' | 'code' | 'key'>) => (e.metaKey || e.ctrlKey) && e.shiftKey && (e.code === 'KeyM' || e.key.toLowerCase() === 'm');
+export const DICTATION_SHORTCUT_LABEL = '⌘⇧M';
+
+export function dictationLabel(state: DictationUiState, language: DictationLanguage): { title: string; progress?: string } {
   const mb = (n: number) => Math.round(n / (1024 * 1024)) + ' MB';
   switch (state.phase) {
-    case 'idle': return { title: language === 'he' ? 'Dictate in Hebrew' : 'Dictate in English' };
+    case 'idle': return { title: 'Dictate in ' + languageName(language) };
     case 'downloading': return { title: 'Downloading speech model, click to cancel', progress: state.total ? Math.floor((state.received ?? 0) * 100 / state.total) + '%' : mb(state.received ?? 0) };
     case 'starting': return { title: 'Starting speech engine' };
     case 'recording': return { title: 'Stop dictation' };
