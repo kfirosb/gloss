@@ -284,6 +284,8 @@ export function createSessionLauncher(options: {
         argv = [await options.resolveExecutable('codex'), ...extra, '--', firstMessage ?? CODEX_SETUP_PROMPT];
       }
       requireOpen();
+      // A reconcile listing already in flight cannot contain this session: it must not end it as missing.
+      for (const startedSince of listings) startedSince.add(id);
       const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, argv, { ELECTRON_RUN_AS_NODE: '' });
       const record: LaunchRecord = { id, agent, folder: cwd, panePid, state: 'starting', createdAt: now(), ...(sessionRef ? { sessionRef } : {}), ...(language ? { languageOverride: language } : {}) };
       put(record);
