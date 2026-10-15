@@ -48,6 +48,8 @@ export async function launch(args: string[]) {
   // The sink must exist before registration/restoration starts adapter source replay.
   if (flags.agent && flags.session) await application.sessions!.register({ agent: flags.agent as 'claude' | 'codex', sessionRef: flags.session, projectId: flags.project ?? process.cwd() }, application.snapshot().snapshot.id);
   await application.restore?.(application.snapshot().snapshot.id);
+  // Saved channel commands may still name a renamed or older app; point them at this build.
+  if (isEntry()) void import('./claude-channel-setup.js').then(module => module.createClaudeChannelSetup().repairConfigs()).then(({ repaired }) => { if (repaired) process.stdout.write(JSON.stringify({ event: 'channel-configs-repaired', count: repaired }) + '\n'); }, () => {});
   process.stdout.write(server.url + '\n'); return { application, server };
 }
 if (isEntry()) void launch(process.argv.slice(2)).catch(error => { process.stderr.write((error instanceof Error ? error.message : 'Launch failed') + '\n'); process.exitCode = 1; });
