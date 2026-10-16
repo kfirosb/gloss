@@ -132,6 +132,7 @@ const RELEASED_BEFORE_SENDING_REASON = 'Not sent: released before Gloss typed it
 const NOT_CONNECTED_REASON = 'Claude is not connected';
 const ROUTE_UNAVAILABLE_REASON =
   'Gloss couldn’t check how to reach this session; it will check again';
+const NOT_TYPED_REASON = 'Gloss couldn’t reach the terminal; nothing was sent';
 
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -444,6 +445,17 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     if (route.transport === null) throw new Error(route.reason);
     return route.transport;
   };
+  /** Cancels a message nothing was sent for yet, so no later check, nor one running now, can type or send it. */
+  const cancelHeld = (delivery: Delivery) => {
+    delivery.state = 'failed';
+    delivery.reason = RELEASED_BEFORE_SENDING_REASON;
+    deps.store.updateDelivery(copy(delivery));
+  };
+  /** Abandoning a review draft cancels its held messages; one whose typing started is never touched. */
+  const cancelHeldFor = (draftId: string) => {
+    for (const delivery of state.deliveries)
+      if (delivery.draftId === draftId && delivery.state === 'held') cancelHeld(delivery);
+  };
   const sameTargetHeld = (target: Target) =>
     state.deliveries.find((item) => item.state === 'held' && sameTarget(item.target, target));
   /** Deliveries handed to the agent whose send has not returned yet. A held one among them is being checked. */
@@ -541,7 +553,11 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         }
       } catch (error) {
         if (terminal && !typingStarted && delivery.state === 'failed') return;
-        if (delivery.state !== 'sent' && delivery.state !== 'queued') {
+        if (terminal && !typingStarted) {
+          // The adapter types only after typing-started is stored, so a throw before it typed nothing.
+          delivery.state = 'failed';
+          delivery.reason = NOT_TYPED_REASON;
+        } else if (delivery.state !== 'sent' && delivery.state !== 'queued') {
           delivery.state = 'unconfirmed';
           delivery.reason = error instanceof Error ? error.message : 'Delivery outcome is unknown';
         }
@@ -1003,12 +1019,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Delivery is still in progress');
       if (!delivery || !['unconfirmed', 'queued', 'failed', 'held'].includes(delivery.state))
         throw new Error('Delivery cannot be released');
-      if (delivery.state === 'held') {
-        // Never typed: cancel it so no later check, nor one running now, can type it after the release.
-        delivery.state = 'failed';
-        delivery.reason = RELEASED_BEFORE_SENDING_REASON;
-        deps.store.updateDelivery(copy(delivery));
-      }
+      if (delivery.state === 'held') cancelHeld(delivery);
       deps.store.releaseComposerAttempt(state.id, requestId);
       delete state.composerDraft;
       publish(false);
@@ -1473,7 +1484,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Instruction changed; reopen it before resetting');
       delete state.currentDraft;
       reviews.delete(id);
-      // Reset detaches the review, never cancels or forgets a native delivery.
+      // Reset detaches the review and cancels a message still held; it never cancels or forgets one already handed over.
+      cancelHeldFor(id);
       publish();
     },
 
@@ -1481,6 +1493,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireOpen();
       if (!state.currentDraft || state.currentDraft.id !== id) throw new Error('Draft not found');
       delete state.currentDraft;
+      cancelHeldFor(id);
       publish();
     },
 

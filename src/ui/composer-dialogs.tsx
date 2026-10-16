@@ -129,6 +129,7 @@ export function ReplaceInstructionDialog({
 export function ResetInstructionDialog({
   open,
   pending,
+  held,
   busy,
   error,
   close,
@@ -136,6 +137,8 @@ export function ResetInstructionDialog({
 }: {
   open: boolean;
   pending: boolean;
+  /** Its message waits for the terminal and nothing was typed yet: Reset cancels it. */
+  held: boolean;
   busy: boolean;
   error: string;
   close(): void;
@@ -148,11 +151,18 @@ export function ResetInstructionDialog({
           Clear the prepared instruction and its review edits? Your selected messages and composer
           text will stay unchanged. You can then use Prepare instruction to create a fresh answer.
         </p>
-        {pending && (
+        {held ? (
           <p className="notice">
-            This instruction has already been submitted. Reset does not cancel its delivery or stop
-            Codex from processing it.
+            This instruction is waiting for the terminal and has not been typed yet. Reset cancels
+            it; Gloss will not type it.
           </p>
+        ) : (
+          pending && (
+            <p className="notice">
+              This instruction has already been submitted. Reset does not cancel its delivery or
+              stop Codex from processing it.
+            </p>
+          )
         )}
         {error && (
           <p role="alert" className="error">

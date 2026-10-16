@@ -277,3 +277,75 @@ it('never sends a channel message again after a restart that interrupted it behi
   await expect.poll(() => restarted.workflow.snapshot().codingState).toBe('idle');
   expect(second.sent).toEqual([]);
 });
+const RELEASED = 'Not sent: released before Gloss typed it';
+it('Reset cancels a held review message so it is never typed, even after a restart', async () => {
+  const store = new SqliteStore(':memory:');
+  const { agent, workflow } = await terminalApp({ state: 'dialog-open', store });
+  const abandoned = await workflow.prepare();
+  expect(await workflow.send(abandoned.id, abandoned.revision)).toMatchObject({ state: 'held' });
+  workflow.resetInstruction(abandoned.id, abandoned.revision);
+  expect(workflow.snapshot().deliveries[0]).toMatchObject({ state: 'failed', reason: RELEASED });
+  expect(store.load('claude-tmux')?.deliveries[0]).toMatchObject({
+    state: 'failed',
+    reason: RELEASED,
+  });
+  agent.emit({ type: 'status', state: 'idle' });
+  await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
+  const next = await workflow.prepare();
+  const sent = await workflow.send(next.id, next.revision);
+  expect(sent.state).toBe('sent');
+  expect(agent.sent.map((s) => s.requestId)).toEqual([sent.id]);
+  await workflow.close();
+  const second = new FakeAgent('claude');
+  const restarted = await terminalApp({ store, agent: second });
+  await restarted.workflow.checkComposer('none');
+  expect(second.sent).toEqual([]);
+});
+it('discarding a review draft cancels its held message too', async () => {
+  const { agent, workflow } = await terminalApp({ state: 'dialog-open' });
+  const draft = await workflow.prepare();
+  await workflow.send(draft.id, draft.revision);
+  workflow.discardDraft(draft.id);
+  expect(workflow.snapshot().deliveries[0]).toMatchObject({ state: 'failed', reason: RELEASED });
+  agent.emit({ type: 'status', state: 'idle' });
+  await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
+  await workflow.checkComposer('none');
+  expect(agent.sent).toEqual([]);
+});
+it('Reset leaves a review message whose typing started as it is', async () => {
+  const agent = new FakeAgent('claude');
+  agent.onSend = (context) => {
+    context?.onTyping?.({ nativeAfterRevision: 9 });
+    return new Promise<void>(() => {});
+  };
+  const { workflow } = await terminalApp({ agent });
+  const draft = await workflow.prepare();
+  void workflow.send(draft.id, draft.revision).catch(() => undefined);
+  await expect
+    .poll(() => workflow.snapshot().deliveries[0])
+    .toMatchObject({ state: 'sending', reason: TYPING_STARTED_REASON });
+  workflow.resetInstruction(draft.id, draft.revision);
+  expect(workflow.snapshot().deliveries[0]).toMatchObject({
+    state: 'sending',
+    reason: TYPING_STARTED_REASON,
+  });
+});
+it('a terminal send that failed before typing anything is not sent, so it can be sent again', async () => {
+  const agent = new FakeAgent('claude');
+  agent.sendError = new Error('Session project identity mismatch');
+  const { workflow } = await terminalApp({ agent });
+  expect(await workflow.sendComposer('r1', 'שלום')).toMatchObject({
+    state: 'failed',
+    reason: 'Gloss couldn’t reach the terminal; nothing was sent',
+  });
+});
+it('a terminal send that failed after typing started stays unconfirmed', async () => {
+  const agent = new FakeAgent('claude');
+  agent.onSend = (context) => void context?.onTyping?.({ nativeAfterRevision: 3 });
+  agent.sendError = new Error('pane closed');
+  const { workflow } = await terminalApp({ agent });
+  expect(await workflow.sendComposer('r1', 'שלום')).toMatchObject({
+    state: 'unconfirmed',
+    nativeAfterRevision: 3,
+  });
+});

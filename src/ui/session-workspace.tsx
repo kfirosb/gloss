@@ -552,6 +552,9 @@ export function SessionWorkspace({
     workspace.update((data) => {
       data.attachmentIds = data.attachmentIds.filter((value) => value !== id);
     });
+  const composerDelivery =
+    composerAttempt &&
+    snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
   const composerSendBlocked =
     unsupportedFiles ||
     (!text.trim() && !images.length) ||
@@ -595,9 +598,6 @@ export function SessionWorkspace({
       setComposerSending(false);
     }
   };
-  const composerDelivery =
-    composerAttempt &&
-    snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
   const awaitingClaudeReplies = snapshot.deliveries.filter(isChannelAwaitingReply).length;
   const received = useReceivedFlash(
     snapshot.deliveries.filter((d) => d.transport === 'channel' && d.state === 'sent').length,
@@ -1475,6 +1475,7 @@ export function SessionWorkspace({
               <ResetInstructionDialog
                 open={resetOpen}
                 pending={Boolean(delivery && isDeliveryUnresolved(delivery))}
+                held={delivery?.state === 'held'}
                 busy={preparing}
                 error={resetError}
                 close={() => setResetOpen(false)}
