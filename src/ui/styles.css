@@ -3954,3 +3954,43 @@ button.dictation-finishing .dictation-icon {
   font-size: 0.8rem;
   color: light-dark(#2f5bd3, var(--dk-fg-2f5bd3));
 }
+.live-terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #0f1420;
+  color: #e6e9ef;
+}
+.live-terminal .terminal-host {
+  flex: 1;
+  min-height: 0;
+}
+.live-terminal [role='alert'] {
+  margin: 0;
+  padding: 6px 12px;
+  color: #ffb4a8;
+}
+.live-terminal-line {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid #2b3445;
+  background: #151c2b;
+}
+.live-terminal-line input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #3a4558;
+  border-radius: 8px;
+  background: #0f1420;
+  color: #e6e9ef;
+}
+.live-terminal-line button {
+  color: #e6e9ef;
+  background: transparent;
+  border: 1px solid #3a4558;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
