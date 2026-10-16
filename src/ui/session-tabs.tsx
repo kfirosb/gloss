@@ -187,93 +187,123 @@ export function SessionTabs({
         {open.map((entry) => {
           const selected = !terminalShown && entry.sessionId === selectedId;
           const unselectable = !entry.sessionId || entry.availability === 'unavailable';
+          const launchId = entry.launchId;
+          const endLabel = `End ${entry.sessionTitle ?? agentName(entry)}`;
           return (
-            <button
-              key={entry.key}
-              role="tab"
-              className={'session-tab' + (selected ? ' selected' : '')}
-              aria-selected={selected}
-              aria-disabled={unselectable || undefined}
-              tabIndex={tabbable === entry.key ? 0 : -1}
-              data-session-key={entry.key}
-              data-session-id={entry.sessionId}
-              title={sessionIdentity(entry)}
-              aria-description={sessionIdentity(entry)}
-              onFocus={() => setFocusKey(entry.key)}
-              onContextMenu={(e) => {
-                if (!hasMenu(entry)) return;
-                e.preventDefault();
-                openMenu(entry, { x: e.clientX, y: e.clientY }, e.currentTarget);
-              }}
-              onClick={() => {
-                if (!unselectable && entry.sessionId) onSelect(entry.sessionId);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
-                  if (hasMenu(entry)) {
+            // The X is a sibling of the tab because a button cannot contain another button.
+            <span key={entry.key} className="session-tab-item" role="presentation">
+              <button
+                role="tab"
+                className={'session-tab' + (selected ? ' selected' : '')}
+                aria-selected={selected}
+                aria-disabled={unselectable || undefined}
+                tabIndex={tabbable === entry.key ? 0 : -1}
+                data-session-key={entry.key}
+                data-session-id={entry.sessionId}
+                title={sessionIdentity(entry)}
+                aria-description={sessionIdentity(entry)}
+                onFocus={() => setFocusKey(entry.key)}
+                onContextMenu={(e) => {
+                  if (!hasMenu(entry)) return;
+                  e.preventDefault();
+                  openMenu(entry, { x: e.clientX, y: e.clientY }, e.currentTarget);
+                }}
+                onClick={() => {
+                  if (!unselectable && entry.sessionId) onSelect(entry.sessionId);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+                    if (hasMenu(entry)) {
+                      e.preventDefault();
+                      openMenu(entry, undefined, e.currentTarget);
+                    }
+                  } else if (e.key === 'ArrowRight') {
                     e.preventDefault();
-                    openMenu(entry, undefined, e.currentTarget);
+                    moveKey(entry.key, 1);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    moveKey(entry.key, -1);
                   }
-                } else if (e.key === 'ArrowRight') {
-                  e.preventDefault();
-                  moveKey(entry.key, 1);
-                } else if (e.key === 'ArrowLeft') {
-                  e.preventDefault();
-                  moveKey(entry.key, -1);
-                }
-              }}
-            >
-              <span className="session-tab-agent" role="img" aria-label={agentName(entry)}>
-                {entry.target.agent === 'claude' ? '✳' : '◎'}
-              </span>
-              <span className="session-tab-title">{tabTitle(entry)}</span>
-              <ActivityDot entry={entry} />
-            </button>
+                }}
+              >
+                <span className="session-tab-agent" role="img" aria-label={agentName(entry)}>
+                  {entry.target.agent === 'claude' ? '✳' : '◎'}
+                </span>
+                <span className="session-tab-title">{tabTitle(entry)}</span>
+                <ActivityDot entry={entry} />
+              </button>
+              {onEnd && launchId && (
+                <button
+                  type="button"
+                  className="session-tab-close"
+                  tabIndex={-1}
+                  aria-label={endLabel}
+                  title={endLabel}
+                  onClick={() => onEnd(launchId)}
+                >
+                  ×
+                </button>
+              )}
+            </span>
           );
         })}
         {terminals.map((terminal) => {
           const selected = terminal.launchId === selectedTerminalId;
           const label = terminal.busy ? 'Running' : 'At the prompt';
+          const endLabel = `End ${terminal.title}`;
           return (
-            <button
-              key={terminal.key}
-              role="tab"
-              className={'session-tab terminal' + (selected ? ' selected' : '')}
-              aria-selected={selected}
-              tabIndex={tabbable === terminal.key ? 0 : -1}
-              data-session-key={terminal.key}
-              data-terminal-id={terminal.launchId}
-              title={`${terminal.title} in ${folder.name}`}
-              onFocus={() => setFocusKey(terminal.key)}
-              onClick={() => onSelectTerminal?.(terminal)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                openTerminalMenu(terminal, { x: e.clientX, y: e.clientY }, e.currentTarget);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+            <span key={terminal.key} className="session-tab-item" role="presentation">
+              <button
+                role="tab"
+                className={'session-tab terminal' + (selected ? ' selected' : '')}
+                aria-selected={selected}
+                tabIndex={tabbable === terminal.key ? 0 : -1}
+                data-session-key={terminal.key}
+                data-terminal-id={terminal.launchId}
+                title={`${terminal.title} in ${folder.name}`}
+                onFocus={() => setFocusKey(terminal.key)}
+                onClick={() => onSelectTerminal?.(terminal)}
+                onContextMenu={(e) => {
                   e.preventDefault();
-                  openTerminalMenu(terminal, undefined, e.currentTarget);
-                } else if (e.key === 'ArrowRight') {
-                  e.preventDefault();
-                  moveKey(terminal.key, 1);
-                } else if (e.key === 'ArrowLeft') {
-                  e.preventDefault();
-                  moveKey(terminal.key, -1);
-                }
-              }}
-            >
-              <span className="session-tab-agent terminal" role="img" aria-label="Terminal">
-                &gt;_
-              </span>
-              <span className="session-tab-title">{terminal.title}</span>
-              <span
-                className={'activity-dot ' + (terminal.busy ? 'working' : 'idle')}
-                role="img"
-                aria-label={label}
-                title={label}
-              />
-            </button>
+                  openTerminalMenu(terminal, { x: e.clientX, y: e.clientY }, e.currentTarget);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+                    e.preventDefault();
+                    openTerminalMenu(terminal, undefined, e.currentTarget);
+                  } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    moveKey(terminal.key, 1);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    moveKey(terminal.key, -1);
+                  }
+                }}
+              >
+                <span className="session-tab-agent terminal" role="img" aria-label="Terminal">
+                  &gt;_
+                </span>
+                <span className="session-tab-title">{terminal.title}</span>
+                <span
+                  className={'activity-dot ' + (terminal.busy ? 'working' : 'idle')}
+                  role="img"
+                  aria-label={label}
+                  title={label}
+                />
+              </button>
+              {onEndTerminal && (
+                <button
+                  type="button"
+                  className="session-tab-close"
+                  tabIndex={-1}
+                  aria-label={endLabel}
+                  title={endLabel}
+                  onClick={() => onEndTerminal(terminal)}
+                >
+                  ×
+                </button>
+              )}
+            </span>
           );
         })}
       </div>
@@ -315,7 +345,7 @@ export function SessionTabs({
                   ]
                 : []),
               ...(onEnd
-                ? [{ key: 'end', content: 'End session…', onChoose: () => onEnd(menu.launchId) }]
+                ? [{ key: 'end', content: 'End session', onChoose: () => onEnd(menu.launchId) }]
                 : []),
             ]}
           />

@@ -107,6 +107,10 @@ test('an exhausted 5-hour window turns the pill red and opens the break once', a
   );
   const dialog = page.getByRole('dialog', { name: '5-hour window used up' });
   await expect(dialog).toContainText('Time for a break');
+  // A compact card, not a sheet: it should read at a glance.
+  const box = await dialog.boundingBox();
+  expect(box?.width).toBeLessThanOrEqual(340);
+  expect(box?.height).toBeLessThanOrEqual(260);
   await expect(dialog).toContainText('Your Claude Code quota renews in 2h 4');
   await expect(dialog.getByRole('link', { name: 'Upgrade plan' })).toHaveAttribute(
     'href',
