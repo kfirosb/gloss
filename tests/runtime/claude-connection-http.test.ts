@@ -7,6 +7,8 @@ import { startServer } from '../../src/runtime/http-server.js';
 import type { PeerSetting } from '../../src/runtime/claude-peer-setting.js';
 import type { RegistrationStatus } from '../../src/runtime/claude-registration.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
+import { FakeAgent } from '../helpers/fake-agent.js';
+import { FakeLanguageSession } from '../helpers/fake-language.js';
 
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -130,4 +132,39 @@ it('rejects the peer setting for a session that is not Claude', async () => {
   expect((await call(url, 'POST', { action: 'accept' })).status).toBe(400);
   expect(read).not.toHaveBeenCalled();
   expect(allowAll).not.toHaveBeenCalled();
+});
+
+it('reports the delivery route of a Claude session and refuses it for another agent', async () => {
+  const folder = await root();
+  const project = join(folder, 'project');
+  await mkdir(project);
+  const claude = new FakeAgent('claude');
+  claude.route = { transport: 'tmux' };
+  const language = new FakeLanguageSession();
+  const backend = { open: async () => language, models: async () => [] };
+  const app = createApplication({
+    store: new SqliteStore(':memory:'),
+    agents: [claude, new FakeAgent('codex')],
+    languageBackends: { claude: backend, codex: backend },
+    capability: 'cap',
+    attachmentRoot: join(folder, 'uploads'),
+  });
+  clean.push(() => app.close());
+  await app.sessions?.register(
+    { agent: 'claude', sessionRef: '11111111-1111-4111-8111-111111111111', projectId: project },
+    'A',
+  );
+  await app.sessions?.register(
+    { agent: 'codex', sessionRef: '22222222-2222-4222-8222-222222222222', projectId: project },
+    'C',
+  );
+  const server = await startServer(app);
+  clean.push(() => server.close());
+  const url = (id: string) => new URL(`/api/sessions/${id}/claude-route`, server.url).href;
+  expect((await call(url('A'), 'GET', undefined, false)).status).toBe(401);
+  expect((await call(url('missing'), 'GET')).status).toBe(404);
+  expect(await (await call(url('A'), 'GET')).json()).toEqual({ transport: 'tmux' });
+  claude.route = { transport: null, reason: 'Gloss can’t reach this session yet.' };
+  expect(await (await call(url('A'), 'GET')).json()).toEqual(claude.route);
+  expect((await call(url('C'), 'GET')).status).toBe(400);
 });

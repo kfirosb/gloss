@@ -69,6 +69,10 @@ export class SessionClient {
       signal ? { signal } : {},
     );
   }
+  /** Untrusted until read with readDeliveryRoute. */
+  claudeRoute(signal?: AbortSignal) {
+    return sessionRequest<unknown>(this.base + '/claude-route', signal ? { signal } : {});
+  }
   prepareClaudeChannel() {
     return sessionRequest<import('../runtime/claude-channel-setup.js').ChannelSetup>(
       this.base + '/claude-channel',

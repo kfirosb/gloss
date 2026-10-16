@@ -2333,6 +2333,17 @@ pre {
 .peer-explanation p {
   margin: 6px 0;
 }
+.route-line {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: light-dark(#58657d, var(--dk-fg-58657d));
+}
+.route-line summary {
+  cursor: pointer;
+}
+.route-line p {
+  margin: 6px 0;
+}
 .session-language {
   position: relative;
   display: flex;
@@ -3573,6 +3584,7 @@ pre {
   background: light-dark(#e6efff, var(--dk-bg-e6efff));
   color: light-dark(#2d5fb8, var(--dk-fg-2d5fb8));
 }
+.status-strip[data-state='held'],
 .status-strip[data-state='queued'],
 .status-strip[data-state='sending'],
 .status-strip[data-state='unconfirmed'] {

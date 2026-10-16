@@ -1,6 +1,6 @@
 import { AttachmentCards } from './attachment-cards.js';
 import { useEffect, useRef, useState } from 'react';
-import type { Draft, Delivery } from '../core/contracts.js';
+import { isDeliveryUnresolved, type Draft, type Delivery } from '../core/contracts.js';
 import { RichText } from './rich-text.js';
 import { providerLabel } from './provider-label.js';
 export interface InstructionReview {
@@ -12,14 +12,12 @@ export function InstructionReviewDialog({
   open,
   busy,
   blocked,
-  channelReady = true,
-  peerBlocked,
+  routeReady = true,
   delivery,
   error,
   onChange,
   onClose,
   onSend,
-  onPeerSend,
   onReset,
 }: {
   review: InstructionReview;
@@ -28,9 +26,8 @@ export function InstructionReviewDialog({
   blocked: boolean;
   delivery?: Delivery;
   error: string;
-  channelReady?: boolean;
-  peerBlocked?: boolean;
-  onPeerSend?: () => void;
+  /** False while Gloss has no route to the session (Claude only). */
+  routeReady?: boolean;
   onChange(text: string): void;
   onClose(): void;
   onSend(): void;
@@ -45,9 +42,7 @@ export function InstructionReviewDialog({
     if (open) dialog.current?.showModal();
     else dialog.current?.close();
   }, [open]);
-  const pending = Boolean(
-    delivery && ['sending', 'queued', 'unconfirmed'].includes(delivery.state),
-  );
+  const pending = Boolean(delivery && isDeliveryUnresolved(delivery));
   const status = busy
     ? 'Preparing / Sending'
     : delivery
@@ -62,8 +57,8 @@ export function InstructionReviewDialog({
         }[delivery.state]
       : blocked
         ? 'Blocked: agent is working or unavailable'
-        : !channelReady
-          ? 'Channel setup required for normal Send'
+        : !routeReady
+          ? 'Gloss can’t reach this session yet'
           : 'Ready';
   return (
     <dialog
@@ -123,20 +118,11 @@ export function InstructionReviewDialog({
           className="primary"
           data-testid="coding-delivery"
           type="button"
-          disabled={busy || blocked || !channelReady || pending || !review.localizedText.trim()}
+          disabled={busy || blocked || !routeReady || pending || !review.localizedText.trim()}
           onClick={onSend}
         >
           Send to Terminal
         </button>
-        {onPeerSend && (
-          <button
-            type="button"
-            disabled={busy || (peerBlocked ?? blocked) || pending || !review.localizedText.trim()}
-            onClick={onPeerSend}
-          >
-            Send as peer
-          </button>
-        )}
         <span className="review-destination">{providerLabel(review.draft.target.agent)}</span>
       </div>
     </dialog>

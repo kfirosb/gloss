@@ -22,6 +22,9 @@ test('release preserves edited text and history across reload without resending'
   await page.route('**/api/sessions/*/claude-channel', (route) =>
     route.fulfill({ json: { state: 'connected' } }),
   );
+  await page.route('**/api/sessions/*/claude-route', (route) =>
+    route.fulfill({ json: { transport: 'channel' } }),
+  );
   await page.route('**/api/sessions/*/actions', async (route) => {
     const a = route.request().postDataJSON();
     calls.push(a);
