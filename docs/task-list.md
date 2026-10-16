@@ -128,6 +128,30 @@ Status: idea captured; brainstorm separately.
 
 - [ ] Show the CLIs installed on the computer (AWS, Docker, GitHub, and others), let the user connect to them, and show what permissions each one has.
 
+## 16. Terminal inside the Live Conversation
+
+Status: design task captured on 2026-10-16; needs a design pass.
+
+- [ ] Show the session's terminal as part of the Live Conversation panel, so the user can view the terminal instead of the conversation in the same place.
+- [ ] Replace the terminal pop-up there with a switch between "Coding agent · translated", the regular (original) conversation, and the terminal.
+- [ ] Decide how the switch fits next to the existing Expand, History, Summarize in Hebrew, and Original controls.
+
+## 17. Files panel and file preview
+
+Status: design task captured on 2026-10-16; needs a design pass.
+
+- [ ] Let the user move the Files panel to another place in the window (not only the current side panel).
+- [ ] Add an option to expand an open file preview from the pop-up to full screen.
+- [ ] Remember Translate / TL;DR results per file: closing the preview and reopening the same file shows the result without clicking again.
+- [ ] Show the file list beside the preview pop-up, so the user can pick other files and move between them without closing the preview.
+
+## 18. Editing and creating files
+
+Status: discussion needed; not urgent.
+
+- [ ] Talk through letting the user edit existing files and create new ones from Gloss, for cases such as `.env`.
+- [ ] Decide scope, safety (secrets, unsaved changes, files the agent is also editing), and whether the agent is told about the change.
+
 ## Shared constraints
 
 - Keep terminal output and instructions delivered to coding agents in English; Hebrew discussion and translations stay in the panel.
