@@ -146,7 +146,7 @@ it('runs tmux without the panel capability and never lets tmux shell-parse a one
     expect(call.options!.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
     expect(call.options!.env).not.toHaveProperty('TMUX');
   }
-  expect(calls.map((c) => c.args.slice(4, 8).join(' '))).toEqual(
+  expect(calls.map((c) => c.args.slice(5, 9).join(' '))).toEqual(
     expect.arrayContaining([
       'set-environment -g -u LANGUAGE_PANEL_CAPABILITY',
       'set-environment -g -u ELECTRON_RUN_AS_NODE',
@@ -219,6 +219,24 @@ describe.skipIf(!available)('with real tmux on a private socket', () => {
     expect(await tmuxCmd(['show-options', '-gv', 'prefix'])).toBe('None\n');
     expect(await tmuxCmd(['show-options', '-gv', 'status'])).toBe('off\n');
     expect(await tmuxCmd(['show-options', '-sv', 'escape-time'])).toBe('0\n');
+  });
+  it('lists sessions when the app was opened without a locale (a Dock or Finder launch)', async () => {
+    // Without a UTF-8 locale tmux prints control characters such as the listing's tabs as "_".
+    const keys = ['LANG', 'LC_ALL', 'LC_CTYPE'];
+    const saved = keys.map((k) => process.env[k]);
+    for (const k of keys) delete process.env[k];
+    try {
+      const tmux = await createTmux({ stateDir: await stateTemp() });
+      const { panePid } = await tmux.newSession('la-t3', tmpdir(), ['sh', '-c', 'sleep 30']);
+      expect(await tmux.listSessions()).toEqual([
+        expect.objectContaining({ name: 'la-t3', panePid }),
+      ]);
+    } finally {
+      keys.forEach((k, i) => {
+        if (saved[i] === undefined) delete process.env[k];
+        else process.env[k] = saved[i];
+      });
+    }
   });
   it('lists nothing when the private server is not running', async () => {
     const tmux = await createTmux({ stateDir: await stateTemp() });
@@ -345,7 +363,7 @@ it('types text literally and then presses Enter as two commands', async () => {
     },
   });
   await tmux.typeText('la-one', '-n "C-c" && echo done');
-  expect(calls.map((c) => c.slice(4))).toEqual([
+  expect(calls.map((c) => c.slice(5))).toEqual([
     ['send-keys', '-t', '=la-one:', '-l', '--', '-n "C-c" && echo done'],
     ['send-keys', '-t', '=la-one:', '--', 'Enter'],
   ]);

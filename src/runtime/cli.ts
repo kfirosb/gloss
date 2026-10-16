@@ -154,6 +154,19 @@ export async function launch(args: string[]) {
       application.snapshot().snapshot.id,
     );
   await application.restore?.(application.snapshot().snapshot.id);
+  // Saved channel commands may still name a renamed or older app; point them at this build.
+  if (isEntry())
+    void import('./claude-channel-setup.js')
+      .then((module) => module.createClaudeChannelSetup().repairConfigs())
+      .then(
+        ({ repaired }) => {
+          if (repaired)
+            process.stdout.write(
+              JSON.stringify({ event: 'channel-configs-repaired', count: repaired }) + '\n',
+            );
+        },
+        () => {},
+      );
   process.stdout.write(server.url + '\n');
   return { application, server };
 }

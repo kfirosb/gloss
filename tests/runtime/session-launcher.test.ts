@@ -950,6 +950,22 @@ it('reconcile does not delete a shell started while its tmux listing was in flig
   await launcher.reconcile(); // a later listing that includes it keeps it as well
   expect(launcher.list()).toMatchObject([{ id: shell.id, state: 'running' }]);
 });
+it.each(['codex', 'claude'] as const)(
+  'reconcile does not end a %s agent started while its tmux listing was in flight',
+  async (agent) => {
+    const { launcher, folder, t, store } = await setup();
+    const listed = deferred<Awaited<ReturnType<Tmux['listSessions']>>>();
+    const realList = t.tmux.listSessions.bind(t.tmux);
+    t.tmux.listSessions = () => listed.promise; // a listing taken before the agent exists
+    const pending = launcher.reconcile();
+    await tick();
+    t.tmux.listSessions = realList;
+    const started = await launcher.launch({ agent, folder });
+    listed.resolve([]);
+    await pending;
+    expect(store.listLaunches().find((r) => r.id === started.id)?.state).not.toBe('ended');
+  },
+);
 it('run never picks a terminal that is being ended', async () => {
   const { launcher, folder, t } = await setup();
   const first = await launcher.launch({ agent: 'shell', folder });

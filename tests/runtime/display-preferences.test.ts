@@ -1,8 +1,13 @@
 import { expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
+  applyTheme,
+  DARK_STYLES,
   pruneDisplayPreferences,
   readDisplayPreferences,
   writeDisplayPreferences,
+  type DarkStyle,
+  type Theme,
 } from '../../src/ui/display-preferences.js';
 const storage = (data: string | null = null) =>
   ({
@@ -28,6 +33,8 @@ it('recovers from unavailable, corrupt and unknown-version preferences', () => {
       lastByFolder: {},
       tabOrder: {},
       sidebarWidth: 300,
+      theme: 'dark',
+      darkStyle: 'graphite',
     });
   expect(() =>
     writeDisplayPreferences(readDisplayPreferences(), {
@@ -47,6 +54,8 @@ it('persists validated per-session modes and folder state without routing or cap
       lastByFolder: {},
       tabOrder: {},
       sidebarWidth: 300,
+      theme: 'dark',
+      darkStyle: 'graphite',
     },
     s,
   );
@@ -57,6 +66,8 @@ it('persists validated per-session modes and folder state without routing or cap
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
+    theme: 'dark',
+    darkStyle: 'graphite',
   });
   const bad = storage(
     '{"version":1,"collapsed":"yes","grouping":"no","assistantModes":{"A":"compact","B":"bad"},"capability":"secret"}',
@@ -68,6 +79,8 @@ it('persists validated per-session modes and folder state without routing or cap
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
+    theme: 'dark',
+    darkStyle: 'graphite',
   });
 });
 
@@ -95,6 +108,8 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
+    theme: 'dark',
+    darkStyle: 'graphite',
   });
   writeDisplayPreferences(
     {
@@ -104,6 +119,8 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
       lastByFolder: { '/f': 'A', bad: 1 as any },
       tabOrder: { '/f': ['A', 'B'], x: 'no' as any },
       sidebarWidth: 300,
+      theme: 'dark',
+      darkStyle: 'graphite',
     },
     s,
   );
@@ -114,6 +131,8 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     lastByFolder: { '/f': 'A' },
     tabOrder: { '/f': ['A', 'B'] },
     sidebarWidth: 300,
+    theme: 'dark',
+    darkStyle: 'graphite',
   });
 });
 
@@ -128,6 +147,8 @@ it('keeps long-lived tab order beyond 200 keys and prunes only vanished keys, fo
       lastByFolder: { '/f': 'k0', '/gone': 'x' },
       tabOrder: { '/f': keys, '/gone': ['x'] },
       sidebarWidth: 300,
+      theme: 'dark',
+      darkStyle: 'graphite',
     },
     s,
   );
@@ -152,4 +173,54 @@ it('validates and persists sidebarWidth', () => {
   expect(w(350)).toBe(350);
   expect(w('x')).toBe(300);
   expect(w(NaN)).toBe(300);
+});
+
+it('defaults the theme to dark, persists valid themes and rejects unknown ones', () => {
+  expect(readDisplayPreferences(storage()).theme).toBe('dark');
+  expect(readDisplayPreferences(storage('{"version":1,"collapsed":true}')).theme).toBe('dark');
+  const s = storage();
+  const t = (theme: unknown) => {
+    writeDisplayPreferences({ ...readDisplayPreferences(), theme: theme as Theme }, s);
+    return readDisplayPreferences(s).theme;
+  };
+  expect(t('light')).toBe('light');
+  expect(t('auto')).toBe('auto');
+  expect(t('dark')).toBe('dark');
+  expect(t('sepia')).toBe('dark');
+});
+
+it('defaults the dark style to Graphite and rejects unknown styles', () => {
+  expect(readDisplayPreferences(storage()).darkStyle).toBe('graphite');
+  const s = storage();
+  const d = (darkStyle: unknown) => {
+    writeDisplayPreferences({ ...readDisplayPreferences(), darkStyle: darkStyle as DarkStyle }, s);
+    return readDisplayPreferences(s).darkStyle;
+  };
+  expect(d('dimmed')).toBe('dimmed');
+  expect(d('midnight')).toBe('midnight');
+  expect(d('navy')).toBe('graphite');
+});
+
+it('marks the root with the theme and dark style its stylesheets key on', () => {
+  const root = { dataset: {} } as unknown as HTMLElement;
+  for (const theme of ['dark', 'light', 'auto'] as const)
+    for (const darkStyle of ['graphite', 'dimmed', 'midnight'] as const) {
+      applyTheme({ theme, darkStyle }, root);
+      expect(root.dataset).toEqual({ theme, darkStyle });
+    }
+});
+
+it('defines every dark color variable the stylesheets use for each dark style', () => {
+  const sheets = ['styles.css', 'file-tree.css', 'file-content-preview.css']
+    .map((f) => readFileSync(new URL('../../src/ui/' + f, import.meta.url), 'utf8'))
+    .join('\n');
+  const used = new Set([...sheets.matchAll(/var\((--dk-[\w-]+)\)/g)].map((m) => m[1]!));
+  const dark = readFileSync(new URL('../../src/ui/dark-styles.css', import.meta.url), 'utf8');
+  const blocks = [...dark.matchAll(/data-dark-style=(\w+)\] \{([^}]*)\}/g)].map(
+    (m) => [m[1], new Set([...m[2]!.matchAll(/(--dk-[\w-]+):/g)].map((x) => x[1]))] as const,
+  );
+  expect(blocks.map(([name]) => name)).toEqual(DARK_STYLES.map((s) => s.value));
+  expect(used.size).toBeGreaterThan(100);
+  for (const [, defined] of blocks) expect([...used].filter((v) => !defined.has(v))).toEqual([]);
+  expect(sheets).not.toMatch(/light-dark\([^,]+,\s*#/);
 });

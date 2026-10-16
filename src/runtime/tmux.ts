@@ -128,7 +128,9 @@ export async function createTmux(
   const dir = join(options.stateDir ?? join(homedir(), '.language-assistant'), 'tmux');
   await ensureSocketDirectory(dir);
   const socket = join(dir, 'socket');
-  const base = ['-S', socket, '-f', '/dev/null'];
+  // -u: always UTF-8. An app opened from the Dock or Finder has no LANG, and tmux would then print the listing's
+  // tab separators as "_" (every live session would look ended) and draw Hebrew in the popup terminal as "_".
+  const base = ['-u', '-S', socket, '-f', '/dev/null'];
   const check = (name: string) => {
     if (!NAME.test(name)) throw new Error('Invalid tmux session name');
   };

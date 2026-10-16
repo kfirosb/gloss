@@ -23,6 +23,12 @@ import {
   type LaunchSettingsInput,
 } from './launch-controls.js';
 import { ALERT_SOUNDS, useAlertSettings } from './attention-alerts.js';
+import {
+  DARK_STYLES,
+  useDisplayPreferences,
+  type DarkStyle,
+  type Theme,
+} from './display-preferences.js';
 
 export type SessionLanguage = {
   defaults: LanguageSettings;
@@ -78,6 +84,7 @@ export function translationSummary(s: LanguageSettings) {
 export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClose(): void }) {
   const [value, setValue] = useState<LanguageSettings | null>(null);
   const [alerts, updateAlerts] = useAlertSettings();
+  const [display, updateDisplay] = useDisplayPreferences();
   const [launch, setLaunch] = useState<LaunchSettingsInput | null>(null);
   const [error, setError] = useState('');
   const id = useId();
@@ -124,6 +131,42 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
           )}
         </section>
         {launch && <LaunchSettingsFields value={launch} onChange={setLaunch} />}
+        <section className="settings-section" aria-labelledby={id + 'appearance'}>
+          <h3 id={id + 'appearance'}>Appearance</h3>
+          <div className="language-field">
+            <label htmlFor={id + 'theme'}>Theme</label>
+            <select
+              id={id + 'theme'}
+              value={display.theme}
+              onChange={(e) => {
+                const theme = e.target.value as Theme;
+                updateDisplay((p) => ({ ...p, theme }));
+              }}
+            >
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="auto">Match system</option>
+            </select>
+          </div>
+          <div className="language-field">
+            <label htmlFor={id + 'dark-style'}>Dark style</label>
+            <select
+              id={id + 'dark-style'}
+              value={display.darkStyle}
+              onChange={(e) => {
+                const darkStyle = e.target.value as DarkStyle;
+                updateDisplay((p) => ({ ...p, darkStyle }));
+              }}
+            >
+              {DARK_STYLES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <small>Used whenever Gloss is dark, including Match system at night</small>
+          </div>
+        </section>
         <section className="settings-section alert-settings" aria-labelledby={id + 'alerts'}>
           <h3 id={id + 'alerts'}>Notifications</h3>
           <p>When a session you are not looking at replies or needs approval.</p>{' '}

@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { recordOf, type JsonRecord } from '../core/json-record.js';
-import { access, lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
+import { access, lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
@@ -23,6 +23,8 @@ export interface ChannelSetupService {
 }
 export interface NewSessionChannelSetupService extends ChannelSetupService {
   prepareNewSessionConfig(project: string): Promise<{ claude: string; mcpConfigPath: string }>;
+  /** Points every prepared config at this build, so saved commands survive an app rename or move. */
+  repairConfigs(): Promise<{ repaired: number }>;
 }
 /** Trusted host/test options only. Never accept these through HTTP. */
 export interface ChannelSetupOptions {
@@ -228,6 +230,15 @@ export function createClaudeChannelSetup(
   }
   async function prepareConfig(project: string, session?: string) {
     const claude = await preflight(project);
+    const { node, cli } = await serverPaths();
+    await privateDirectory(stateDir);
+    await privateDirectory(setupDir);
+    const path = configPath(project, session ?? 'new-' + randomUUID());
+    await writeConfig(path, node, cli);
+    seen.delete(path);
+    return { claude, mcpConfigPath: path };
+  }
+  async function serverPaths() {
     const node = await realpath(options.nodePath ?? process.execPath);
     const cli = await realpath(
       options.cliPath ?? fileURLToPath(new URL('./cli.js', import.meta.url)),
@@ -239,9 +250,9 @@ export function createClaudeChannelSetup(
       throw new Error(
         'Executable paths containing Claude environment interpolation are unsupported.',
       );
-    await privateDirectory(stateDir);
-    await privateDirectory(setupDir);
-    const path = configPath(project, session ?? 'new-' + randomUUID());
+    return { node, cli };
+  }
+  async function writeConfig(path: string, node: string, cli: string) {
     const temporary = join(setupDir, randomUUID() + '.tmp');
     const file = await open(
       temporary,
@@ -272,14 +283,61 @@ export function createClaudeChannelSetup(
       await file.close();
       await unlink(temporary).catch(() => {});
     }
-    seen.delete(path);
-    return { claude, mcpConfigPath: path };
+  }
+  async function repairConfigs() {
+    // A saved command keeps its config path forever, so a config naming an older or renamed
+    // app would start that build's channel helper. Only files this module wrote are touched.
+    try {
+      const info = await lstat(setupDir);
+      if (
+        !info.isDirectory() ||
+        info.isSymbolicLink() ||
+        (info.mode & 0o777) !== 0o700 ||
+        info.uid !== process.getuid?.()
+      )
+        return { repaired: 0 };
+    } catch (error) {
+      if (absent(error)) return { repaired: 0 };
+      throw error;
+    }
+    const { node, cli } = await serverPaths();
+    let repaired = 0;
+    for (const name of await readdir(setupDir)) {
+      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+      const path = join(setupDir, name);
+      try {
+        const info = await lstat(path);
+        if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) continue;
+        const config = await jsonConfig(path);
+        const servers = recordOf(config?.mcpServers);
+        const server = recordOf(servers?.[serverName]);
+        if (
+          !config ||
+          !servers ||
+          Object.keys(config).length !== 1 ||
+          Object.keys(servers).length !== 1 ||
+          !server ||
+          typeof server.command !== 'string' ||
+          !Array.isArray(server.args) ||
+          server.args.length !== 2 ||
+          server.args[1] !== '--claude-channel'
+        )
+          continue;
+        if (server.command === node && server.args[0] === cli) continue;
+        await writeConfig(path, node, cli);
+        repaired++;
+      } catch {
+        /* One unreadable config must not block repairing the rest. */
+      }
+    }
+    return { repaired };
   }
   async function prepareNewSessionConfig(project: string) {
     return prepareConfig(await projectFor(undefined, project));
   }
   return {
     prepareNewSessionConfig,
+    repairConfigs,
     async status(target) {
       try {
         const project = await projectFor(target);

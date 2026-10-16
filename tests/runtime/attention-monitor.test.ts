@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { MARKER_TABLES, classifyScreen, markersFor } from '../../src/runtime/attention-markers.js';
+import {
+  MARKER_TABLES,
+  classifyScreen,
+  compareVersions,
+  markersFor,
+} from '../../src/runtime/attention-markers.js';
 import { createAttentionMonitor } from '../../src/runtime/attention-monitor.js';
 
 const dir = 'tests/fixtures/screens';
@@ -14,14 +19,41 @@ const CLAUDE_FIXTURES = {
   idle: 'none',
   working: 'none',
 } as const;
-it('the claude marker table lists exactly the versions with fixtures', () => {
-  expect(MARKER_TABLES.find((t) => t.agent === 'claude')!.versions).toEqual(CLAUDE_VERSIONS);
-  const fixtureVersions = new Set(
-    readdirSync(dir)
-      .filter((f) => f.startsWith('claude-'))
-      .map((f) => f.split('-')[1]),
+it('the claude marker table lists exactly the versions with a full fixture set', () => {
+  expect(MARKER_TABLES.find((t) => t.agent === 'claude')!.verified).toEqual(CLAUDE_VERSIONS);
+  const files = readdirSync(dir);
+  const complete = [
+    ...new Set(files.filter((f) => f.startsWith('claude-')).map((f) => f.split('-')[1]!)),
+  ].filter((v) =>
+    Object.keys(CLAUDE_FIXTURES).every((kind) => files.includes(`claude-${v}-${kind}.txt`)),
   );
-  expect([...fixtureVersions].sort()).toEqual([...CLAUDE_VERSIONS].sort());
+  expect(complete.sort()).toEqual([...CLAUDE_VERSIONS].sort());
+});
+it('uses the patterns for the oldest captured version and every newer one, major versions included', () => {
+  for (const v of ['2.1.296', '2.1.300', '2.1.340', '2.2.0', '3.0.0', '10.0.0'])
+    expect(markersFor('claude', v), v).toBe(MARKER_TABLES.find((t) => t.agent === 'claude'));
+  for (const v of ['0.162.1', '0.162.2', '0.200.0', '1.0.0'])
+    expect(markersFor('codex', v), v).toBe(MARKER_TABLES.find((t) => t.agent === 'codex'));
+  for (const v of ['2.1.295', '2.0.999', '1.9.9'])
+    expect(markersFor('claude', v), v).toBeUndefined();
+  for (const v of ['0.162.0', '0.99.0']) expect(markersFor('codex', v), v).toBeUndefined();
+  for (const v of ['', 'unknown', '2.1']) expect(markersFor('claude', v), v).toBeUndefined();
+});
+it('compares versions numerically, not as text', () => {
+  expect(compareVersions('2.1.300', '2.1.296')).toBeGreaterThan(0);
+  expect(compareVersions('2.10.0', '2.9.9')).toBeGreaterThan(0);
+  expect(compareVersions('3.0.0', '2.1.999')).toBeGreaterThan(0);
+  expect(compareVersions('2.1.296', '2.1.296')).toBe(0);
+  expect(compareVersions('2.1.9', '2.1.10')).toBeLessThan(0);
+  expect(compareVersions('x', '2.1.296')).toBeUndefined();
+});
+it('classifies the 2.1.300 startup consent captured from a live session with the same patterns', () => {
+  expect(
+    classifyScreen(
+      markersFor('claude', '2.1.300')!,
+      readFileSync(join(dir, 'claude-2.1.300-consent.txt'), 'utf8'),
+    ),
+  ).toBe('consent');
 });
 describe.each(CLAUDE_VERSIONS)('claude %s', (version) => {
   const table = () => {
@@ -62,7 +94,7 @@ for (const file of readdirSync(dir).filter((f) => !f.startsWith('claude-'))) {
     expect(classifyScreen(table!, readFileSync(join(dir, file), 'utf8'))).toBe(expected);
   });
 }
-it('unknown versions have no table', () => {
+it('versions older than the captured ones have no table', () => {
   expect(markersFor('codex', '0.0.1')).toBeUndefined();
   expect(MARKER_TABLES.length).toBeGreaterThan(0);
 });
@@ -82,7 +114,7 @@ it('monitor reports needs-user, clears, and flags unknown versions without guess
       { id: 'L2', agent: 'claude', folder: '/p', panePid: 3, state: 'running', createdAt: 0 },
     ],
     agentVersion: async (a) =>
-      a === 'codex' ? MARKER_TABLES.find((t) => t.agent === 'codex')!.versions[0] : '9.9.9',
+      a === 'codex' ? MARKER_TABLES.find((t) => t.agent === 'codex')!.since : '1.0.0',
     intervalMs: 1,
     setTimer: ((fn: () => void) => {
       timers.push(fn);
@@ -160,7 +192,7 @@ it('never captures the pane of a launch whose agent version is unknown', async (
     launches: () => [
       { id: 'L1', agent: 'claude', folder: '/p', panePid: 2, state: 'running', createdAt: 0 },
     ],
-    agentVersion: async () => '9.9.9',
+    agentVersion: async () => '1.0.0',
     setTimer: ((fn: () => void) => {
       timers.push(fn);
       return 0 as any;

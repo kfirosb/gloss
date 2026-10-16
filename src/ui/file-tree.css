@@ -31,7 +31,7 @@
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: #334155;
+  color: light-dark(#334155, var(--dk-fg-334155));
   font:
     400 12px/26px ui-monospace,
     SFMono-Regular,
@@ -42,14 +42,14 @@
   cursor: pointer;
 }
 .file-entries .file-tree-row:hover {
-  background: #f0f3f7;
+  background: light-dark(#f0f3f7, var(--dk-bg-f0f3f7));
 }
 .file-entries .file-tree-row[aria-current='true'] {
-  background: #e0ebfa;
-  color: #163d70;
+  background: light-dark(#e0ebfa, var(--dk-bg-e0ebfa));
+  color: light-dark(#163d70, var(--dk-fg-163d70));
 }
 .file-entries .file-tree-row:focus-visible {
-  outline: 2px solid #7095c2;
+  outline: 2px solid light-dark(#7095c2, var(--dk-bg-7095c2));
   outline-offset: -2px;
 }
 .file-entries .file-tree-name {
@@ -79,7 +79,7 @@
   color: #7b8797;
 }
 .folder-icon {
-  color: #a17c35;
+  color: light-dark(#a17c35, var(--dk-fg-a17c35));
   fill: #f5e6c8;
 }
 .document-icon {
@@ -88,7 +88,7 @@
 .file-tree-list .file-tree-message {
   padding: 3px 6px 3px 20px;
   font-size: 11px;
-  color: #68768a;
+  color: light-dark(#68768a, var(--dk-fg-68768a));
   overflow-wrap: anywhere;
 }
 .file-tree .file-tree-action {
@@ -98,9 +98,9 @@
   margin-left: 19px;
   border-radius: 3px;
   font-size: 11px;
-  color: #355f93;
+  color: light-dark(#355f93, var(--dk-fg-355f93));
   text-align: left;
 }
 .file-tree .file-tree-action:hover {
-  background: #f0f3f7;
+  background: light-dark(#f0f3f7, var(--dk-bg-f0f3f7));
 }

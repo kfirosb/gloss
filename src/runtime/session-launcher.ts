@@ -478,6 +478,8 @@ export function createSessionLauncher(options: {
         ];
       }
       requireOpen();
+      // A reconcile listing already in flight cannot contain this session: it must not end it as missing.
+      for (const startedSince of listings) startedSince.add(id);
       const { panePid } = await tmux.newSession(sessionNameFor(id), cwd, argv, {
         ELECTRON_RUN_AS_NODE: '',
       });
