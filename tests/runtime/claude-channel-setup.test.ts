@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createApplication } from '../../src/runtime/application.js';
 import { startServer } from '../../src/runtime/http-server.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
@@ -78,6 +79,7 @@ async function service(registered = true) {
     registration,
   };
   await writeFile(options.cliPath, '// fixture');
+  await mkdir(options.configDir);
   const setup = createClaudeChannelSetup(options);
   return {
     ...f,
@@ -150,7 +152,7 @@ it('authenticates both routes and rejects unknown IDs before setup', async () =>
     sessionRef: '22222222-2222-4222-8222-222222222222',
   });
 });
-it('keeps GET read-only and reports setup, connecting, connected, disconnected independently', async () => {
+it('keeps GET read-only and reports setup, connected, disconnected independently', async () => {
   const f = await service();
   expect(await f.setup.status(f.target)).toMatchObject({
     state: 'setup-required',
@@ -168,6 +170,29 @@ it('keeps GET read-only and reports setup, connecting, connected, disconnected i
     state: 'setup-required',
     reason: expect.stringContaining('Register Gloss'),
   });
+});
+it('reports a session with a per-session file from an older build as connecting, then disconnected', async () => {
+  const f = await service();
+  // Older builds wrote one 0600 file per session; repairConfigs() keeps their mtime fresh.
+  const setupDir = join(f.options.stateDir, 'claude-channel-setup');
+  await mkdir(setupDir, { recursive: true, mode: 0o700 });
+  const name =
+    createHash('sha256')
+      .update(JSON.stringify([f.target.projectId, f.target.sessionRef]))
+      .digest('hex') + '.json';
+  await writeFile(join(setupDir, name), '{}', { mode: 0o600 });
+  expect(await f.setup.status(f.target)).toMatchObject({ state: 'connecting' });
+  f.advance();
+  expect(await f.setup.status(f.target)).toMatchObject({ state: 'disconnected' });
+});
+it('uses the Claude executable lookup the host shares with registration', async () => {
+  const f = await service();
+  const { createClaudeChannelSetup } = await import('../../src/runtime/claude-channel-setup.js');
+  const claude = vi.fn(async () => '/shared/claude');
+  const setup = createClaudeChannelSetup({ ...f.options, claude });
+  expect((await setup.prepareNewSessionConfig(f.project)).claude).toBe('/shared/claude');
+  expect(claude).toHaveBeenCalledOnce();
+  expect(f.runner).not.toHaveBeenCalled();
 });
 it('gives a registered user the short exact-id command and writes no file', async () => {
   const f = await service();
@@ -285,7 +310,8 @@ it.each(['user', 'local', 'project', 'managed'])(
         ? join(f.project, '.mcp.json')
         : scope === 'managed'
           ? join(f.options.managedDir, 'managed-mcp.json')
-          : join(f.root, '.claude.json');
+          : // The config dir is set (to ~/.claude), so Claude's user file is inside it.
+            join(f.options.configDir, '.claude.json');
     if (scope === 'managed') await mkdir(f.options.managedDir);
     const content = JSON.stringify(
       scope === 'local'
@@ -470,7 +496,7 @@ it('distinguishes equal project names and refuses malformed config without expos
   const second = await f.setup.createChannelSetup({ ...f.target, projectId: project });
   if (first.kind !== 'command' || second.kind !== 'command') throw new Error('expected commands');
   expect(first.cdCommand).not.toBe(second.cdCommand);
-  await writeFile(join(f.root, '.claude.json'), '{SECRET_DO_NOT_PRINT');
+  await writeFile(join(f.options.configDir, '.claude.json'), '{SECRET_DO_NOT_PRINT');
   const status = await f.setup.status(f.target);
   expect(status.state).toBe('unsupported');
   expect(status.reason).not.toContain('SECRET_DO_NOT_PRINT');
@@ -578,7 +604,10 @@ it('keeps the legacy language-assistant key in repaired files even when gloss is
     args: [f.options.cliPath, '--claude-channel'],
     env: { ELECTRON_RUN_AS_NODE: '1' },
   };
-  await writeFile(join(f.root, '.claude.json'), JSON.stringify({ mcpServers: { gloss } }));
+  await writeFile(
+    join(f.options.configDir, '.claude.json'),
+    JSON.stringify({ mcpServers: { gloss } }),
+  );
   const setupDir = join(f.options.stateDir, 'claude-channel-setup');
   await f.setup.prepareNewSessionConfig(f.project);
   const name = 'e'.repeat(64) + '.json';

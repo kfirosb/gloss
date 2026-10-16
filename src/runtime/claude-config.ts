@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, lstat, open, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LEGACY_SERVER } from '../agents/claude/channel-names.js';
 import { recordOf, type JsonRecord } from '../core/json-record.js';
@@ -34,6 +34,21 @@ export async function readClaudeConfigFile(path: string): Promise<JsonRecord | u
   } finally {
     await file?.close();
   }
+}
+
+/** Where Claude keeps user-scope settings such as MCP servers: `$CLAUDE_CONFIG_DIR/.claude.json` whenever a
+ * config dir is set (by option or a nonempty env var), even when it names `~/.claude`; otherwise `~/.claude.json`.
+ * `configDir` is the explicitly set dir, resolved, or undefined.
+ */
+export function claudeUserConfigPath(options: { home: string; configDir?: string | undefined }): {
+  path: string;
+  configDir: string | undefined;
+} {
+  const explicit = options.configDir ?? (process.env.CLAUDE_CONFIG_DIR || undefined);
+  if (explicit === undefined)
+    return { path: join(options.home, '.claude.json'), configDir: undefined };
+  const configDir = resolve(explicit);
+  return { path: join(configDir, '.claude.json'), configDir };
 }
 
 /** The executable and cli.js this build runs the channel bridge with. */

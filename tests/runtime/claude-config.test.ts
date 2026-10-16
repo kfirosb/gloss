@@ -1,16 +1,18 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 import {
   channelServerPaths,
+  claudeUserConfigPath,
   createClaudeExecutable,
   readClaudeConfigFile,
 } from '../../src/runtime/claude-config.js';
 
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const close of clean.splice(0)) await close();
 });
 async function folder() {
@@ -70,4 +72,23 @@ it('probes the installed Claude once per minute with the legacy server name', as
   now += 60_001;
   await claude();
   expect(calls).toHaveLength(2);
+});
+
+it('locates .claude.json in an explicitly set config dir, even the default one', () => {
+  const home = '/Users/me';
+  vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+  expect(claudeUserConfigPath({ home })).toEqual({
+    path: '/Users/me/.claude.json',
+    configDir: undefined,
+  });
+  for (const configDir of ['/Users/me/.claude', '/Users/me/other-claude'])
+    expect(claudeUserConfigPath({ home, configDir })).toEqual({
+      path: join(configDir, '.claude.json'),
+      configDir,
+    });
+  vi.stubEnv('CLAUDE_CONFIG_DIR', '/Users/me/.claude');
+  expect(claudeUserConfigPath({ home })).toEqual({
+    path: '/Users/me/.claude/.claude.json',
+    configDir: '/Users/me/.claude',
+  });
 });

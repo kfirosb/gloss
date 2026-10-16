@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isChannelServer } from './channel-names.js';
+import { claudeUserConfigPath } from '../../runtime/claude-config.js';
 import { isWithin } from '../../runtime/path-containment.js';
 import {
   mcpEntries,
@@ -88,20 +89,16 @@ export async function readClaudeInventory(options: {
   configDir?: string;
 }): Promise<Inventory> {
   const home = options.home ?? homedir();
-  const explicitDir = options.configDir ?? (process.env.CLAUDE_CONFIG_DIR || undefined);
-  const configDir = explicitDir ?? join(home, '.claude');
+  const user = claudeUserConfigPath({ home, configDir: options.configDir });
+  const configDir = user.configDir ?? join(home, '.claude');
   const ctx: InventoryContext = { home, problems: [] };
   const entries: InventoryEntry[] = [
     ...(await readSkillDir(join(configDir, 'skills'), 'global', ctx)),
     ...(await readSkillDir(join(options.project, '.claude', 'skills'), 'project', ctx)),
   ];
-  const user = await readJsonConfig(
-    explicitDir ? join(explicitDir, '.claude.json') : join(home, '.claude.json'),
-    ctx,
-    Infinity,
-  );
-  entries.push(...mcpEntries(user?.mcpServers, 'global'));
-  const projects = isObject(user?.projects) ? user.projects : {};
+  const userConfig = await readJsonConfig(user.path, ctx, Infinity);
+  entries.push(...mcpEntries(userConfig?.mcpServers, 'global'));
+  const projects = isObject(userConfig?.projects) ? userConfig.projects : {};
   const projectEntry = projects[options.project];
   if (isObject(projectEntry)) entries.push(...mcpEntries(projectEntry.mcpServers, 'project'));
   entries.push(

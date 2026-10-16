@@ -515,6 +515,8 @@ it('prepares distinct private MCP files for concurrent new sessions and never ma
   await writeFile(cliPath, '// fixture');
   const setup = createClaudeChannelSetup({
     homeDir: root,
+    // Pinned so the developer's CLAUDE_CONFIG_DIR is never read.
+    configDir: join(root, '.claude'),
     stateDir: join(root, 'state'),
     cliPath,
     claudePath: '/bin/echo',

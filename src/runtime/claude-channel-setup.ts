@@ -12,6 +12,7 @@ import { GLOSS_SERVER, LEGACY_SERVER } from '../agents/claude/channel-names.js';
 import { writeFileAtomic } from './atomic-file.js';
 import {
   channelServerPaths,
+  claudeUserConfigPath,
   createClaudeExecutable,
   isMissingFile,
   opaqueManagedPolicyPaths,
@@ -59,6 +60,8 @@ export interface ChannelSetupOptions {
   nodePath?: string;
   cliPath?: string;
   claudePath?: string;
+  /** The verified Claude executable lookup, shared with registration; built from `claudePath` when absent. */
+  claude?: (() => Promise<string>) | undefined;
   platform?: NodeJS.Platform;
   runner?: ProcessRunner;
   now?: () => number;
@@ -84,6 +87,7 @@ export function createClaudeChannelSetup(
   const stateDir = resolve(options.stateDir ?? join(home, '.language-assistant'));
   const setupDir = join(stateDir, 'claude-channel-setup');
   const configDir = resolve(claudeConfigDir(options.configDir, home));
+  const userConfigPath = claudeUserConfigPath({ home, configDir: options.configDir }).path;
   const library = options.systemLibraryDir ?? '/Library';
   const managedDir = options.managedDir ?? join(library, 'Application Support', 'ClaudeCode');
   const registry =
@@ -98,18 +102,21 @@ export function createClaudeChannelSetup(
         .update(JSON.stringify([project, session]))
         .digest('hex') + '.json',
     );
-  const executable = createClaudeExecutable({
-    homeDir: home,
-    claudePath: options.claudePath,
-    runner: options.runner,
-    now,
-  });
+  const executable =
+    options.claude ??
+    createClaudeExecutable({
+      homeDir: home,
+      claudePath: options.claudePath,
+      runner: options.runner,
+      now,
+    });
   const registration =
     options.registration ??
     createClaudeRegistration({
       claude: executable,
       homeDir: home,
-      configDir,
+      // Unresolved: whether a config dir was set decides which .claude.json Claude uses.
+      configDir: options.configDir,
       nodePath: options.nodePath,
       cliPath: options.cliPath,
       runner: options.runner,
@@ -148,11 +155,7 @@ export function createClaudeChannelSetup(
   async function preflight(project: string) {
     if ((options.platform ?? process.platform) !== 'darwin')
       throw new Error('Experimental Claude channels are supported on macOS only.');
-    const global = await readClaudeConfigFile(join(home, '.claude.json'));
-    const alternate =
-      configDir !== join(home, '.claude')
-        ? await readClaudeConfigFile(join(configDir, '.claude.json'))
-        : undefined;
+    const user = await readClaudeConfigFile(userConfigPath);
     const projectConfig = await readClaudeConfigFile(join(project, '.mcp.json'));
     const managed = await readClaudeConfigFile(join(managedDir, 'managed-mcp.json'));
     if (managed)
@@ -183,13 +186,7 @@ export function createClaudeChannelSetup(
       )
         throw new Error('Managed MCP policy requires administrator review before channel setup.');
     }
-    for (const config of [
-      global,
-      alternate,
-      projectConfig,
-      recordOf(recordOf(global?.projects)?.[project]),
-      recordOf(recordOf(alternate?.projects)?.[project]),
-    ]) {
+    for (const config of [user, projectConfig, recordOf(recordOf(user?.projects)?.[project])]) {
       if (config?.mcpServers && Object.hasOwn(config.mcpServers, serverName))
         throw new Error(
           'Claude MCP server name conflict: language-assistant already exists. Resolve it explicitly before setup.',
