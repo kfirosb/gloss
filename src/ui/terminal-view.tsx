@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -10,9 +10,14 @@ const COALESCE_MS = 10;
 export function TerminalView({
   launchId,
   onSelection,
+  autoFocus = true,
+  inputRef,
 }: {
   launchId: string;
   onSelection?(text: string): void;
+  autoFocus?: boolean;
+  /** Set while mounted to a sender that returns false when the socket is not open. */
+  inputRef?: MutableRefObject<((text: string) => boolean) | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
@@ -29,7 +34,7 @@ export function TerminalView({
     term.loadAddon(fit);
     term.open(host.current);
     fit.fit();
-    term.focus();
+    if (autoFocus) term.focus();
     let ws: WebSocket | undefined;
     let disposed = false;
     let pending = '';
@@ -46,6 +51,15 @@ export function TerminalView({
       pending = '';
       for (const part of chunkInput(data)) send({ type: 'input', data: part });
     };
+    if (inputRef)
+      inputRef.current = (text) => {
+        if (ws?.readyState !== WebSocket.OPEN) return false;
+        // Keep order with keystrokes still waiting in the coalescing window.
+        if (timer) clearTimeout(timer);
+        pending += text;
+        flush();
+        return true;
+      };
     terminalTicket(launchId).then(
       ({ ticket }) => {
         if (disposed) return;
@@ -84,6 +98,7 @@ export function TerminalView({
     observer.observe(host.current);
     return () => {
       disposed = true;
+      if (inputRef) inputRef.current = null;
       if (timer) clearTimeout(timer);
       observer.disconnect();
       input.dispose();
