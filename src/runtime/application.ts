@@ -57,6 +57,11 @@ import type { DictationBridge } from './dictation/bridge.js';
 import { createUsageService, type SessionUsageReport, type UsageService } from './usage.js';
 import type { UsageSnapshot } from '../core/usage.js';
 import type { AttentionMonitor } from './attention-monitor.js';
+import {
+  createClaudePeerSetting,
+  type PeerSetting,
+  type PeerSettingService,
+} from './claude-peer-setting.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
 import { createClaudeExecutable } from './claude-config.js';
 import {
@@ -84,6 +89,7 @@ import {
 export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
   claudeRegistration?: RegistrationService;
+  claudePeerSetting?: PeerSettingService;
   capability?: string;
   store: ConversationStore &
     SessionStore &
@@ -168,6 +174,8 @@ export interface Application {
   claudeChannelStatus?(id: string): ReturnType<ChannelSetupService['status']>;
   prepareClaudeChannel?(id: string): ReturnType<ChannelSetupService['createChannelSetup']>;
   claudeRegistration?(): Promise<RegistrationStatus>;
+  claudePeerSetting?(id: string): Promise<PeerSetting>;
+  allowClaudePeers?(id: string): Promise<PeerSetting>;
   changeClaudeRegistration?(action: 'register' | 'remove'): Promise<RegistrationStatus>;
   uploadImage?(input: { name: string; data: string }, sessionId?: string): Promise<ImageAttachment>;
   readonly files?: FileRegistry;
@@ -339,6 +347,7 @@ export function createApplication(options: ApplicationOptions): Application {
     options.claudeRegistration ?? createClaudeRegistration({ claude: createClaudeExecutable() });
   const channelSetup =
     options.channelSetup ?? createClaudeChannelSetup({ registration: claudeRegistration });
+  const claudePeerSetting = options.claudePeerSetting ?? createClaudePeerSetting();
   const savedTarget = (id: string) => {
     sessions.snapshot(id);
     return sessions.list().find((record) => record.id === id)!.target;
@@ -775,6 +784,14 @@ export function createApplication(options: ApplicationOptions): Application {
     async prepareClaudeChannel(id) {
       requireOpen();
       return channelSetup.createChannelSetup(savedTarget(id));
+    },
+    async claudePeerSetting(id) {
+      requireOpen();
+      return claudePeerSetting.read(savedTarget(id).projectId);
+    },
+    async allowClaudePeers(id) {
+      requireOpen();
+      return claudePeerSetting.allowAll(savedTarget(id).projectId);
     },
     async claudeRegistration() {
       requireOpen();

@@ -75,6 +75,18 @@ export class SessionClient {
       { method: 'POST' },
     );
   }
+  claudePeerSetting(signal?: AbortSignal) {
+    return sessionRequest<import('../runtime/claude-peer-setting.js').PeerSetting>(
+      this.base + '/claude-peer',
+      signal ? { signal } : {},
+    );
+  }
+  allowClaudePeers() {
+    return sessionRequest<import('../runtime/claude-peer-setting.js').PeerSetting>(
+      this.base + '/claude-peer',
+      { method: 'POST', body: JSON.stringify({ action: 'accept' }) },
+    );
+  }
   language() {
     return sessionRequest<import('./language-controls.js').SessionLanguage>(
       this.base + '/language',

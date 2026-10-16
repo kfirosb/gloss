@@ -171,6 +171,18 @@ async function sessionRoute(
       return true;
     }
   }
+  if (route === 'claude-peer') {
+    res.setHeader('cache-control', 'no-store');
+    if (req.method === 'GET' && app.claudePeerSetting) {
+      respond(res, 200, await app.claudePeerSetting(id));
+      return true;
+    }
+    if (req.method === 'POST' && app.allowClaudePeers) {
+      bodyAction(await readBody(req, 256), ['accept'] as const);
+      respond(res, 200, await app.allowClaudePeers(id));
+      return true;
+    }
+  }
   if (route === 'language') {
     res.setHeader('cache-control', 'no-store');
     if (req.method === 'GET' && app.sessionLanguage) {
