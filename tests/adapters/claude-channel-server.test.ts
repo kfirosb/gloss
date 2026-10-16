@@ -135,6 +135,36 @@ async function setup(mode = 'normal', initialize = true) {
   };
 }
 
+/** A bridge whose parent Claude command line and env are given; it does not wait for registration. */
+async function spawnWithActivation(env: Record<string, string>, commandLine: string) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'la-channel-activation-')));
+  roots.push(root);
+  const record: ChannelRecord = {
+    schemaVersion: 1,
+    generation: randomUUID(),
+    token: 'a'.repeat(64),
+    port: 0,
+    target: { agent: 'claude', sessionRef: randomUUID(), projectId: root },
+    transcriptPath: join(root, 'native.jsonl'),
+    claudePid: 100,
+    claudeStartedAt: 'native-start',
+    channelPid: 101,
+    channelStartedAt: 'channel-start',
+  };
+  await writeFile(join(root, 'input.json'), JSON.stringify(record));
+  await writeFile(join(root, 'activation.json'), JSON.stringify({ env, commandLine }));
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ['--experimental-transform-types', fixture, root, 'normal'],
+    stderr: 'pipe',
+  });
+  transports.push(transport);
+  const client = new Client({ name: 'channel-test', version: '1' });
+  await client.connect(transport);
+  await waitFile(join(root, 'started'));
+  return { root, client, transport };
+}
+
 describe('experimental Claude channel process boundary', () => {
   it('waits for initialized notification even after registration returned', async () => {
     const f = await setup('normal', false);
@@ -412,6 +442,43 @@ describe('experimental Claude channel process boundary', () => {
       generation: f.record.generation,
     });
     await expect(f.health()).rejects.toThrow();
+  });
+
+  it.each([
+    ['a plain session', {}, 'claude --resume aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    [
+      'a gloss bridge in a session that enabled only language-assistant',
+      { GLOSS_CHANNEL_SERVER: 'gloss' },
+      'claude --dangerously-load-development-channels server:language-assistant',
+    ],
+    [
+      'an unknown server name',
+      { GLOSS_CHANNEL_SERVER: 'other' },
+      'claude --dangerously-load-development-channels server:other',
+    ],
+  ])(
+    'stays inert in %s: no registration, tools, instructions or endpoint',
+    async (_name, env, commandLine) => {
+      const { root, client, transport } = await spawnWithActivation(env, commandLine);
+      expect(client.getServerCapabilities()).toEqual({});
+      expect(client.getInstructions()).toBeUndefined();
+      await expect(client.listTools()).rejects.toThrow();
+      await transport.close();
+      for (const marker of ['registered', 'bound.json', 'failed'])
+        await expect(readFile(join(root, marker), 'utf8')).rejects.toThrow();
+    },
+  );
+
+  it('serves a gloss bridge whose session enabled server:gloss', async () => {
+    const { root, client } = await spawnWithActivation(
+      { GLOSS_CHANNEL_SERVER: 'gloss' },
+      'claude --resume x --dangerously-load-development-channels=server:gloss',
+    );
+    expect(await readFile(join(root, 'registered'), 'utf8')).toBe('registered');
+    expect(client.getServerCapabilities()).toEqual({
+      experimental: { 'claude/channel': {} },
+      tools: {},
+    });
   });
 
   it('dispatches the CLI channel before panel imports, database setup, or panel flag validation', async () => {

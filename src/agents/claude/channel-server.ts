@@ -6,6 +6,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { uuid } from '../shared.js';
+import { enabledChannelServer, readParentCommandLine } from './channel-activation.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { GLOSS_SERVER } from './channel-names.js';
 import { ChannelStore } from './channel-store.js';
@@ -17,6 +18,10 @@ export interface ClaudeChannelOptions {
   /** Trusted process configuration only; never sourced from HTTP or model input. */
   stateDir?: string;
   registryFactory?: (context: { port: number; stateDir: string }) => Registry;
+  /** The bridge's environment; `GLOSS_CHANNEL_SERVER` names the server it runs as. */
+  env?: NodeJS.ProcessEnv | undefined;
+  /** Reads the parent Claude's command line; production runs `ps` on the parent pid. */
+  readParentCommandLine?: (() => Promise<string | undefined>) | undefined;
 }
 const MAX_BODY = 1_048_576;
 const identifier = (value: unknown): value is string =>
@@ -98,6 +103,36 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** A user-scope MCP server loads in every Claude session, but Claude delivers channel
+ * pushes only to servers its command line enabled. Elsewhere the bridge answers MCP with
+ * no tools or instructions, never registers, and exits with stdin.
+ */
+async function startInertServer(): Promise<{ close(): Promise<void> }> {
+  const mcp = new Server({ name: GLOSS_SERVER, version: '0.0.0' }, { capabilities: {} });
+  let closePromise: Promise<void> | undefined;
+  const close = () => {
+    closePromise ??= Promise.resolve().then(async () => {
+      process.stdin.off('end', shutdown);
+      process.stdin.off('error', shutdown);
+      process.stdout.off('error', shutdown);
+      await mcp.close();
+    });
+    return closePromise;
+  };
+  function shutdown() {
+    void close().catch(() => {
+      process.stderr.write('Claude channel shutdown failed\n');
+    });
+  }
+  mcp.onclose = shutdown;
+  mcp.onerror = shutdown;
+  process.stdin.once('end', shutdown);
+  process.stdin.once('error', shutdown);
+  process.stdout.once('error', shutdown);
+  await mcp.connect(new StdioServerTransport());
+  return { close };
+}
+
 /** Experimental macOS channel. Readiness proves local initialization, not Claude
  * consent, processing or delivery. Stdio is exclusively MCP; HTTP never supplies
  * identity, credentials, filesystem paths, or permission decisions.
@@ -105,6 +140,11 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 export async function startClaudeChannel(
   options: ClaudeChannelOptions = {},
 ): Promise<{ close(): Promise<void> }> {
+  const enabled = await enabledChannelServer(
+    options.env ?? process.env,
+    options.readParentCommandLine ?? (() => readParentCommandLine()),
+  );
+  if (!enabled) return startInertServer();
   const stateDir = resolve(options.stateDir ?? join(homedir(), '.language-assistant'));
   let registry: Registry | undefined;
   let record: ChannelRecord | undefined;

@@ -32,9 +32,15 @@ if (mode === 'cli') {
 } else {
   const { startClaudeChannel } = await import('../../src/agents/claude/channel-server.ts');
   const input = JSON.parse(await readFile(join(root, 'input.json'), 'utf8'));
+  // The parent Claude's command line and the bridge env; by default a legacy session that enabled the channel.
+  const activation = await readFile(join(root, 'activation.json'), 'utf8').then(JSON.parse, () => ({
+    env: {},
+    commandLine: 'claude --dangerously-load-development-channels server:language-assistant',
+  }));
   let removals = 0;
   const registryFactory = ({ port, stateDir }) => ({
     async registerChannel() {
+      await writeFile(join(root, 'registered'), 'registered');
       const record = { ...input, port };
       await writeFile(join(root, 'bound.json'), JSON.stringify({ record, stateDir }));
       if (mode === 'gated' || mode === 'reject') {
@@ -51,7 +57,12 @@ if (mode === 'cli') {
     },
   });
   try {
-    const handle = await startClaudeChannel({ stateDir: join(root, 'state'), registryFactory });
+    const handle = await startClaudeChannel({
+      stateDir: join(root, 'state'),
+      registryFactory,
+      env: activation.env,
+      readParentCommandLine: async () => activation.commandLine,
+    });
     await writeFile(join(root, 'started'), 'started');
     if (mode === 'close') { await handle.close(); await handle.close(); }
   } catch {

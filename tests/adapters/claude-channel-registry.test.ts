@@ -22,6 +22,7 @@ import {
   type ChannelRegistryOptions,
 } from '../../src/agents/claude/channel-registry.js';
 import type { ChannelRecord } from '../../src/agents/claude/channel-types.js';
+import { enabledChannelServer } from '../../src/agents/claude/channel-activation.js';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 
 // Keep real filesystem behavior; allow only the selected syscall to be stalled.
@@ -571,6 +572,29 @@ describe('experimental native Claude channel registry', () => {
     await f.seed(second, join(f.registryDir, `${otherGeneration}.json`));
     expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(f.record);
     f.table.set(301, { ...f.table.get(300)!, pid: 301 });
+    expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toBeUndefined();
+  });
+
+  it('resolves the legacy bridge when an inert gloss bridge runs in the same session', async () => {
+    const f = await fixture();
+    f.table.set(301, { ...f.table.get(300)!, pid: 301 });
+    // A Gloss-launched session: the per-session legacy file plus the user-scope gloss entry.
+    const parent = async () =>
+      `/native/2.1.288 --session-id ${id} --mcp-config /x.json --dangerously-load-development-channels server:language-assistant`;
+    const bridges = [
+      { pid: 300, env: {} },
+      { pid: 301, env: { GLOSS_CHANNEL_SERVER: 'gloss' } },
+    ];
+    const registered: ChannelRecord[] = [];
+    for (const bridge of bridges)
+      if (await enabledChannelServer(bridge.env, parent))
+        registered.push(
+          await createChannelRegistry({ ...f.options, pid: bridge.pid }).registerChannel(),
+        );
+    expect(registered.map((record) => record.channelPid)).toEqual([300]);
+    expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(registered[0]);
+    // Without the gate both bridges register, and the session has no channel at all.
+    await createChannelRegistry({ ...f.options, pid: 301 }).registerChannel();
     expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toBeUndefined();
   });
 
