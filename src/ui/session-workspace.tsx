@@ -556,6 +556,8 @@ export function SessionWorkspace({
     composerAttempt &&
     snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
   const composerSendBlocked =
+    // A held message is still the composer's: Don't send releases it; Send would only re-post it.
+    composerDelivery?.state === 'held' ||
     unsupportedFiles ||
     (!text.trim() && !images.length) ||
     uploading ||

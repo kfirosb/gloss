@@ -103,11 +103,15 @@ test('a held message says why it waits, and Don’t send releases it without sen
     'Waiting for the terminal: There is unsent text in the terminal',
   );
   await expect(page.getByRole('button', { name: 'Check delivery' })).toHaveCount(0);
+  // Send would only re-post the held message; Don’t send is the way out.
+  await expect(send(page)).toBeDisabled();
+  await input(page).press('Enter');
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Don’t send', exact: true }).click();
   await expect.poll(() => f.actions.some((a) => a.type === 'release-composer')).toBe(true);
   await expect(input(page)).toHaveValue('שלום');
   expect(f.actions.filter((a) => a.type === 'send-composer')).toHaveLength(1);
+  await expect(send(page)).toBeEnabled();
 });
 test('a dialog in the terminal labels the session and still lets a message wait for it', async ({
   page,
