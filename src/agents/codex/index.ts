@@ -1,5 +1,10 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
-import { codexThreadLiveness, discoverOpenCodex } from './discovery.js';
+import {
+  codexSnapshot,
+  discoverOpenCodex,
+  threadLiveness,
+  type CodexSnapshot,
+} from './discovery.js';
 import type { LaunchedLiveness, ThreadLiveness } from './liveness.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
 import { stat } from 'node:fs/promises';
@@ -54,8 +59,13 @@ export interface CodexAdapterOptions extends AdapterOptions {
 /** Shown when a send targets a Codex thread with no attached terminal. */
 export const CODEX_CLOSED_REASON =
   'Codex session is closed: no Codex terminal is attached, so a queued message would never be processed. Resume it in a terminal first.';
-/** Liveness probes are shared by every connection of one adapter for this long. */
-const LIVENESS_TTL_MS = 1000;
+/**
+ * How long one writer/attachment probe round is shared by discovery and every connection
+ * of one adapter, in milliseconds after it finished. Sends always probe afresh.
+ */
+const CODEX_LIVENESS_TTL_MS = 3000;
+/** Bound on one shared probe round, so a hung `ps`/`lsof` cannot stall every caller. */
+const CODEX_PROBE_TIMEOUT_MS = 10_000;
 export function parseCodexRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {
   const payload = recordOf(record.payload);
   if (record.type === 'session_meta') {
@@ -110,22 +120,35 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   const database = options.databasePath ?? join(home, 'state_5.sqlite');
   const runner = options.runner ?? runProcess;
   const now = options.now ?? Date.now;
-  let liveness: { at: number; value: Promise<Map<string, ThreadLiveness>> } | undefined;
-  const threadLiveness = () => {
-    if (!liveness || now() - liveness.at >= LIVENESS_TTL_MS) {
-      const value = codexThreadLiveness(options, AbortSignal.timeout(10_000));
-      const entry = { at: now(), value };
-      liveness = entry;
-      value.catch(() => {
-        if (liveness === entry) liveness = undefined;
-      });
-    }
-    return liveness.value;
+  let shared: { value: Promise<CodexSnapshot>; settled: boolean; expiresAt: number } | undefined;
+  /** `fresh` skips a finished round but joins one still running, which started moments ago. */
+  const snapshot = ({ fresh = false } = {}): Promise<CodexSnapshot> => {
+    if (shared && (!shared.settled || (!fresh && now() <= shared.expiresAt))) return shared.value;
+    const entry = {
+      value: codexSnapshot(options, AbortSignal.timeout(CODEX_PROBE_TIMEOUT_MS)),
+      settled: false,
+      expiresAt: -Infinity,
+    };
+    shared = entry;
+    // Only a fully verified round is reused; anything incomplete is probed again next time.
+    entry.value.then(
+      (result) => {
+        entry.settled = true;
+        if (result.scan.complete && result.liveness)
+          entry.expiresAt = now() + CODEX_LIVENESS_TTL_MS;
+        else if (shared === entry) shared = undefined;
+      },
+      () => {
+        entry.settled = true;
+        if (shared === entry) shared = undefined;
+      },
+    );
+    return entry.value;
   };
-  const isOpen = async (target: Target) =>
+  const isOpen = async (target: Target, fresh = false) =>
     options.observeLive
       ? options.observeLive(target)
-      : (await threadLiveness()).get(target.sessionRef)?.open === true;
+      : threadLiveness(await snapshot({ fresh })).get(target.sessionRef)?.open === true;
   function rows(id?: string): Thread[] {
     const db = new DatabaseSync(database, { readOnly: true });
     try {
@@ -153,7 +176,7 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   }
   return {
     kind: 'codex',
-    discoverOpen: (signal) => discoverOpenCodex(options, signal),
+    discoverOpen: (signal) => discoverOpenCodex(options, signal, () => snapshot()),
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       let threads: Thread[];
@@ -219,7 +242,7 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
         },
         async beforeSend() {
           try {
-            if (!(await isOpen(target))) return CODEX_CLOSED_REASON;
+            if (!(await isOpen(target, true))) return CODEX_CLOSED_REASON;
           } catch {
             return 'Codex session liveness could not be verified';
           }

@@ -590,6 +590,96 @@ describe('closed Codex threads (no attached terminal)', () => {
     });
     await expect(readFile(queueArgs, 'utf8')).rejects.toThrow();
   });
+  async function terminalRig(h: Awaited<ReturnType<typeof harness>>) {
+    await mkdir(join(h.dir, 'thread-writer-locks'));
+    const lock = join(h.dir, 'thread-writer-locks', `${h.sessionRef}.lock`);
+    await writeFile(lock, '');
+    const state = {
+      owner: '/opt/codex/bin/codex --model gpt',
+      writerProbes: 0,
+      now: 0,
+    };
+    const lines = (values: string[]) =>
+      (async function* () {
+        for (const line of values) yield { type: 'line' as const, line };
+        yield {
+          type: 'exit' as const,
+          outcome: { code: 0, signal: null, reason: 'exited' as const, diagnostics: '' },
+        };
+      })();
+    const runner: ProcessRunner = (command, args) => {
+      if (command === '/usr/sbin/lsof' && args[0] === '-Fpcfn') {
+        state.writerProbes++;
+        return lines(['p900', 'ccodex', 'f20', `n${lock}`]);
+      }
+      if (command === '/usr/sbin/lsof') return lines([]);
+      if (command === '/bin/ps') return lines([`900 05:00 codex ${state.owner}`]);
+      throw new Error(`Unexpected process ${command}`);
+    };
+    const adapter = createCodexAdapter({
+      codexHome: h.dir,
+      runner,
+      pollMs: 5,
+      now: () => state.now,
+    });
+    return { state, adapter };
+  }
+
+  it.runIf(process.platform === 'darwin')(
+    'shares one liveness round between discovery and status polls',
+    async () => {
+      const h = await harness('codex');
+      cleanups.push(h.cleanup);
+      const { state, adapter } = await terminalRig(h);
+      const connection = await adapter.attach(h.target);
+      cleanups.push(() => connection.detach());
+      const w = watch(connection);
+      cleanups.push(w.stop);
+      await expect
+        .poll(() => w.events.filter((e) => e.type === 'status').at(-1))
+        .toEqual({ type: 'status', state: 'idle' });
+      for (let i = 0; i < 3; i++) await adapter.discoverOpen!(new AbortController().signal);
+      expect(state.writerProbes).toBe(1);
+    },
+  );
+
+  it.runIf(process.platform === 'darwin')(
+    'reuses a liveness round for 3 seconds after it finished',
+    async () => {
+      const h = await harness('codex');
+      cleanups.push(h.cleanup);
+      const { state, adapter } = await terminalRig(h);
+      const discover = () => adapter.discoverOpen!(new AbortController().signal);
+      await discover();
+      expect(state.writerProbes).toBe(1);
+      state.now = 2999;
+      await discover();
+      expect(state.writerProbes).toBe(1);
+      state.now = 3001;
+      await discover();
+      expect(state.writerProbes).toBe(2);
+    },
+  );
+
+  it.runIf(process.platform === 'darwin')('checks liveness afresh before every send', async () => {
+    const h = await harness('codex');
+    cleanups.push(h.cleanup);
+    const { state, adapter } = await terminalRig(h);
+    const connection = await adapter.attach(h.target);
+    cleanups.push(() => connection.detach());
+    const w = watch(connection);
+    cleanups.push(w.stop);
+    await expect
+      .poll(() => w.events.filter((e) => e.type === 'status').at(-1))
+      .toEqual({ type: 'status', state: 'idle' });
+    state.owner =
+      '/x/.codex/packages/app-server-daemon/bin/codex app-server --listen unix:// --managed-daemon';
+    expect(await connection.send('closed', 'text')).toEqual({
+      state: 'failed',
+      reason: CODEX_CLOSED_REASON,
+    });
+  });
+
   it.runIf(process.platform === 'darwin')(
     'reports a daemon-held lock without a terminal as closed and a terminal-held lock as open',
     async () => {

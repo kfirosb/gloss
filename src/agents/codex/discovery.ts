@@ -247,17 +247,22 @@ async function writerLiveness(
   });
 }
 
-/** Liveness of every locked thread, for adapter status checks. Throws when it cannot be verified. */
-export async function codexThreadLiveness(
+/** One writer scan and the liveness decided from it: the unit an adapter shares between discovery, status and sends. */
+export interface CodexSnapshot {
+  scan: WriterScan;
+  /** Absent when attachment verification failed. */
+  liveness?: Map<string, ThreadLiveness>;
+  metadataUnavailable?: boolean;
+}
+
+/** Runs the writer probe and the attachment probes once. Throws only when cancelled. */
+export async function codexSnapshot(
   options: CodexAdapterOptions,
   signal: AbortSignal,
-): Promise<Map<string, ThreadLiveness>> {
-  if (process.platform !== 'darwin')
-    throw new Error('Codex writer ownership verification is unavailable on this platform');
+): Promise<CodexSnapshot> {
   const scan = await scanWriters(options, signal);
-  if (scan.cancelled) throw new Error('Codex liveness check cancelled');
-  if (!scan.complete && !scan.owned.size)
-    throw new Error(scan.error ?? 'Codex writer enumeration failed');
+  if (scan.cancelled || signal.aborted) throw new Error('Codex liveness check cancelled');
+  if (!scan.owned.size) return { scan, liveness: new Map() };
   let metadata: ReturnType<typeof openMetadata> | undefined;
   try {
     metadata = openMetadata(options);
@@ -265,16 +270,32 @@ export async function codexThreadLiveness(
     /* Daemon-held threads then stay closed. */
   }
   try {
-    return await writerLiveness(scan, metadata?.query, options, signal);
+    const liveness = await writerLiveness(scan, metadata?.query, options, signal);
+    return { scan, liveness, ...(metadata ? {} : { metadataUnavailable: true }) };
+  } catch {
+    if (signal.aborted) throw new Error('Codex liveness check cancelled');
+    return { scan, ...(metadata ? {} : { metadataUnavailable: true }) };
   } finally {
     metadata?.close();
   }
+}
+
+/** Liveness of every locked thread, for adapter status checks. Throws when it cannot be verified. */
+export function threadLiveness(snapshot: CodexSnapshot): Map<string, ThreadLiveness> {
+  if (process.platform !== 'darwin')
+    throw new Error('Codex writer ownership verification is unavailable on this platform');
+  const { scan, liveness } = snapshot;
+  if (!scan.complete && !scan.owned.size)
+    throw new Error(scan.error ?? 'Codex writer enumeration failed');
+  if (!liveness) throw new Error('Codex terminal attachment verification failed');
+  return liveness;
 }
 
 /** Metadata-only discovery: writer candidates first, attachment second, exact SQLite rows last. */
 export async function discoverOpenCodex(
   options: CodexAdapterOptions,
   signal: AbortSignal,
+  snapshot: () => Promise<CodexSnapshot> = () => codexSnapshot(options, signal),
 ): Promise<OpenSessionScan> {
   const result: OpenSessionScan = { candidates: [], complete: true };
   const fail = (error: string) => {
@@ -293,27 +314,29 @@ export async function discoverOpenCodex(
       complete: false,
       error: 'Codex writer ownership verification is unavailable on this platform',
     };
-  const scan = await scanWriters(options, signal);
-  if (scan.cancelled || signal.aborted) return cancelled();
-  if (!scan.complete) fail(scan.error!);
+  let snap: CodexSnapshot;
+  try {
+    snap = await snapshot();
+  } catch {
+    return cancelled();
+  }
+  if (signal.aborted) return cancelled();
+  const { scan, liveness } = snap;
+  if (!scan.complete) fail(scan.error ?? 'Codex writer enumeration failed');
   if (!scan.owned.size) return result;
   let metadata: ReturnType<typeof openMetadata>;
   try {
+    if (snap.metadataUnavailable) throw new Error('Codex session metadata unavailable');
     metadata = openMetadata(options);
   } catch {
     fail('Codex session metadata unavailable');
     return result;
   }
   try {
-    let liveness: Map<string, ThreadLiveness>;
-    try {
-      liveness = await writerLiveness(scan, metadata.query, options, signal);
-    } catch {
-      if (signal.aborted) return cancelled();
+    if (!liveness) {
       fail('Codex terminal attachment verification failed');
       return result;
     }
-    if (signal.aborted) return cancelled();
     for (const [id, nativePid] of scan.owned) {
       if (signal.aborted) return cancelled();
       // A thread nobody is attached to cannot process a message: it is closed, not open.
