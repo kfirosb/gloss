@@ -61,7 +61,7 @@ import {
   needsReplyTranslation,
 } from '../core/language-settings.js';
 import { isHebrew } from '../core/language-style.js';
-import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
+import { ClaudeConnection, PeerExplanation, useClaudeConnection } from './claude-connection.js';
 import {
   canSendWhileWorking,
   isChannelAwaitingReply,
@@ -1316,13 +1316,16 @@ export function SessionWorkspace({
               Send to agent
             </button>
             {isClaude && (
-              <button
-                type="button"
-                disabled={composerSendBlocked('peer')}
-                onClick={() => void sendComposer('peer')}
-              >
-                Send as peer — approval may be required
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={composerSendBlocked('peer')}
+                  onClick={() => void sendComposer('peer')}
+                >
+                  Send as peer
+                </button>
+                <PeerExplanation client={client} />
+              </>
             )}
           </div>
         </ImageAttachments>

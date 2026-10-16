@@ -2323,6 +2323,16 @@ pre {
   font-family: monospace;
   direction: ltr;
 }
+.peer-explanation {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+.peer-explanation summary {
+  cursor: pointer;
+}
+.peer-explanation p {
+  margin: 6px 0;
+}
 .session-language {
   position: relative;
   display: flex;

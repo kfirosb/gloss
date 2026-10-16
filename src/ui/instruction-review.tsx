@@ -133,7 +133,7 @@ export function InstructionReviewDialog({
             disabled={busy || (peerBlocked ?? blocked) || pending || !review.localizedText.trim()}
             onClick={onPeerSend}
           >
-            Send as peer — approval may be required
+            Send as peer
           </button>
         )}
         <span className="review-destination">{providerLabel(review.draft.target.agent)}</span>

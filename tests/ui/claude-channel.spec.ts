@@ -25,10 +25,12 @@ async function fixture(page: Page, initial = 'setup-required', deliveryState = '
       setups++;
       return route.fulfill({
         json: {
-          command: "cd '/project' && claude --resume '11111111-1111-4111-8111-111111111111'",
-          experimental: true,
-          instructions:
-            'Stop the existing Claude process normally, then resume. Accept per-launch consent.',
+          kind: 'command',
+          command:
+            'claude --resume 11111111-1111-4111-8111-111111111111 --dangerously-load-development-channels server:gloss',
+          cdCommand:
+            "cd '/project' && claude --resume 11111111-1111-4111-8111-111111111111 --dangerously-load-development-channels server:gloss",
+          folder: '/project',
         },
       });
     }
@@ -155,18 +157,20 @@ test('discovery is not send readiness; explicit setup is collapsible and shows a
   await expect(
     page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
   ).toBeDisabled();
-  await expect(page.getByText('Channel setup required', { exact: false })).toBeVisible();
-  await expect(page.locator('.claude-connection summary')).toContainText('Experimental');
+  await expect(page.getByText('Not connected', { exact: false })).toBeVisible();
+  await expect(page.locator('.claude-connection summary')).toContainText(
+    'Connect this session to Gloss',
+  );
   expect(f.setups()).toBe(0);
-  await page.getByText('Channel setup required', { exact: false }).click();
-  await page.getByRole('button', { name: 'Prepare setup command' }).click();
-  await expect(page.getByRole('textbox', { name: 'Claude setup command' })).toContainText(
+  await page.locator('.claude-connection summary').click();
+  await page.getByRole('button', { name: 'Show connect command' }).click();
+  await expect(page.getByRole('textbox', { name: 'Claude connect command' })).toContainText(
     '--resume',
   );
   expect(f.setups()).toBe(1);
   for (const [state, label] of [
     ['connecting', 'Connecting'],
-    ['connected', 'Channel connected'],
+    ['connected', 'Connected'],
     ['disconnected', 'Disconnected'],
     ['unsupported', 'Unsupported'],
   ]) {
@@ -189,9 +193,7 @@ test('peer is explicit per send; uncertain release preserves edited Hebrew and n
   const f = await fixture(page);
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
   await input.fill('שלום לעולם');
-  await page
-    .getByRole('button', { name: 'Send as peer — approval may be required', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Send as peer', exact: true }).click();
   await expect(page.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-composer')).toMatchObject({
     transport: 'peer',
@@ -243,9 +245,7 @@ test('prepared review offers separate peer action while normal channel send is u
   await expect(
     dialog.getByRole('button', { name: 'Send to Terminal', exact: true }),
   ).toBeDisabled();
-  await dialog
-    .getByRole('button', { name: 'Send as peer — approval may be required', exact: true })
-    .click();
+  await dialog.getByRole('button', { name: 'Send as peer', exact: true }).click();
   await expect(dialog.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-review')).toMatchObject({
     transport: 'peer',
@@ -364,7 +364,7 @@ test('same-name destinations retain isolated status and late status cannot enabl
   await selectSession(page, 'B');
   finish!();
   await page.getByRole('textbox', { name: 'Discuss with language assistant' }).fill('לסשן השני');
-  await expect(page.locator('.claude-connection summary')).toContainText('Channel setup required');
+  await expect(page.locator('.claude-connection summary')).toContainText('Not connected');
   await expect(
     page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
   ).toBeDisabled();
@@ -483,4 +483,87 @@ test('channel-connected Claude working: Send to agent enabled, peer send stays d
   await expect(
     page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
   ).toBeDisabled();
+});
+
+test('walks an outside session from registration to the short command', async ({ page }) => {
+  const f = await fixture(page);
+  let registered = false;
+  await page.route('**/api/claude/registration', async (route) => {
+    if (route.request().method() === 'POST') registered = true;
+    await route.fulfill({ json: { state: registered ? 'registered' : 'unregistered' } });
+  });
+  await page.route('**/api/sessions/*/claude-channel', (route) => {
+    if (route.request().method() === 'GET')
+      return route.fulfill({ json: { state: 'setup-required' } });
+    return route.fulfill({
+      json: registered
+        ? {
+            kind: 'command',
+            folder: '/project',
+            command:
+              'claude --resume 11111111-1111-4111-8111-111111111111 --dangerously-load-development-channels server:gloss',
+            cdCommand:
+              "cd '/project' && claude --resume 11111111-1111-4111-8111-111111111111 --dangerously-load-development-channels server:gloss",
+          }
+        : { kind: 'registration-required', registration: { state: 'unregistered' } },
+    });
+  });
+  await page.locator('.claude-connection summary').click();
+  await page.getByRole('button', { name: 'Show connect command' }).click();
+  await expect(page.getByText('registers itself once with Claude Code')).toBeVisible();
+  await page.getByRole('button', { name: 'Register', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Claude connect command' })).toHaveValue(
+    /--resume 11111111-1111-4111-8111-111111111111 --dangerously-load-development-channels server:gloss$/,
+  );
+  await expect(page.getByRole('button', { name: 'Copy with cd' })).toBeVisible();
+  await expect(page.getByText('--mcp-config')).toHaveCount(0);
+  expect(f.actions).toEqual([]);
+});
+
+test('explains peer sending and allows it for all sessions on an explicit click', async ({
+  page,
+}) => {
+  await fixture(page);
+  let user = 'unset';
+  const posts: unknown[] = [];
+  await page.route('**/api/sessions/*/claude-peer', async (route) => {
+    if (route.request().method() === 'POST') {
+      posts.push(route.request().postDataJSON());
+      user = 'accept';
+    }
+    await route.fulfill({ json: { user } });
+  });
+  await page.getByText('How to allow', { exact: true }).click();
+  await page.getByRole('button', { name: 'Allow for all sessions' }).click();
+  await expect(page.getByRole('button', { name: 'Allow for all sessions' })).toHaveCount(0);
+  await expect(page.getByText('Messages from your other sessions').first()).toBeVisible();
+  expect(posts).toEqual([{ action: 'accept' }]);
+});
+
+test('a forced peer setting shows the reason instead of the allow button', async ({ page }) => {
+  await fixture(page);
+  await page.route('**/api/sessions/*/claude-peer', (route) =>
+    route.fulfill({ json: { user: 'unset', forcedBy: 'repository', forced: 'hold' } }),
+  );
+  await page.getByText('How to allow', { exact: true }).click();
+  await expect(page.getByText('by your repository', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Allow for all sessions' })).toHaveCount(0);
+});
+
+test('peer send stays available while Claude works when Claude queues peer messages', async ({
+  page,
+}) => {
+  const f = await fixture(page, 'connected', 'queued');
+  f.snapshot.codingState = 'working';
+  f.snapshot.capabilities = {
+    sendWhileBusy: false,
+    channelSendWhileBusy: true,
+    peerSendWhileBusy: true,
+    fileReferences: true,
+  };
+  await page.reload();
+  await page
+    .getByRole('textbox', { name: 'Discuss with language assistant' })
+    .fill('הודעה בזמן עבודה');
+  await expect(page.getByRole('button', { name: 'Send as peer', exact: true })).toBeEnabled();
 });
