@@ -23,3 +23,14 @@ export function readRecord(version: string, state: 'dialog' | 'permission'): Cap
     version: record.version,
   };
 }
+export const readScreen = (version: string, state: string) =>
+  readFileSync(join(FIXTURE_DIR, `claude-${version}-${state}.ansi`), 'utf8');
+export function readCursor(
+  version: string,
+  state: string,
+): { x: number; y: number; inMode: boolean } {
+  const text = readFileSync(join(FIXTURE_DIR, `claude-${version}-${state}.cursor`), 'utf8');
+  const match = /^(\d+) (\d+) ([01])$/.exec(text.trim());
+  if (!match) throw new Error('Malformed captured cursor');
+  return { x: Number(match[1]), y: Number(match[2]), inMode: match[3] === '1' };
+}
