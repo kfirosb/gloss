@@ -36,7 +36,8 @@ export interface AdapterOptions {
   sourceSink?: SourceSink;
   /** A server-owned verified liveness probe. Never trust a browser-provided boolean. */
   observeLive?: (target: Target) => Promise<boolean>;
-  clock?: { sleep(ms: number, signal: AbortSignal): Promise<void> };
+  /** `now` (epoch milliseconds) defaults to `Date.now`; a test clock that skips its sleeps supplies its own. */
+  clock?: { sleep(ms: number, signal: AbortSignal): Promise<void>; now?(): number };
 }
 export interface SourceSink {
   send(message: {

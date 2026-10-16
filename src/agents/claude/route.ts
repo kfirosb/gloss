@@ -13,6 +13,7 @@ export interface ClaudeRouteInput {
 export const DESKTOP_REASON = 'Claude Desktop sessions can’t receive messages from Gloss.';
 export const NO_ROUTE_REASON =
   'Gloss can’t reach this session yet. Use “Connect this session to Gloss”.';
+export const SESSION_GONE_REASON = 'This Claude session has ended or can’t be found.';
 /** Spec section 1: exactly one route per send, in this order. */
 export function selectClaudeRoute(input: ClaudeRouteInput): DeliveryRoute {
   if (input.entrypoint === 'claude-desktop') return { transport: null, reason: DESKTOP_REASON };

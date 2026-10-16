@@ -38,7 +38,7 @@ import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { ChannelStore } from './channel-store.js';
 import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
-import { selectClaudeRoute } from './route.js';
+import { SESSION_GONE_REASON, selectClaudeRoute } from './route.js';
 import {
   NO_TYPING_RECORD_REASON,
   TERMINAL_GONE_REASON,
@@ -56,6 +56,20 @@ import {
 
 /** A typed delivery's evidence names the transcript record that showed it. */
 const TYPED_EVIDENCE_PREFIX = 'transcript:';
+/** A message this adapter typed into a session, and the transcript record that confirmed it once one did. */
+interface TypedInFlight {
+  send: TypedSend;
+  sourceId?: string | undefined;
+}
+/**
+ * Messages typed into one session while any of them still waits for confirmation. The workflow's `earlier` is a
+ * snapshot taken at dispatch, so it can miss a send typed just before; this keeps identical texts confirming in
+ * send order. Cleared once nothing in the session is waiting.
+ */
+interface SessionTyping {
+  typed: Map<string, TypedInFlight>;
+  waiting: Set<string>;
+}
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
 export const CLAUDE_PROTOCOL = {
@@ -425,6 +439,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   const liveness = claudeLiveness(options);
   /** Shared by every connection to a session, so two sends never type into the same pane at once. */
   const typeInTurn = createTypingQueue();
+  const typingBySession = new Map<string, SessionTyping>();
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -653,26 +668,53 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
               after: delivery.nativeAfterRevision,
             }
           : undefined;
+      /**
+       * Other typed sends known for this session: the workflow's snapshot first (claimed before `send`), then this
+       * adapter's memory in typing order. `precedes` marks the ones typed before `send`, which take records first.
+       */
+      const otherTyped = (send: TypedSend, earlier: readonly Delivery[]) => {
+        const entries = new Map<string, TypedInFlight & { awaiting: boolean; precedes: boolean }>();
+        for (const delivery of earlier) {
+          const typed = typedSend(delivery);
+          if (!typed || typed.id === send.id) continue;
+          const sourceId =
+            delivery.state === 'sent' && delivery.nativeMessageId?.startsWith(TYPED_EVIDENCE_PREFIX)
+              ? delivery.nativeMessageId.slice(TYPED_EVIDENCE_PREFIX.length)
+              : undefined;
+          entries.set(typed.id, {
+            send: typed,
+            sourceId,
+            awaiting: isAwaitingEvidence(delivery),
+            precedes: true,
+          });
+        }
+        const remembered = [...(typingBySession.get(target.sessionRef)?.typed.values() ?? [])];
+        const position = remembered.findIndex((entry) => entry.send.id === send.id);
+        remembered.forEach((entry, index) => {
+          if (entry.send.id === send.id || entries.get(entry.send.id)?.sourceId) return;
+          // Without `send` in memory (it settled earlier), only a strictly earlier paste can come before it.
+          const precedes = position >= 0 ? index < position : entry.send.after < send.after;
+          entries.set(entry.send.id, {
+            ...entry,
+            awaiting: !entry.sourceId,
+            precedes: entries.get(entry.send.id)?.precedes ?? precedes,
+          });
+        });
+        return [...entries.values()];
+      };
       /** The transcript record confirming `send`: earlier identical sends still pending take records first. */
       const confirmTyped = async (
         send: TypedSend,
         earlier: readonly Delivery[],
       ): Promise<string | undefined> => {
-        const identical = earlier.flatMap((delivery) => {
-          const typed = typedSend(delivery);
-          return typed && sameTypedText(typed.body, send.body) ? [{ delivery, typed }] : [];
-        });
-        const taken = new Set(
-          identical.flatMap(({ delivery }) =>
-            delivery.state === 'sent' && delivery.nativeMessageId?.startsWith(TYPED_EVIDENCE_PREFIX)
-              ? [delivery.nativeMessageId.slice(TYPED_EVIDENCE_PREFIX.length)]
-              : [],
-          ),
+        const identical = otherTyped(send, earlier).filter((entry) =>
+          sameTypedText(entry.send.body, send.body),
         );
+        const taken = new Set(identical.flatMap(({ sourceId }) => (sourceId ? [sourceId] : [])));
         const sends = [
           ...identical
-            .filter(({ delivery }) => isAwaitingEvidence(delivery))
-            .map(({ typed }) => typed),
+            .filter((entry) => entry.precedes && entry.awaiting)
+            .map((entry) => entry.send),
           send,
         ];
         const messages = await typedMessagesAfter(
@@ -681,8 +723,26 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         );
         return assignTypedMessages(sends, messages, taken).get(send.id);
       };
+      const rememberTyped = (send: TypedSend) => {
+        const session = typingBySession.get(target.sessionRef) ?? {
+          typed: new Map(),
+          waiting: new Set(),
+        };
+        session.typed.set(send.id, { send });
+        session.waiting.add(send.id);
+        typingBySession.set(target.sessionRef, session);
+      };
+      const settleTyped = (id: string, sourceId?: string) => {
+        const session = typingBySession.get(target.sessionRef);
+        if (!session) return;
+        const entry = session.typed.get(id);
+        if (entry && sourceId) entry.sourceId = sourceId;
+        session.waiting.delete(id);
+        if (!session.waiting.size) typingBySession.delete(target.sessionRef);
+      };
       /** Ends the confirmation wait when the connection detaches. */
       const confirmationStop = new AbortController();
+      const now = () => options.clock?.now?.() ?? Date.now();
       const pause = (ms: number) =>
         (options.clock
           ? options.clock.sleep(ms, confirmationStop.signal)
@@ -705,7 +765,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           const current = await exact(target);
           const terminal = await terminalFor(current);
           if (!terminal) return { state: 'failed' as const, reason: TERMINAL_GONE_REASON };
-          return typeIntoTerminal({
+          const result = await typeIntoTerminal({
             terminal,
             requestId,
             body,
@@ -713,22 +773,30 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
             transcriptSize: async () => (await stat(path)).size,
             onTyping,
           });
+          // Registered inside the turn, so the next send's confirmation already sees this one.
+          if (result.state === 'typed')
+            rememberTyped({ id: requestId, body, after: result.nativeAfterRevision });
+          return result;
         });
         if (typed.state !== 'typed') return typed;
         const send = { id: requestId, body, after: typed.nativeAfterRevision };
-        for (let waited = 0; ; waited += TMUX_CONFIRM_POLL_MS) {
+        const deadline = now() + TMUX_CONFIRM_TIMEOUT_MS;
+        for (;;) {
           const sourceId = await confirmTyped(send, sendContext.earlier ?? []).catch(
             () => undefined,
           );
-          if (sourceId)
+          if (sourceId) {
+            settleTyped(requestId, sourceId);
             return {
               state: 'sent' as const,
               nativeAfterRevision: send.after,
               nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId,
             };
-          if (waited >= TMUX_CONFIRM_TIMEOUT_MS || confirmationStop.signal.aborted) break;
+          }
+          if (now() >= deadline || confirmationStop.signal.aborted) break;
           await pause(TMUX_CONFIRM_POLL_MS);
         }
+        settleTyped(requestId);
         return {
           state: 'unconfirmed' as const,
           reason: TMUX_UNCONFIRMED_REASON,
@@ -933,7 +1001,8 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         return matches === 1;
       };
       connection.deliveryRoute = async (): Promise<DeliveryRoute> => {
-        const current = await exact(target);
+        const current = await exact(target).catch(() => undefined);
+        if (!current) return { transport: null, reason: SESSION_GONE_REASON };
         const channel = await channelRegistry.resolveChannel(target).then(
           (record) => !!record,
           () => false,

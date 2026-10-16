@@ -1,11 +1,11 @@
 import { afterEach, expect, it } from 'vitest';
-import { appendFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createClaudeAdapter } from '../../src/agents/claude/index.js';
+import { createClaudeAdapter, type ClaudeAdapterOptions } from '../../src/agents/claude/index.js';
 import type { ChannelRecord } from '../../src/agents/claude/channel-types.js';
-import { NO_ROUTE_REASON } from '../../src/agents/claude/route.js';
+import { NO_ROUTE_REASON, SESSION_GONE_REASON } from '../../src/agents/claude/route.js';
 import {
   NO_TYPING_RECORD_REASON,
   TERMINAL_GONE_REASON,
@@ -63,11 +63,26 @@ const channelRecord = (h: Harness): ChannelRecord => ({
   channelPid: 2,
   channelStartedAt: 'start',
 });
+type Clock = NonNullable<ClaudeAdapterOptions['clock']>;
+/** Test time: each sleep moves the clock forward by its length, once `ready` lets it. */
+function testClock(ready: (signal: AbortSignal) => Promise<void> = async () => {}) {
+  let time = 0;
+  const sleeps: number[] = [];
+  const clock: Clock = {
+    now: () => time,
+    sleep: async (ms, signal) => {
+      sleeps.push(ms);
+      await ready(signal);
+      time += ms;
+    },
+  };
+  return { clock, sleeps };
+}
 async function connect(
   h: Harness,
   terminal: GlossTerminal | undefined,
   channel = false,
-  sleep = async () => {},
+  clock: Clock = testClock().clock,
 ) {
   const connection = await createClaudeAdapter({
     configDir: h.dir,
@@ -75,7 +90,7 @@ async function connect(
     transcriptPath: async () => h.transcript,
     observeLive: async () => true,
     pollMs: 5,
-    clock: { sleep },
+    clock,
     glossTerminal: async () => terminal,
     channelRegistry: { resolveChannel: async () => (channel ? channelRecord(h) : undefined) },
   }).attach(h.target, { panelSessionId: 'panel' });
@@ -203,7 +218,7 @@ it('does not hold the next message in the terminal while one waits for confirmat
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const connection = await connect(h, terminal, false, () => released);
+  const connection = await connect(h, terminal, false, testClock(() => released).clock);
   const first = connection.send('delivery-1', 'First message', [], tmux);
   expect(await connection.send('delivery-2', 'Second message', [], tmux)).toMatchObject({
     state: 'sent',
@@ -211,6 +226,96 @@ it('does not hold the next message in the terminal while one waits for confirmat
   release();
   expect(await first).toMatchObject({ state: 'unconfirmed', reason: TMUX_UNCONFIRMED_REASON });
   expect(log.calls.filter((call) => call === 'enter')).toHaveLength(2);
+});
+it('confirms identical messages typed back to back in the order they were typed', async () => {
+  const h = await claudeSession();
+  const { terminal } = fixtureTerminal('2.1.301', 'empty');
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let sleeping = 0;
+  let bothWaiting = () => {};
+  const waiting = new Promise<void>((resolve) => {
+    bothWaiting = resolve;
+  });
+  const { clock } = testClock(async () => {
+    if (++sleeping === 2) bothWaiting();
+    await released;
+  });
+  const connection = await connect(h, terminal, false, clock);
+  // Neither send is told about the other, as when both are dispatched before either records its typing.
+  const first = connection.send('first', 'yes', [], tmux);
+  const second = connection.send('second', 'yes', [], tmux);
+  await waiting;
+  await recordTyped(h)('yes');
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  expect(a).toMatchObject({ state: 'sent' });
+  expect(b).toMatchObject({ state: 'unconfirmed', reason: TMUX_UNCONFIRMED_REASON });
+  if (!a.nativeMessageId) throw new Error('the first should be confirmed');
+  const firstSent: Delivery = {
+    ...typedDelivery(h, 'first', 'yes', a.nativeAfterRevision ?? -1),
+    state: 'sent',
+    nativeMessageId: a.nativeMessageId,
+  };
+  const secondTyped = typedDelivery(h, 'second', 'yes', b.nativeAfterRevision ?? -1);
+  expect(await connection.reconcileDelivery?.(secondTyped, [firstSent])).toBe(false);
+  await recordTyped(h)('yes');
+  const evidence = await connection.reconcileDelivery?.(secondTyped, [firstSent]);
+  if (typeof evidence !== 'object') throw new Error('the second should be confirmed');
+  expect(evidence.nativeMessageId).toMatch(/^transcript:/);
+  expect(evidence.nativeMessageId).not.toBe(a.nativeMessageId);
+});
+it('measures the confirmation wait in elapsed time, not in polls', async () => {
+  const h = await claudeSession();
+  const { terminal } = fixtureTerminal('2.1.301', 'empty');
+  let time = 0;
+  let sleeps = 0;
+  // Each poll interval here takes ten seconds, as after a laptop sleep or a slow transcript read.
+  const slow: Clock = {
+    now: () => time,
+    sleep: async () => {
+      sleeps += 1;
+      time += 10_000;
+    },
+  };
+  const connection = await connect(h, terminal, false, slow);
+  expect(await connection.send('delivery-1', 'Fix it', [], tmux)).toMatchObject({
+    state: 'unconfirmed',
+    reason: TMUX_UNCONFIRMED_REASON,
+  });
+  expect(sleeps).toBe(3);
+});
+it('ends the confirmation wait as unconfirmed when the connection detaches', async () => {
+  const h = await claudeSession();
+  const { terminal } = fixtureTerminal('2.1.301', 'empty');
+  let asleep = () => {};
+  const sleeping = new Promise<void>((resolve) => {
+    asleep = resolve;
+  });
+  const { clock, sleeps } = testClock(
+    (signal) =>
+      new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+        asleep();
+      }),
+  );
+  const connection = await connect(h, terminal, false, clock);
+  const result = connection.send('delivery-1', 'Fix it', [], tmux);
+  await sleeping;
+  await connection.detach();
+  expect(await result).toMatchObject({ state: 'unconfirmed', reason: TMUX_UNCONFIRMED_REASON });
+  expect(sleeps).toHaveLength(1);
+});
+it('offers no route, without failing, once the session record is gone', async () => {
+  const h = await claudeSession();
+  const connection = await connect(h, fixtureTerminal('2.1.301', 'empty').terminal);
+  await rm(join(h.dir, 'sessions', 'own.json'));
+  expect(await connection.deliveryRoute?.()).toEqual({
+    transport: null,
+    reason: SESSION_GONE_REASON,
+  });
 });
 it('holds while Claude’s record says a dialog is open, without touching the terminal', async () => {
   const h = await claudeSession({ status: 'busy', waitingFor: 'dialog open' });
