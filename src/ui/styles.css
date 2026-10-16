@@ -2534,6 +2534,40 @@ pre {
   opacity: 0.6;
   cursor: default;
 }
+/* Hovering a session or terminal tab swaps its activity dot for an X that ends it. */
+.session-tab-item {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+.session-tab-close {
+  display: none;
+  position: absolute;
+  right: 5px;
+  top: calc(50% + 1px);
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: light-dark(#4b566b, var(--dk-fg-4b566b));
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.session-tab-close:hover {
+  background: light-dark(#d9deea, var(--dk-bg-d9deea));
+  color: light-dark(#172033, var(--dk-fg-172033));
+}
+.session-tab-item:hover .session-tab-close {
+  display: flex;
+}
+.session-tab-item:hover .session-tab .activity-dot {
+  visibility: hidden;
+}
 .session-tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3881,16 +3915,18 @@ button.dictation-finishing .dictation-icon {
   line-height: 1.45;
 }
 .instruction-review.quota-break {
-  width: min(420px, calc(100vw - 32px));
-  height: auto;
+  width: min(320px, calc(100vw - 32px));
+  /* auto would stretch a modal dialog to the full window height. */
+  height: fit-content;
   max-height: calc(100dvh - 32px);
+  gap: 0;
 }
 .quota-break .review-header {
   display: none;
 }
 .quota-break .review-body {
-  padding: 22px 24px 6px;
-  line-height: 1.5;
+  padding: 16px 18px 12px;
+  line-height: 1.45;
 }
 .quota-eyebrow {
   margin: 0;
@@ -3908,9 +3944,9 @@ button.dictation-finishing .dictation-icon {
   font-size: 1.1rem;
 }
 .quota-renew {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: light-dark(#58657d, var(--dk-fg-58657d));
-  margin: 0 0 14px;
+  margin: 0 0 10px;
 }
 .quota-renew b {
   color: light-dark(#172033, var(--dk-fg-172033));
@@ -3919,9 +3955,9 @@ button.dictation-finishing .dictation-icon {
 .quota-idea {
   background: light-dark(#fff8e8, var(--dk-bg-fff8e8));
   border: 1px solid light-dark(#f2dfae, var(--dk-bg-f2dfae));
-  border-radius: 11px;
-  padding: 12px 14px;
-  margin: 0 0 6px;
+  border-radius: 10px;
+  padding: 8px 11px;
+  margin: 0;
 }
 .quota-break.weekly .quota-idea {
   background: light-dark(#edf1ff, var(--dk-bg-edf1ff));
@@ -3938,16 +3974,23 @@ button.dictation-finishing .dictation-icon {
   color: light-dark(#3f58a0, var(--dk-fg-3f58a0));
 }
 .quota-idea p {
-  margin: 4px 0 0;
-  font-size: 0.9rem;
+  margin: 2px 0 0;
+  font-size: 0.85rem;
 }
 .quota-emoji {
-  font-size: 1.35rem;
+  font-size: 1.1rem;
   margin-right: 6px;
   vertical-align: -3px;
 }
 .quota-break .review-actions {
   align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 8px 12px;
+}
+.quota-break .review-actions button {
+  padding: 5px 9px;
+  font-size: 0.8rem;
 }
 .quota-upgrade {
   margin-right: auto;

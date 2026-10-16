@@ -268,6 +268,26 @@ test('End terminal closes the terminal at once, with no confirmation dialog', as
   await expect.poll(() => ended).toEqual(['POST']);
   await expect(page.getByRole('dialog', { name: 'End terminal' })).toHaveCount(0);
 });
+test('hovering a terminal tab turns its dot into an X that ends the terminal at once', async ({
+  page,
+}) => {
+  await withSession(page, [terminal()]);
+  const ended: string[] = [];
+  await page.route('**/api/launches/T1/end', (r) => {
+    ended.push(r.request().method());
+    return r.fulfill({ json: {} });
+  });
+  await page.goto('/#capability=test');
+  const tab = page
+    .getByRole('tablist', { name: 'Sessions in project' })
+    .getByRole('tab', { name: /Terminal/ });
+  const close = page.getByRole('button', { name: 'End Terminal', exact: true });
+  await expect(close).toBeHidden();
+  await tab.hover();
+  await expect(close).toBeVisible();
+  await close.click();
+  await expect.poll(() => ended).toEqual(['POST']);
+});
 test('a failed End terminal says why, in the error line', async ({ page }) => {
   await withSession(page, [terminal()], 'workspace');
   await page.route('**/api/launches/T1/end', (r) =>
