@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { clampLayoutSize } from '../core/session-contracts.js';
+import { LIVE_VIEWS, type ConversationView, type LiveView } from './live-view.js';
 import { clampSidebarWidth } from './sidebar-frame.js';
 export type AssistantMode = 'full' | 'compact';
 export type Theme = 'light' | 'dark' | 'auto';
@@ -8,10 +10,21 @@ export const DARK_STYLES: { value: DarkStyle; label: string }[] = [
   { value: 'dimmed', label: 'Dimmed slate' },
   { value: 'midnight', label: 'Midnight' },
 ];
+export interface LiveLayout {
+  view: LiveView;
+  conversation: ConversationView;
+  split: number;
+}
+export const DEFAULT_LIVE_LAYOUT: LiveLayout = {
+  view: 'translated',
+  conversation: 'translated',
+  split: 50,
+};
 export interface DisplayPreferences {
   version: 1;
   collapsed: boolean;
   assistantModes: Record<string, AssistantMode>;
+  liveViews: Record<string, LiveLayout>;
   lastByFolder: Record<string, string>;
   tabOrder: Record<string, string[]>;
   sidebarWidth: number;
@@ -24,6 +37,7 @@ const defaults = (): DisplayPreferences => ({
   version: 1,
   collapsed: false,
   assistantModes: {},
+  liveViews: {},
   lastByFolder: {},
   tabOrder: {},
   sidebarWidth: 300,
@@ -36,6 +50,14 @@ const objectOf = (value: unknown) =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+function liveLayout(value: unknown): LiveLayout | undefined {
+  const l = objectOf(value);
+  const { view, conversation, split } = l;
+  if (!LIVE_VIEWS.includes(view as LiveView)) return undefined;
+  if (conversation !== 'translated' && conversation !== 'original') return undefined;
+  if (typeof split !== 'number' || !Number.isFinite(split)) return undefined;
+  return { view: view as LiveView, conversation, split: clampLayoutSize(split) };
+}
 function validated(value: unknown): DisplayPreferences {
   if (!value || typeof value !== 'object' || (value as DisplayPreferences).version !== 1)
     return defaults();
@@ -53,6 +75,12 @@ function validated(value: unknown): DisplayPreferences {
         ([, mode]) => mode === 'full' || mode === 'compact',
       ),
     ) as Record<string, AssistantMode>,
+    liveViews: Object.fromEntries(
+      Object.entries(objectOf(v.liveViews))
+        .map(([id, layout]) => [id, liveLayout(layout)] as const)
+        .filter((entry): entry is [string, LiveLayout] => entry[1] !== undefined)
+        .slice(-maxFolders),
+    ),
     lastByFolder: Object.fromEntries(
       Object.entries(objectOf(v.lastByFolder)).filter(([, id]) => typeof id === 'string'),
     ) as Record<string, string>,
