@@ -120,7 +120,8 @@ export function createSessionLauncher(options: {
   tmux: () => Promise<Tmux>;
   store: LaunchStore;
   sessions: Pick<SessionManager, 'register'>;
-  prepareClaude(folder: string): Promise<{ claude: string; mcpConfigPath: string }>;
+  /** The verified Claude executable. Launches need no channel setup: Gloss types into their tmux pane. */
+  claudeExecutable(): Promise<string>;
   /** Finds the native Codex session a launch started: by process ancestry first, then by folder and creation time. */
   findCodex(launch: LaunchRecord, signal: AbortSignal): Promise<Target | undefined>;
   resolveExecutable(name: 'codex'): Promise<string>;
@@ -459,18 +460,14 @@ export function createSessionLauncher(options: {
       let sessionRef: string | undefined;
       let argv: string[];
       if (agent === 'claude') {
-        const { claude, mcpConfigPath } = await options.prepareClaude(cwd);
+        const claude = await options.claudeExecutable();
         sessionRef = randomUUID();
-        // The prompt goes last, after `--`: that ends option parsing, so neither a variadic option (--mcp-config,
-        // --dangerously-load-development-channels, or an extra one) nor a prompt starting with "-" is misread.
+        // No MCP config and no development-channel flag: Gloss delivers by typing into this tmux pane.
+        // The prompt goes last, after `--`, so neither a variadic extra option nor a prompt starting with "-" is misread.
         argv = [
           claude,
           '--session-id',
           sessionRef,
-          '--mcp-config',
-          mcpConfigPath,
-          '--dangerously-load-development-channels',
-          'server:language-assistant',
           ...extra,
           '--',
           firstMessage ?? CLAUDE_SETUP_PROMPT,
