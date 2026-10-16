@@ -506,7 +506,7 @@ it('reads launch settings saved before terminalView existed with the popup defau
     store.close();
   }
 });
-it('prepares distinct private MCP files for concurrent new sessions and preserves exact resume status', async () => {
+it('prepares distinct private MCP files for concurrent new sessions and never marks an existing session connecting', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'la-preflight-')));
   dirs.push(root);
   const project = join(root, 'project');
@@ -541,8 +541,7 @@ it('prepares distinct private MCP files for concurrent new sessions and preserve
     sessionRef: '11111111-1111-4111-8111-111111111111',
     projectId: project,
   };
-  await setup.createChannelSetup(target);
-  expect((await setup.status(target)).state).toBe('connecting');
+  expect((await setup.status(target)).state).toBe('setup-required');
 });
 it('retains a live launch if graceful exit and forced kill fail, then permits a retry', async () => {
   const { launcher, folder, t } = await setup();

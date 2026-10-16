@@ -9,7 +9,9 @@ const state = vi.hoisted(() => ({
     instructions: 'This makes one model request when run.',
   })),
 }));
-vi.mock('../../src/runtime/claude-channel-setup.js', () => ({ createChannelSetup: state.prepare }));
+vi.mock('../../src/runtime/claude-channel-setup.js', () => ({
+  createNewSessionSetup: state.prepare,
+}));
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
 vi.mock('../../src/storage/sqlite-store.js', () => ({ SqliteStore: class {} }));
 vi.mock('../../src/agents/claude/index.js', () => ({ createClaudeAdapter: () => ({}) }));
@@ -45,7 +47,7 @@ it('prepares a new-session command and exits without panel or session startup', 
   state.delivered.mockClear();
   try {
     await launch(['--prepare-claude-channel', '--project', '/tmp/exact project']);
-    expect(state.prepare).toHaveBeenCalledWith(undefined, '/tmp/exact project');
+    expect(state.prepare).toHaveBeenCalledWith('/tmp/exact project');
     expect(output).toHaveBeenCalledWith(expect.stringContaining('one model request'));
     expect(output).toHaveBeenCalledWith(expect.stringContaining('quoted command'));
     expect(state.register).not.toHaveBeenCalled();

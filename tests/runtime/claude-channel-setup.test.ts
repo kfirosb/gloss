@@ -20,6 +20,7 @@ import type { Target } from '../../src/core/contracts.js';
 import { WorkspaceController } from '../../src/ui/use-workspace.js';
 import { recordOf } from '../../src/core/json-record.js';
 import { defaultWorkspace, WorkspaceConflict } from '../../src/core/session-contracts.js';
+import type { RegistrationStatus } from '../../src/runtime/claude-registration.js';
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -37,7 +38,7 @@ async function fixture() {
     target: { agent: 'claude', sessionRef: native, projectId: project } as Target,
   };
 }
-async function service() {
+async function service(registered = true) {
   const f = await fixture();
   const { createClaudeChannelSetup } = await import('../../src/runtime/claude-channel-setup.js');
   let connected = false;
@@ -54,6 +55,10 @@ async function service() {
       outcome: { code: 0, signal: null, reason: 'exited' as const, diagnostics: '' },
     };
   });
+  const registration = {
+    status: async (): Promise<RegistrationStatus> =>
+      registered ? { state: 'registered' } : { state: 'unregistered' },
+  };
   const options = {
     stateDir: join(f.root, "app ' ;$(touch INJECTED)"),
     homeDir: f.root,
@@ -70,6 +75,7 @@ async function service() {
       resolveChannel: async (target: Target) =>
         connected && target.sessionRef === native ? { target } : undefined,
     },
+    registration,
   };
   await writeFile(options.cliPath, '// fixture');
   const setup = createClaudeChannelSetup(options);
@@ -91,9 +97,10 @@ it('authenticates both routes and rejects unknown IDs before setup', async () =>
   const setup = {
     status: vi.fn(async () => ({ state: 'setup-required' as const })),
     createChannelSetup: vi.fn(async () => ({
+      kind: 'command' as const,
       command: 'safe',
-      experimental: true as const,
-      instructions: 'Stop then resume',
+      cdCommand: "cd '/p' && safe",
+      folder: '/p',
     })),
   };
   const app = createApplication({
@@ -145,29 +152,70 @@ it('authenticates both routes and rejects unknown IDs before setup', async () =>
 });
 it('keeps GET read-only and reports setup, connecting, connected, disconnected independently', async () => {
   const f = await service();
+  expect(await f.setup.status(f.target)).toMatchObject({
+    state: 'setup-required',
+    reason: expect.stringContaining('Connect this session to Gloss'),
+  });
+  await f.setup.createChannelSetup(f.target);
   expect((await f.setup.status(f.target)).state).toBe('setup-required');
   await expect(stat(f.options.stateDir)).rejects.toMatchObject({ code: 'ENOENT' });
-  await f.setup.createChannelSetup(f.target);
-  expect((await f.setup.status(f.target)).state).toBe('connecting');
-  expect(
-    (await f.setup.status({ ...f.target, sessionRef: '22222222-2222-4222-8222-222222222222' }))
-      .state,
-  ).toBe('setup-required');
   f.connect(true);
   expect((await f.setup.status(f.target)).state).toBe('connected');
   f.connect(false);
   expect((await f.setup.status(f.target)).state).toBe('disconnected');
-  f.advance();
-  expect((await f.setup.status(f.target)).state).toBe('disconnected');
+  const g = await service(false);
+  expect(await g.setup.status(g.target)).toMatchObject({
+    state: 'setup-required',
+    reason: expect.stringContaining('Register Gloss'),
+  });
 });
-it('generates private exact resume config and shell arguments without execution or global writes', async () => {
+it('gives a registered user the short exact-id command and writes no file', async () => {
   const f = await service();
   const before = await readdir(f.root);
   const result = await f.setup.createChannelSetup(f.target);
+  if (result.kind !== 'command') throw new Error('expected a command, got ' + result.kind);
+  expect(result.folder).toBe(f.project);
+  expect(result.command).toBe(
+    `claude --resume ${native} --dangerously-load-development-channels server:gloss`,
+  );
+  // The cd prefix survives the hostile folder name: run it with a stub `claude` that prints its cwd and argv.
+  const args = JSON.parse(
+    execFileSync(
+      '/bin/sh',
+      [
+        '-c',
+        'claude() { "$CHANNEL_TEST_NODE"' +
+          ' -e \'console.log(JSON.stringify([process.cwd(), ...process.argv.slice(1)]))\' -- "$@"; }; ' +
+          result.cdCommand,
+      ],
+      { encoding: 'utf8', env: { ...process.env, CHANNEL_TEST_NODE: process.execPath } },
+    ),
+  );
+  expect(args).toEqual([
+    f.project,
+    '--resume',
+    native,
+    '--dangerously-load-development-channels',
+    'server:gloss',
+  ]);
+  expect((await readdir(f.root)).sort()).toEqual(before.sort());
+  expect(await readdir(f.project)).toEqual([]);
+});
+it('asks an unregistered user to register before showing a command', async () => {
+  const f = await service(false);
+  expect(await f.setup.createChannelSetup(f.target)).toEqual({
+    kind: 'registration-required',
+    registration: { state: 'unregistered' },
+  });
+});
+it('generates a private new-session config and shell arguments without execution or global writes', async () => {
+  const f = await service();
+  const before = await readdir(f.root);
+  const result = await f.setup.newSessionSetup(f.project);
   expect(result.experimental).toBe(true);
   // Replace only the executable with a shell function that prints argv; never launch Claude.
   const command = result.command.replace("'/bin/echo'", 'capture');
-  const args = JSON.parse(
+  const args: unknown = JSON.parse(
     execFileSync(
       '/bin/sh',
       [
@@ -179,17 +227,18 @@ it('generates private exact resume config and shell arguments without execution 
       { encoding: 'utf8', env: { ...process.env, CHANNEL_TEST_NODE: process.execPath } },
     ),
   );
-  expect(args.slice(0, 2)).toEqual(['--resume', native]);
-  expect(args.slice(4)).toEqual([
+  if (!Array.isArray(args)) throw new Error('expected argv');
+  expect(args[0]).toBe('Reply with READY only. Do not use tools.');
+  expect(args.slice(3)).toEqual([
     '--dangerously-load-development-channels',
     'server:language-assistant',
   ]);
-  const path = args[3];
-  const config = JSON.parse(await readFile(path, 'utf8'));
-  expect(config).toEqual({
+  const path = args[2];
+  if (typeof path !== 'string') throw new Error('expected a config path');
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
     mcpServers: {
       'language-assistant': {
-        command: process.execPath,
+        command: await realpath(process.execPath),
         args: [f.options.cliPath, '--claude-channel'],
         env: { ELECTRON_RUN_AS_NODE: '1' },
       },
@@ -199,12 +248,14 @@ it('generates private exact resume config and shell arguments without execution 
   expect((await stat(join(f.options.stateDir, 'claude-channel-setup'))).mode & 0o777).toBe(0o700);
   expect((await readdir(f.root)).sort()).toEqual([...before, "app ' ;$(touch INJECTED)"].sort());
   expect(await readdir(f.project)).toEqual([]);
-  expect(result.command).not.toMatch(/strict-mcp|setting-sources|READY/);
+  expect(result.command).not.toMatch(/strict-mcp|setting-sources|--resume/);
 });
 it('discloses one model request only for explicitly requested new-session setup', async () => {
   const f = await service();
-  await expect(f.setup.createChannelSetup()).rejects.toThrow(/project/i);
-  const result = await f.setup.createChannelSetup(undefined, f.project);
+  await expect(f.setup.newSessionSetup('relative/project')).rejects.toThrow(
+    /absolute project path/i,
+  );
+  const result = await f.setup.newSessionSetup(f.project);
   expect(result.command).not.toContain('--resume');
   expect(result.command).toContain('Reply with READY only. Do not use tools.');
   // Variadic options must not swallow the prompt, so it directly follows the executable.
@@ -221,7 +272,7 @@ it('rejects malformed identities before allocating files and rejects unsafe setu
   await expect(stat(f.options.stateDir)).rejects.toMatchObject({ code: 'ENOENT' });
   await mkdir(f.options.stateDir, { mode: 0o700 });
   await symlink(f.project, join(f.options.stateDir, 'claude-channel-setup'));
-  await expect(f.setup.createChannelSetup(f.target)).rejects.toThrow(/private|unsafe/i);
+  await expect(f.setup.newSessionSetup(f.project)).rejects.toThrow(/private|unsafe/i);
   expect(await readdir(f.project)).toEqual([]);
 });
 it.each(['user', 'local', 'project', 'managed'])(
@@ -417,7 +468,8 @@ it('distinguishes equal project names and refuses malformed config without expos
   await mkdir(project);
   const first = await f.setup.createChannelSetup(f.target);
   const second = await f.setup.createChannelSetup({ ...f.target, projectId: project });
-  expect(first.command).not.toBe(second.command);
+  if (first.kind !== 'command' || second.kind !== 'command') throw new Error('expected commands');
+  expect(first.cdCommand).not.toBe(second.cdCommand);
   await writeFile(join(f.root, '.claude.json'), '{SECRET_DO_NOT_PRINT');
   const status = await f.setup.status(f.target);
   expect(status.state).toBe('unsupported');
@@ -436,7 +488,7 @@ it('uses the native install instead of a terminal-host wrapper in PATH', async (
   const { createClaudeChannelSetup } = await import('../../src/runtime/claude-channel-setup.js');
   const { claudePath: _omit, ...options } = f.options;
   const setup = createClaudeChannelSetup(options);
-  const result = await setup.createChannelSetup(f.target);
+  const result = await setup.newSessionSetup(f.project);
   expect(result.command).toContain("'/bin/echo'");
   expect(result.command).not.toContain('.superset');
 });
@@ -473,7 +525,7 @@ it('points saved setup configs from a renamed or older app at this build and lea
   const setupDir = join(f.options.stateDir, 'claude-channel-setup');
   expect(await f.setup.repairConfigs()).toEqual({ repaired: 0 });
   await expect(stat(setupDir)).rejects.toMatchObject({ code: 'ENOENT' });
-  await f.setup.createChannelSetup(f.target);
+  await f.setup.prepareNewSessionConfig(f.project);
   const [current] = await readdir(setupDir);
   const fresh = await readFile(join(setupDir, current!), 'utf8');
   const stale = (name: string, content: unknown, mode = 0o600) =>

@@ -8,7 +8,7 @@ import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-types.js';
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
 import { claudeConfigDir, validateTarget } from '../agents/shared.js';
-import { LEGACY_SERVER } from '../agents/claude/channel-names.js';
+import { GLOSS_SERVER, LEGACY_SERVER } from '../agents/claude/channel-names.js';
 import { writeFileAtomic } from './atomic-file.js';
 import {
   channelServerPaths,
@@ -18,19 +18,33 @@ import {
   pathExists,
   readClaudeConfigFile,
 } from './claude-config.js';
+import {
+  createClaudeRegistration,
+  type RegistrationService,
+  type RegistrationStatus,
+} from './claude-registration.js';
 import type { ProcessRunner } from './process-runner.js';
 import { ensurePrivateDirectory, isPrivateDirectory } from './private-directory.js';
 
-export interface ChannelSetup {
+/** What an existing session needs to connect. Producing it writes nothing. */
+export type ChannelSetup =
+  | {
+      kind: 'registration-required';
+      registration: Exclude<RegistrationStatus, { state: 'registered' }>;
+    }
+  | { kind: 'command'; command: string; cdCommand: string; folder: string };
+/** The legacy launch command for a new session (the `--prepare-claude-channel` CLI path). */
+export interface NewSessionSetup {
   command: string;
   experimental: true;
   instructions: string;
 }
 export interface ChannelSetupService {
   status(target: Target): Promise<ChannelStatus>;
-  createChannelSetup(target?: Target, newProject?: string): Promise<ChannelSetup>;
+  createChannelSetup(target: Target): Promise<ChannelSetup>;
 }
 export interface NewSessionChannelSetupService extends ChannelSetupService {
+  newSessionSetup(project: string): Promise<NewSessionSetup>;
   prepareNewSessionConfig(project: string): Promise<{ claude: string; mcpConfigPath: string }>;
   /** Points every prepared config at this build, so saved commands survive an app rename or move. */
   repairConfigs(): Promise<{ repaired: number }>;
@@ -51,6 +65,7 @@ export interface ChannelSetupOptions {
   registry?: {
     resolveChannel(target: Target): Promise<Pick<ChannelRecord, 'target'> | undefined>;
   };
+  registration?: Pick<RegistrationService, 'status'> | undefined;
 }
 export { CLAUDE_SETUP_PROMPT };
 // Per-session files and the commands users saved with them name the legacy server. Never change this key:
@@ -89,6 +104,16 @@ export function createClaudeChannelSetup(
     runner: options.runner,
     now,
   });
+  const registration =
+    options.registration ??
+    createClaudeRegistration({
+      claude: executable,
+      homeDir: home,
+      configDir,
+      nodePath: options.nodePath,
+      cliPath: options.cliPath,
+      runner: options.runner,
+    });
   const serverPaths = () => channelServerPaths(options.nodePath, options.cliPath);
   const writeConfig = (path: string, node: string, cli: string) =>
     // The desktop build uses Electron's bundled Node executable; plain Node ignores this flag.
@@ -261,7 +286,13 @@ export function createClaudeChannelSetup(
         } catch (error) {
           if (!isMissingFile(error)) throw error;
         }
-        return { state: 'setup-required', reason: 'Discovery alone does not enable sending.' };
+        const registered = (await registration.status()).state === 'registered';
+        return {
+          state: 'setup-required',
+          reason: registered
+            ? 'Close the session and run the command in "Connect this session to Gloss".'
+            : 'Register Gloss with Claude once, then run the connect command.',
+        };
       } catch (error) {
         return {
           state: 'unsupported',
@@ -269,18 +300,36 @@ export function createClaudeChannelSetup(
         };
       }
     },
-    async createChannelSetup(target, newProject) {
-      const project = await projectFor(target, newProject);
-      const { claude, mcpConfigPath: path } = await (target
-        ? prepareConfig(project, target.sessionRef)
-        : prepareNewSessionConfig(project));
+    async createChannelSetup(target) {
+      const project = await projectFor(target);
+      await preflight(project);
+      const current = await registration.status();
+      if (current.state !== 'registered')
+        return { kind: 'registration-required', registration: current };
+      // The id is a validated UUID and the server name a constant; only the folder needs quoting.
+      const command = [
+        'claude',
+        '--resume',
+        target.sessionRef,
+        '--dangerously-load-development-channels',
+        'server:' + GLOSS_SERVER,
+      ].join(' ');
+      return {
+        kind: 'command',
+        command,
+        cdCommand: 'cd ' + quote(project) + ' && ' + command,
+        folder: project,
+      };
+    },
+    async newSessionSetup(newProject) {
+      const project = await projectFor(undefined, newProject);
+      const { claude, mcpConfigPath } = await prepareConfig(project);
       // The prompt must directly follow the executable: the later options are variadic and would swallow a trailing positional.
       const args = [
         claude,
-        ...(!target ? [CLAUDE_SETUP_PROMPT] : []),
-        ...(target ? ['--resume', target.sessionRef] : []),
+        CLAUDE_SETUP_PROMPT,
         '--mcp-config',
-        path,
+        mcpConfigPath,
         '--dangerously-load-development-channels',
         'server:' + serverName,
       ];
@@ -288,18 +337,15 @@ export function createClaudeChannelSetup(
         command: 'cd ' + quote(project) + ' && ' + args.map(quote).join(' '),
         experimental: true,
         instructions:
-          (target
-            ? 'Stop the existing Claude process normally first, then run this command to resume that exact session. '
-            : 'This starts a new session when you run it. The disclosed setup prompt “' +
-              CLAUDE_SETUP_PROMPT +
-              '” makes one model request to initialize its transcript. ') +
-          'Accept Claude’s experimental per-launch consent. Account or organization policy may still prevent connection. This prepares instructions only; nothing has been launched.',
+          'This starts a new session when you run it. The disclosed setup prompt “' +
+          CLAUDE_SETUP_PROMPT +
+          '” makes one model request to initialize its transcript. Accept Claude’s experimental per-launch consent. Account or organization policy may still prevent connection. This prepares instructions only; nothing has been launched.',
       };
     },
   };
 }
-export const createChannelSetup = (target?: Target, newProject?: string) =>
-  createClaudeChannelSetup().createChannelSetup(target, newProject);
+export const createNewSessionSetup = (project: string) =>
+  createClaudeChannelSetup().newSessionSetup(project);
 
 export const prepareNewSessionConfig = (project: string) =>
   createClaudeChannelSetup().prepareNewSessionConfig(project);

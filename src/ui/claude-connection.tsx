@@ -88,11 +88,8 @@ export function ClaudeConnection({
       >
         {busy ? 'Preparing…' : 'Prepare setup command'}
       </button>
-      {setup && (
-        <>
-          <p>{setup.instructions}</p>
-          <textarea aria-label="Claude setup command" readOnly value={setup.command} rows={4} />
-        </>
+      {setup && 'command' in setup && (
+        <textarea aria-label="Claude setup command" readOnly value={setup.command} rows={4} />
       )}
       {error && <p role="alert">{error}</p>}
     </details>

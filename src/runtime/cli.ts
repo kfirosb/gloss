@@ -26,8 +26,8 @@ export async function launch(args: string[]) {
       throw new Error(
         'Use --prepare-claude-channel --project <absolute-path> for a new session; use the saved session UI for resume.',
       );
-    const { createChannelSetup } = await import('./claude-channel-setup.js');
-    const setup = await createChannelSetup(undefined, flags.project);
+    const { createNewSessionSetup } = await import('./claude-channel-setup.js');
+    const setup = await createNewSessionSetup(flags.project);
     process.stdout.write(
       'Experimental Claude channel setup\n' + setup.instructions + '\n\n' + setup.command + '\n',
     );
