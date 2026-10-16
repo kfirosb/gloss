@@ -1,16 +1,24 @@
-import { constants } from 'node:fs';
-import { recordOf, type JsonRecord } from '../core/json-record.js';
-import { access, lstat, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import { recordOf } from '../core/json-record.js';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 import type { Target } from '../core/contracts.js';
 import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-types.js';
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
 import { claudeConfigDir, validateTarget } from '../agents/shared.js';
-import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
+import { LEGACY_SERVER } from '../agents/claude/channel-names.js';
+import { writeFileAtomic } from './atomic-file.js';
+import {
+  channelServerPaths,
+  createClaudeExecutable,
+  isMissingFile,
+  opaqueManagedPolicyPaths,
+  pathExists,
+  readClaudeConfigFile,
+} from './claude-config.js';
+import type { ProcessRunner } from './process-runner.js';
 import { ensurePrivateDirectory, isPrivateDirectory } from './private-directory.js';
 
 export interface ChannelSetup {
@@ -45,42 +53,15 @@ export interface ChannelSetupOptions {
   };
 }
 export { CLAUDE_SETUP_PROMPT };
-const serverName = 'language-assistant';
+// Per-session files and the commands users saved with them name the legacy server. Never change this key:
+// a file keyed `gloss` under a saved `server:language-assistant` command makes Claude ignore the channel.
+const serverName = LEGACY_SERVER;
 const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
-const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
-async function jsonConfig(path: string): Promise<JsonRecord | undefined> {
-  let file;
-  try {
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const info = await file.stat();
-    if (!info.isFile() || info.size > 2 * 1024 * 1024) throw new Error('Invalid configuration');
-    const value = recordOf(JSON.parse(await file.readFile('utf8')));
-    if (!value) throw new Error('Invalid configuration');
-    return value;
-  } catch (error) {
-    if (absent(error)) return undefined;
-    // Config may contain tokens; parser diagnostics must never leave this boundary.
-    throw new Error(
-      'Cannot safely inspect Claude configuration; check local configuration before setup.',
-    );
-  } finally {
-    await file?.close();
-  }
-}
 const privateDirectory = (path: string) =>
   ensurePrivateDirectory(
     path,
     'Unsafe setup directory; a private app-owned directory is required.',
   );
-async function exists(path: string) {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (absent(error)) return false;
-    throw new Error('Cannot inspect managed Claude policy; administrator review is required.');
-  }
-}
 export function createClaudeChannelSetup(
   options: ChannelSetupOptions = {},
 ): NewSessionChannelSetupService {
@@ -102,53 +83,32 @@ export function createClaudeChannelSetup(
         .update(JSON.stringify([project, session]))
         .digest('hex') + '.json',
     );
-  let capability: { until: number; promise: Promise<string> } | undefined;
-  async function executable() {
-    if (!capability || capability.until < now()) {
-      const promise = (async () => {
-        let executable = options.claudePath;
-        const directories = [
-          join(home, '.local', 'bin'),
-          ...(process.env.PATH ?? '').split(':').filter(isAbsolute),
-        ].filter((directory) => !/(?:^|\/)\.superset(?:-[^/]*)?\/bin\/?$/.test(directory));
-        if (!executable)
-          for (const directory of directories) {
-            try {
-              const candidate = join(directory, 'claude');
-              await access(candidate, constants.X_OK);
-              executable = await realpath(candidate);
-              break;
-            } catch {
-              /* Next PATH entry. */
-            }
-          }
-        if (!executable || !isAbsolute(executable))
-          throw new Error(
-            'Claude executable unavailable. Install a Claude CLI supporting experimental development channels.',
-          );
-        const result = await collectProcess(
-          (options.runner ?? runProcess)(
-            executable,
-            ['--dangerously-load-development-channels', 'server:' + serverName, '--version'],
-            '',
-            AbortSignal.timeout(5000),
-            { timeoutMs: 4000, maxOutputBytes: 8192, maxDiagnosticBytes: 1024 },
-          ),
-        );
-        if (
-          result.outcome.code !== 0 ||
-          result.outcome.reason !== 'exited' ||
-          !result.lines.some((line) => /\b\d+\.\d+\.\d+\b/.test(line))
-        )
-          throw new Error(
-            'Installed Claude did not accept the experimental development-channel capability probe.',
-          );
-        return executable;
-      })();
-      capability = { until: now() + 60_000, promise };
-    }
-    return capability.promise;
-  }
+  const executable = createClaudeExecutable({
+    homeDir: home,
+    claudePath: options.claudePath,
+    runner: options.runner,
+    now,
+  });
+  const serverPaths = () => channelServerPaths(options.nodePath, options.cliPath);
+  const writeConfig = (path: string, node: string, cli: string) =>
+    // The desktop build uses Electron's bundled Node executable; plain Node ignores this flag.
+    writeFileAtomic(
+      path,
+      JSON.stringify(
+        {
+          mcpServers: {
+            [serverName]: {
+              command: node,
+              args: [cli, '--claude-channel'],
+              env: { ELECTRON_RUN_AS_NODE: '1' },
+            },
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+      0o600,
+    );
   async function projectFor(target?: Target, newProject?: string) {
     if (target) validateTarget(target, 'claude');
     const path = target?.projectId ?? newProject;
@@ -163,26 +123,19 @@ export function createClaudeChannelSetup(
   async function preflight(project: string) {
     if ((options.platform ?? process.platform) !== 'darwin')
       throw new Error('Experimental Claude channels are supported on macOS only.');
-    const global = await jsonConfig(join(home, '.claude.json'));
+    const global = await readClaudeConfigFile(join(home, '.claude.json'));
     const alternate =
       configDir !== join(home, '.claude')
-        ? await jsonConfig(join(configDir, '.claude.json'))
+        ? await readClaudeConfigFile(join(configDir, '.claude.json'))
         : undefined;
-    const projectConfig = await jsonConfig(join(project, '.mcp.json'));
-    const managed = await jsonConfig(join(managedDir, 'managed-mcp.json'));
+    const projectConfig = await readClaudeConfigFile(join(project, '.mcp.json'));
+    const managed = await readClaudeConfigFile(join(managedDir, 'managed-mcp.json'));
     if (managed)
       throw new Error(
         'Managed MCP configuration is unsupported by automatic setup; ask your administrator.',
       );
-    const domain = 'com.anthropic.claudecode.plist';
-    for (const path of [
-      join(managedDir, 'managed-settings.d'),
-      join(library, 'Managed Preferences', domain),
-      join(library, 'Managed Preferences', basename(home), domain),
-      join(library, 'Preferences', domain),
-      join(home, 'Library', 'Preferences', domain),
-    ]) {
-      if (await exists(path))
+    for (const path of opaqueManagedPolicyPaths({ home, library, managedDir })) {
+      if (await pathExists(path))
         throw new Error(
           'Managed Claude policy requires administrator review before channel setup.',
         );
@@ -193,7 +146,7 @@ export function createClaudeChannelSetup(
       join(project, '.claude', 'settings.json'),
       join(project, '.claude', 'settings.local.json'),
     ]) {
-      const settings = await jsonConfig(settingsPath);
+      const settings = await readClaudeConfigFile(settingsPath);
       if (
         settings &&
         [
@@ -229,59 +182,13 @@ export function createClaudeChannelSetup(
     seen.delete(path);
     return { claude, mcpConfigPath: path };
   }
-  async function serverPaths() {
-    const node = await realpath(options.nodePath ?? process.execPath);
-    const cli = await realpath(
-      options.cliPath ?? fileURLToPath(new URL('./cli.js', import.meta.url)),
-    ).catch(() => {
-      throw new Error('Build the application before preparing channel setup.');
-    });
-    // Claude expands ${...} inside MCP config strings. Reject ambiguous executable paths.
-    if ([node, cli].some((path) => path.includes('${')))
-      throw new Error(
-        'Executable paths containing Claude environment interpolation are unsupported.',
-      );
-    return { node, cli };
-  }
-  async function writeConfig(path: string, node: string, cli: string) {
-    const temporary = join(setupDir, randomUUID() + '.tmp');
-    const file = await open(
-      temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
-    try {
-      // The desktop build uses Electron's bundled Node executable; plain Node ignores this flag.
-      await file.writeFile(
-        JSON.stringify(
-          {
-            mcpServers: {
-              [serverName]: {
-                command: node,
-                args: [cli, '--claude-channel'],
-                env: { ELECTRON_RUN_AS_NODE: '1' },
-              },
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      await file.sync();
-      await file.close();
-      await rename(temporary, path);
-    } finally {
-      await file.close();
-      await unlink(temporary).catch(() => {});
-    }
-  }
   async function repairConfigs() {
     // A saved command keeps its config path forever, so a config naming an older or renamed
     // app would start that build's channel helper. Only files this module wrote are touched.
     try {
       if (!isPrivateDirectory(await lstat(setupDir))) return { repaired: 0 };
     } catch (error) {
-      if (absent(error)) return { repaired: 0 };
+      if (isMissingFile(error)) return { repaired: 0 };
       throw error;
     }
     const { node, cli } = await serverPaths();
@@ -292,7 +199,7 @@ export function createClaudeChannelSetup(
       try {
         const info = await lstat(path);
         if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) continue;
-        const config = await jsonConfig(path);
+        const config = await readClaudeConfigFile(path);
         const servers = recordOf(config?.mcpServers);
         const server = recordOf(servers?.[serverName]);
         if (
@@ -352,7 +259,7 @@ export function createClaudeChannelSetup(
                   'Setup was prepared, but no ready channel is verified. Resume the exact session and accept consent.',
               };
         } catch (error) {
-          if (!absent(error)) throw error;
+          if (!isMissingFile(error)) throw error;
         }
         return { state: 'setup-required', reason: 'Discovery alone does not enable sending.' };
       } catch (error) {

@@ -18,6 +18,7 @@ import { startServer } from '../../src/runtime/http-server.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import type { Target } from '../../src/core/contracts.js';
 import { WorkspaceController } from '../../src/ui/use-workspace.js';
+import { recordOf } from '../../src/core/json-record.js';
 import { defaultWorkspace, WorkspaceConflict } from '../../src/core/session-contracts.js';
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -517,4 +518,31 @@ it('points saved setup configs from a renamed or older app at this build and lea
   expect((await readdir(setupDir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   expect(await f.setup.repairConfigs()).toEqual({ repaired: 0 });
   expect(f.runner).toHaveBeenCalledTimes(1);
+});
+it('keeps the legacy language-assistant key in repaired files even when gloss is registered at user scope', async () => {
+  const f = await service();
+  const gloss = {
+    command: process.execPath,
+    args: [f.options.cliPath, '--claude-channel'],
+    env: { ELECTRON_RUN_AS_NODE: '1' },
+  };
+  await writeFile(join(f.root, '.claude.json'), JSON.stringify({ mcpServers: { gloss } }));
+  const setupDir = join(f.options.stateDir, 'claude-channel-setup');
+  await f.setup.prepareNewSessionConfig(f.project);
+  const name = 'e'.repeat(64) + '.json';
+  const old = {
+    mcpServers: {
+      'language-assistant': {
+        command: '/Applications/Old.app/Contents/MacOS/Old',
+        args: ['/Applications/Old.app/cli.js', '--claude-channel'],
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+      },
+    },
+  };
+  await writeFile(join(setupDir, name), JSON.stringify(old), { mode: 0o600 });
+  expect(await f.setup.repairConfigs()).toEqual({ repaired: 1 });
+  const repaired = recordOf(JSON.parse(await readFile(join(setupDir, name), 'utf8')));
+  const servers = recordOf(repaired?.mcpServers);
+  expect(Object.keys(servers ?? {})).toEqual(['language-assistant']);
+  expect(recordOf(servers?.['language-assistant'])?.command).toBe(await realpath(process.execPath));
 });
