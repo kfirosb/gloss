@@ -2,7 +2,7 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
-## 16. lsof storm in Claude session liveness checks
+## 19. lsof storm in Claude session liveness checks
 
 Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
 
