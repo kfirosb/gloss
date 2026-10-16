@@ -52,6 +52,12 @@ export const markSessionSeen = (sessionId: string, sequence: number) =>
     method: 'POST',
     body: JSON.stringify({ sessionId, sequence }),
   });
+/** Registers or removes Gloss's user-scope `gloss` server in Claude. Only called from an explicit click. */
+export const changeClaudeRegistration = (action: 'register' | 'remove') =>
+  sessionRequest<import('../runtime/claude-registration.js').RegistrationStatus>(
+    '/api/claude/registration',
+    { method: 'POST', body: JSON.stringify({ action }) },
+  );
 export class SessionClient {
   readonly base: string;
   constructor(readonly sessionId: string) {

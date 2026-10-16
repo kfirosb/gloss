@@ -58,6 +58,12 @@ import { createUsageService, type SessionUsageReport, type UsageService } from '
 import type { UsageSnapshot } from '../core/usage.js';
 import type { AttentionMonitor } from './attention-monitor.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
+import { createClaudeExecutable } from './claude-config.js';
+import {
+  createClaudeRegistration,
+  type RegistrationService,
+  type RegistrationStatus,
+} from './claude-registration.js';
 import {
   createInventoryService,
   sessionInventoryRoot,
@@ -77,6 +83,7 @@ import {
 
 export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
+  claudeRegistration?: RegistrationService;
   capability?: string;
   store: ConversationStore &
     SessionStore &
@@ -160,6 +167,8 @@ export interface SessionLanguage {
 export interface Application {
   claudeChannelStatus?(id: string): ReturnType<ChannelSetupService['status']>;
   prepareClaudeChannel?(id: string): ReturnType<ChannelSetupService['createChannelSetup']>;
+  claudeRegistration?(): Promise<RegistrationStatus>;
+  changeClaudeRegistration?(action: 'register' | 'remove'): Promise<RegistrationStatus>;
   uploadImage?(input: { name: string; data: string }, sessionId?: string): Promise<ImageAttachment>;
   readonly files?: FileRegistry;
   readImage?(id: string, sessionId?: string): Promise<ImageAttachment>;
@@ -326,7 +335,10 @@ export function createApplication(options: ApplicationOptions): Application {
       : {}),
   });
   const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
-  const channelSetup = options.channelSetup ?? createClaudeChannelSetup();
+  const claudeRegistration =
+    options.claudeRegistration ?? createClaudeRegistration({ claude: createClaudeExecutable() });
+  const channelSetup =
+    options.channelSetup ?? createClaudeChannelSetup({ registration: claudeRegistration });
   const savedTarget = (id: string) => {
     sessions.snapshot(id);
     return sessions.list().find((record) => record.id === id)!.target;
@@ -763,6 +775,14 @@ export function createApplication(options: ApplicationOptions): Application {
     async prepareClaudeChannel(id) {
       requireOpen();
       return channelSetup.createChannelSetup(savedTarget(id));
+    },
+    async claudeRegistration() {
+      requireOpen();
+      return claudeRegistration.status();
+    },
+    async changeClaudeRegistration(action) {
+      requireOpen();
+      return action === 'register' ? claudeRegistration.register() : claudeRegistration.remove();
     },
     async uploadImage(input, sessionId = id) {
       requireOpen();

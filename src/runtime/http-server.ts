@@ -14,6 +14,7 @@ import { readProjectMetadata, type ProjectMetadata } from './project-metadata.js
 import { validateLanguageOverride } from '../core/language-settings.js';
 import { isLoopbackHost, isLoopbackOrigin, LOOPBACK_HOST } from './loopback.js';
 import { createAsyncCache } from '../core/async-cache.js';
+import { recordOf } from '../core/json-record.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -30,6 +31,14 @@ async function readBody(req: IncomingMessage, limit = 256000) {
     chunks.push(bytes);
   }
   return size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+}
+/** Accepts exactly {"action": <one of actions>}; parsed JSON is untrusted until checked here. */
+function bodyAction<const A extends string>(value: unknown, actions: readonly A[]): A {
+  const body = recordOf(value);
+  const action = actions.find((candidate) => candidate === body?.action);
+  if (!body || Object.keys(body).length !== 1 || action === undefined)
+    throw new Error(`Expected {"action": ${actions.map((a) => JSON.stringify(a)).join(' or ')}}.`);
+  return action;
 }
 function events<T>(
   res: ServerResponse,
@@ -682,6 +691,19 @@ export async function startServer(
           return respond(res, 200, application.launchSettings());
         if (req.method === 'PUT' && application.setLaunchSettings)
           return respond(res, 200, application.setLaunchSettings(await readBody(req, 4096)));
+      }
+      if (url.pathname === '/api/claude/registration') {
+        res.setHeader('cache-control', 'no-store');
+        if (req.method === 'GET' && application.claudeRegistration)
+          return respond(res, 200, await application.claudeRegistration());
+        if (req.method === 'POST' && application.changeClaudeRegistration)
+          return respond(
+            res,
+            200,
+            await application.changeClaudeRegistration(
+              bodyAction(await readBody(req, 256), ['register', 'remove'] as const),
+            ),
+          );
       }
       if (await projectRoute(application, req, res, url.pathname, url)) return;
       if (await launchFolderRoute(application, req, res, url.pathname)) return;
