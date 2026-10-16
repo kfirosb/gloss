@@ -65,9 +65,9 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
       [socket(3)]: [{ pid: 3, command: 'node' }],
       [socket(4)]: [{ pid: 4, command: '2.1.300' }],
     });
-    await expect(
-      liveness.checkMany([record(1), record(2), record(3), record(4)]),
-    ).resolves.toEqual(['alive', 'alive', 'not-alive', 'not-alive']);
+    await expect(liveness.checkMany([record(1), record(2), record(3), record(4)])).resolves.toEqual(
+      ['alive', 'alive', 'not-alive', 'not-alive'],
+    );
   });
 
   it('serves the cache within the window', async () => {
@@ -128,9 +128,10 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
 
   it('judges two records on the same path by their own PID', async () => {
     const { liveness, calls } = setup({ [socket(10)]: [{ pid: 10, command: 'claude' }] });
-    await expect(
-      liveness.checkMany([record(10), record(11, socket(10))]),
-    ).resolves.toEqual(['alive', 'not-alive']);
+    await expect(liveness.checkMany([record(10), record(11, socket(10))])).resolves.toEqual([
+      'alive',
+      'not-alive',
+    ]);
     expect(calls).toHaveLength(1);
   });
 
