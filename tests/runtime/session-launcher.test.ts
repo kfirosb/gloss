@@ -77,6 +77,8 @@ function fakeTmux() {
       if (k.includes('C-c')) live.delete(n);
     },
     async resizeWindow() {},
+    async scroll() {},
+    async exitCopyMode() {},
     async killSession(n) {
       live.delete(n);
     },

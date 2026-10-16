@@ -4,8 +4,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { chunkInput, terminalTicket } from './launch-controls.js';
 import { errorMessage } from './error-message.js';
+import { MAX_WHEEL_LINES, wheelLineCounter, type TerminalWheel } from '../core/terminal-wheel.js';
 
 const COALESCE_MS = 10;
+const WHEEL_COALESCE_MS = 30;
 /** One live attachment to a launch's tmux session. Mount it to connect; unmount to disconnect (the session keeps running). */
 export function TerminalView({
   launchId,
@@ -35,7 +37,10 @@ export function TerminalView({
     let pending = '';
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = (
-      value: { type: 'input'; data: string } | { type: 'resize'; cols: number; rows: number },
+      value:
+        | { type: 'input'; data: string }
+        | { type: 'resize'; cols: number; rows: number }
+        | ({ type: 'scroll' } & TerminalWheel),
     ) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
     };
@@ -67,6 +72,37 @@ export function TerminalView({
         if (!disposed) setError(errorMessage(e, 'Terminal unavailable'));
       },
     );
+    // tmux owns the history (the attached screen has no scrollback of its own), so wheel movement goes to the
+    // server rather than becoming the arrow keys xterm.js would otherwise send, which agents read as prompt history.
+    const countLines = wheelLineCounter();
+    let wheelLines = 0;
+    let wheelAt = { col: 1, row: 1 };
+    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushWheel = () => {
+      wheelTimer = undefined;
+      while (wheelLines !== 0) {
+        const lines = Math.max(-MAX_WHEEL_LINES, Math.min(MAX_WHEEL_LINES, wheelLines));
+        wheelLines -= lines;
+        send({ type: 'scroll', lines, ...wheelAt });
+      }
+    };
+    term.attachCustomWheelEventHandler((event) => {
+      const screen = term.element?.querySelector('.xterm-screen')?.getBoundingClientRect();
+      if (!screen || event.deltaY === 0) return false;
+      event.preventDefault();
+      const cellHeight = screen.height / term.rows;
+      const lines = countLines(event, cellHeight, term.rows);
+      if (lines === 0) return false;
+      const cell = (offset: number, size: number, count: number) =>
+        Math.min(count, Math.max(1, Math.floor(offset / size) + 1));
+      wheelAt = {
+        col: cell(event.clientX - screen.left, screen.width / term.cols, term.cols),
+        row: cell(event.clientY - screen.top, cellHeight, term.rows),
+      };
+      wheelLines += lines;
+      wheelTimer ??= setTimeout(flushWheel, WHEEL_COALESCE_MS);
+      return false;
+    });
     const input = term.onData((data) => {
       pending += data;
       timer ??= setTimeout(flush, COALESCE_MS);
@@ -85,6 +121,7 @@ export function TerminalView({
     return () => {
       disposed = true;
       if (timer) clearTimeout(timer);
+      if (wheelTimer) clearTimeout(wheelTimer);
       observer.disconnect();
       input.dispose();
       selected.dispose();

@@ -87,6 +87,25 @@ test('Show terminal opens the popup, streams output, sends input and closing lea
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'Show terminal' })).toBeVisible();
 });
+test('the mouse wheel scrolls the popup terminal instead of typing arrow keys', async ({
+  page,
+}) => {
+  const { received } = await withLaunch(page);
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  const screen = page.getByRole('dialog', { name: /Terminal:/ }).locator('.xterm-screen');
+  await expect.poll(() => received.some((m) => m.type === 'resize' && m.cols > 0)).toBe(true);
+  const box = await screen.boundingBox();
+  if (!box) throw new Error('terminal screen not laid out');
+  await page.mouse.move(box.x + 5, box.y + 5);
+  await page.mouse.wheel(0, -300);
+  await page.mouse.wheel(0, 300);
+  const scrolls = () => received.filter((m) => m.type === 'scroll');
+  await expect.poll(() => scrolls().some((m) => m.lines > 0)).toBe(true);
+  expect(scrolls()[0]).toMatchObject({ col: 1, row: 1 });
+  expect(scrolls()[0].lines).toBeLessThan(0);
+  expect(received.filter((m) => m.type === 'input')).toEqual([]);
+});
 test('shows the attention notice beside Show terminal', async ({ page }) => {
   await withLaunch(page, 'idle', 'auto', [], {
     attentionNotice: 'Cannot tell if this session needs you',
