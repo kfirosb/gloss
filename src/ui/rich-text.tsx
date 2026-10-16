@@ -5,6 +5,7 @@ import { RunCommandContext, runnableCommand } from './run-command.js';
 import remarkGfm from 'remark-gfm';
 import type { Root, RootContent } from 'mdast';
 import { isHebrew } from '../core/language-style.js';
+import { errorMessage } from './error-message.js';
 
 function highlights() {
   return (tree: Root) => {
@@ -83,7 +84,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
               setRun('running');
               runner!.run(command).then(
                 () => setRun('idle'),
-                (e) => setRun(e instanceof Error ? e.message : 'Could not run'),
+                (e) => setRun(errorMessage(e, 'Could not run')),
               );
             }}
           >

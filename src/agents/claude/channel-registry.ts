@@ -4,11 +4,18 @@ import type { ChannelRecord } from './channel-types.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
 import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { constants } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { projectIdentity, uuid, validateTarget, verifyFirstRecord } from '../shared.js';
+import {
+  claudeConfigDir,
+  projectIdentity,
+  uuid,
+  validateTarget,
+  verifyFirstRecord,
+} from '../shared.js';
 
 export interface ChannelProcess {
   pid: number;
@@ -57,15 +64,13 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
   const registryDir = resolve(
     options.registryDir ?? join(homedir(), '.language-assistant', 'claude-channels'),
   );
-  const configDir = resolve(
-    options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
-  );
+  const configDir = resolve(claudeConfigDir(options.configDir));
   const uid = () => options.uid ?? process.getuid?.();
   const supported = () =>
     (options.platform ?? process.platform) === 'darwin' && uid() !== undefined;
   const own = new Map<string, ChannelRecord>();
   const now = options.now ?? (() => performance.now());
-  const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
+  const sleep = options.sleep ?? ((ms) => delay(ms));
 
   // Reject symlinks in every component, including parent directories. Never chmod
   // pre-existing state: unsafe permissions are a failure, not permission to repair.

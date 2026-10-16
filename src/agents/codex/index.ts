@@ -4,12 +4,12 @@ import type { LaunchedLiveness, ThreadLiveness } from './liveness.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
 import { stat } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, CodingState, Target, Attachment } from '../../core/contracts.js';
 import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { parseCodexRateLimits } from '../../core/usage.js';
 import {
+  codexHomeDir,
   projectIdentity,
   Transcript,
   transcriptConnection,
@@ -106,7 +106,7 @@ export function parseCodexRecord(record: JsonRecord, offset: number, sessionRef:
     : {};
 }
 export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdapter {
-  const home = options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  const home = codexHomeDir(options.codexHome);
   const database = options.databasePath ?? join(home, 'state_5.sqlite');
   const runner = options.runner ?? runProcess;
   const now = options.now ?? Date.now;

@@ -24,23 +24,73 @@ check still reports eight pre-existing unused parameters in test fixtures. Those
 unrelated test signatures were not changed. Future sessions should follow
 `docs/clean-code-guidelines.md`, linked from `AGENTS.md`.
 
-**Integrated-version unit/browser tests and build are pending at the user's request.**
-The historical passing results below describe the pre-merge refactor only, not
-the integrated version. Integration verification is limited to TypeScript checking,
-formatting, whitespace/conflict checks, ancestry confirmation and semantic review.
+## Follow-up review and cleanup — 2026-10-16
+
+A second pass reviewed the integrated branch against `origin/main` in four areas
+(UI; runtime/desktop/scripts; agents/language; core/storage) by formatting the
+upstream sources with the pinned Prettier and diffing semantically. No behavioral
+regression was found. Migrations still match upstream exactly, content limits
+equal their old values, and the 0.10.1/0.10.2 fixes (tmux `-u`, launch/reconcile
+race, channel config repair, approval version floors) are intact.
+
+The integrated version had one failing unit test: Prettier quotes the generated
+`data-dark-style` selectors, and the dark-palette test's regex accepted only the
+unquoted form. The test now accepts both; regenerating and formatting the
+stylesheet reproduces the committed file.
+
+Cleanup applied (no behavior change except where noted):
+
+- Messages and checks now derive from named policy: text, upload, media and
+  image-preview limits (`content-policy.ts`), the Claude channel limit
+  (`CHANNEL_MAX_TEXT_CHARS`), request IDs (`REQUEST_ID_PATTERN`), launch-setting
+  bounds, layout size bounds, sidebar width, discussion window, retry and
+  launch timing constants.
+- Shared helpers replace copies: `isWithin` (path containment; also fixes names
+  starting with `..` being treated as outside), `ensurePrivateDirectory` /
+  `isPrivateDirectory` (four copies; now uniformly fails closed),
+  `claudeConfigDir` / `codexHomeDir` (eleven copies; an empty environment
+  variable now falls back to the home default instead of a relative path),
+  `assertAttachmentLimits`, `errorMessage` in the UI (46 copies), one
+  auto-open hook, and one main-window IPC sender check in Electron.
+- Hand-written sleeps use Node's `node:timers/promises`.
+- Remaining untyped `JSON.parse` reads (Claude session metadata, Codex model
+  cache) are narrowed with `recordOf`; launch settings are validated where the
+  HTTP input is normalized; stale re-exports from `session-launcher.ts` removed.
+- The HTTP server again caches the unavailable-folder fallback for 30 s, as
+  before the refactor, instead of re-reading a missing folder on every listing.
+
+No utility library (radash, es-toolkit, lru-cache) was added: no candidate
+replaced enough code to justify a new runtime dependency. Node built-ins covered
+the sleeps; `async-cache.ts` has semantics `lru-cache` would need adapting for.
+
+Verification of the integrated, cleaned-up branch on 2026-10-16:
+
+- `npm run format:check`, `npm run typecheck`, `git diff --check`: passed.
+- `npm test`: 1,043 passed; the real-engine dictation test skipped as before.
+  One of twelve consecutive runs reported two failures that did not recur in the
+  next ten runs; their names were not captured, so the flake is not yet identified.
+- `caffeinate -i env PLAYWRIGHT_PORT=4287 npx playwright test --workers=1`:
+  279 passed. (An earlier run during editing had one failure caused by a dev
+  server hot reload mid-test; the clean rerun passed.)
+- `npm run build`: passed, with the existing ~902 kB UI chunk warning.
+
+Not done: remaining items under "Remaining opportunities", consolidating the two
+Claude transcript/session-metadata readers, merging the http-server and
+application metadata caches, combining `git rev-parse` calls, and replacing
+`JSON.stringify` equality checks in the UI.
 
 ## Changes worth reviewing first
 
-| Concern | Ownership after this refactor |
-| --- | --- |
-| Attachment, upload, text and media limits | `src/core/content-policy.ts`, shared by UI and server |
-| Ordered attachment selection and membership validation | `selectFileReferences` in `src/core/file-references.ts` |
-| Launch settings, defaults, validation and argument serialization | `src/core/launch-settings.ts` |
-| Bounded asynchronous caching | `src/core/async-cache.ts` |
-| Session update envelope | `src/core/session-contracts.ts` |
-| JSON server-sent event decoding and cancellation | `src/ui/server-events.ts` |
-| Session workspace UI | `src/ui/session-workspace.tsx`, separated from application navigation |
-| Existing SQLite migrations | `src/storage/migrations.ts`, moved without changing SQL or versions |
+| Concern                                                          | Ownership after this refactor                                         |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Attachment, upload, text and media limits                        | `src/core/content-policy.ts`, shared by UI and server                 |
+| Ordered attachment selection and membership validation           | `selectFileReferences` in `src/core/file-references.ts`               |
+| Launch settings, defaults, validation and argument serialization | `src/core/launch-settings.ts`                                         |
+| Bounded asynchronous caching                                     | `src/core/async-cache.ts`                                             |
+| Session update envelope                                          | `src/core/session-contracts.ts`                                       |
+| JSON server-sent event decoding and cancellation                 | `src/ui/server-events.ts`                                             |
+| Session workspace UI                                             | `src/ui/session-workspace.tsx`, separated from application navigation |
+| Existing SQLite migrations                                       | `src/storage/migrations.ts`, moved without changing SQL or versions   |
 
 The cache shares pending reads, starts expiry when a read completes, retries failed
 reads, bounds retained entries, and supports targeted invalidation. Inventory,

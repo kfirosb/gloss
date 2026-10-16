@@ -13,6 +13,7 @@ import {
   CODEX_SETUP_PROMPT,
   type LaunchAgent,
 } from '../core/session-contracts.js';
+import { errorMessage } from './error-message.js';
 
 declare global {
   interface Window {
@@ -111,7 +112,7 @@ export function NewSessionDialog({
       );
       setFolder(real);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Folder unavailable');
+      setError(errorMessage(e, 'Folder unavailable'));
     }
   };
   const shell = agent === 'shell';

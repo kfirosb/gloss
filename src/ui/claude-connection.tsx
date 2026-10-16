@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ChannelStatus } from '../agents/claude/channel-types.js';
 import type { ChannelSetup } from '../runtime/claude-channel-setup.js';
 import type { SessionClient } from './session-client.js';
+import { errorMessage } from './error-message.js';
 
 export function useClaudeConnection(client: SessionClient, enabled: boolean) {
   const [status, setStatus] = useState<ChannelStatus>({
@@ -57,7 +58,7 @@ export function ClaudeConnection({
     try {
       setSetup(await client.prepareClaudeChannel());
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Setup unavailable');
+      setError(errorMessage(error, 'Setup unavailable'));
     } finally {
       setBusy(false);
     }

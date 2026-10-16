@@ -1,5 +1,4 @@
 import { timingSafeEqual } from 'node:crypto';
-import { lstat, mkdir } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -9,7 +8,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { uuid } from '../shared.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { ChannelStore } from './channel-store.js';
-import type { ChannelKey, ChannelRecord } from './channel-types.js';
+import { CHANNEL_MAX_TEXT_CHARS, type ChannelKey, type ChannelRecord } from './channel-types.js';
+import { ensurePrivateDirectory } from '../../runtime/private-directory.js';
 
 type Registry = Pick<ReturnType<typeof createChannelRegistry>, 'registerChannel' | 'removeChannel'>;
 export interface ClaudeChannelOptions {
@@ -18,11 +18,10 @@ export interface ClaudeChannelOptions {
   registryFactory?: (context: { port: number; stateDir: string }) => Registry;
 }
 const MAX_BODY = 1_048_576;
-const MAX_TEXT = 160_000;
 const identifier = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && !value.includes('\0');
 const textValue = (value: unknown): value is string =>
-  typeof value === 'string' && value.length <= MAX_TEXT;
+  typeof value === 'string' && value.length <= CHANNEL_MAX_TEXT_CHARS;
 function fields(value: unknown, names: string[]): value is Record<string, unknown> {
   return (
     !!value &&
@@ -138,7 +137,7 @@ export async function startClaudeChannel(
           type: 'object',
           properties: {
             request_id: { type: 'string', minLength: 1 },
-            text: { type: 'string', maxLength: MAX_TEXT },
+            text: { type: 'string', maxLength: CHANNEL_MAX_TEXT_CHARS },
           },
           required: ['request_id', 'text'],
           additionalProperties: false,
@@ -288,15 +287,7 @@ export async function startClaudeChannel(
     await mcp.connect(new StdioServerTransport());
     record = await registry.registerChannel(port);
     if (closed) throw new Error('Stdio closed during registration');
-    await mkdir(stateDir, { recursive: true, mode: 0o700 });
-    const info = await lstat(stateDir);
-    if (
-      !info.isDirectory() ||
-      info.isSymbolicLink() ||
-      (info.mode & 0o777) !== 0o700 ||
-      (process.getuid && info.uid !== process.getuid())
-    )
-      throw new Error('Unsafe channel state directory');
+    await ensurePrivateDirectory(stateDir, 'Unsafe channel state directory', { recursive: true });
     if (closed) throw new Error('Stdio closed during startup');
     store = new ChannelStore(join(stateDir, 'claude-channel-ledger.db'));
     store.registerGeneration(record.generation, record.target);

@@ -3,6 +3,9 @@ import type { FileReference } from './file-references.js';
 import type { LanguageSettings } from './language-settings.js';
 export type { FileReference, FileReferenceStore, FileRegistry } from './file-references.js';
 export type AgentKind = 'claude' | 'codex';
+/** Composer request IDs; also embedded in native channel and delivery markers. */
+export const REQUEST_ID_SOURCE = '[a-zA-Z0-9-]{1,100}';
+export const REQUEST_ID_PATTERN = new RegExp(`^${REQUEST_ID_SOURCE}$`);
 export type CodingState = 'idle' | 'working' | 'approval-required' | 'disconnected';
 export type DeliveryState = 'sending' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
 

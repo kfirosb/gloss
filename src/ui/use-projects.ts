@@ -8,6 +8,7 @@ import {
   readSidebarSettings,
   writeSidebarSettings,
 } from './session-client.js';
+import { errorMessage } from './error-message.js';
 export const defaultSidebarSettings = (): SidebarSettings => ({
   order: [],
   hidden: [],
@@ -187,9 +188,7 @@ export function useProjects(
         if (id !== settingsWrite.current || !saved.current) return;
         latest.current = saved.current;
         setSettings(saved.current);
-        report.current(
-          `Could not save the sidebar layout: ${e instanceof Error ? e.message : 'request failed'}`,
-        );
+        report.current(`Could not save the sidebar layout: ${errorMessage(e, 'request failed')}`);
       });
   }, []);
   useEffect(() => {

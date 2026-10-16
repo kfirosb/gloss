@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { recordOf, type JsonRecord } from '../core/json-record.js';
-import { access, lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import { access, lstat, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
@@ -9,8 +9,9 @@ import type { Target } from '../core/contracts.js';
 import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-types.js';
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
-import { validateTarget } from '../agents/shared.js';
+import { claudeConfigDir, validateTarget } from '../agents/shared.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
+import { ensurePrivateDirectory, isPrivateDirectory } from './private-directory.js';
 
 export interface ChannelSetup {
   command: string;
@@ -66,19 +67,11 @@ async function jsonConfig(path: string): Promise<JsonRecord | undefined> {
     await file?.close();
   }
 }
-async function privateDirectory(path: string) {
-  await mkdir(path, { mode: 0o700 }).catch((error) => {
-    if (error.code !== 'EEXIST') throw error;
-  });
-  const info = await lstat(path);
-  if (
-    !info.isDirectory() ||
-    info.isSymbolicLink() ||
-    (info.mode & 0o777) !== 0o700 ||
-    info.uid !== process.getuid?.()
-  )
-    throw new Error('Unsafe setup directory; a private app-owned directory is required.');
-}
+const privateDirectory = (path: string) =>
+  ensurePrivateDirectory(
+    path,
+    'Unsafe setup directory; a private app-owned directory is required.',
+  );
 async function exists(path: string) {
   try {
     await lstat(path);
@@ -94,9 +87,7 @@ export function createClaudeChannelSetup(
   const home = options.homeDir ?? homedir();
   const stateDir = resolve(options.stateDir ?? join(home, '.language-assistant'));
   const setupDir = join(stateDir, 'claude-channel-setup');
-  const configDir = resolve(
-    options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'),
-  );
+  const configDir = resolve(claudeConfigDir(options.configDir, home));
   const library = options.systemLibraryDir ?? '/Library';
   const managedDir = options.managedDir ?? join(library, 'Application Support', 'ClaudeCode');
   const registry =
@@ -288,14 +279,7 @@ export function createClaudeChannelSetup(
     // A saved command keeps its config path forever, so a config naming an older or renamed
     // app would start that build's channel helper. Only files this module wrote are touched.
     try {
-      const info = await lstat(setupDir);
-      if (
-        !info.isDirectory() ||
-        info.isSymbolicLink() ||
-        (info.mode & 0o777) !== 0o700 ||
-        info.uid !== process.getuid?.()
-      )
-        return { repaired: 0 };
+      if (!isPrivateDirectory(await lstat(setupDir))) return { repaired: 0 };
     } catch (error) {
       if (absent(error)) return { repaired: 0 };
       throw error;

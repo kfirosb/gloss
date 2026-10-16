@@ -1,4 +1,4 @@
-import { MAX_TEXT_CHARS } from './content-policy.js';
+import { MAX_SUMMARY_CHARS, MAX_TEXT_CHARS } from './content-policy.js';
 import { createHash } from 'node:crypto';
 import type { ConversationSnapshot, ConversationStore, LanguageSession } from './contracts.js';
 import {
@@ -80,7 +80,7 @@ export class ResponseSummaries {
       const text = (
         await this.language.summarize(initial.text, initial.key.language, controller.signal)
       ).trim();
-      if (!text || text.length > 4000) throw new Error('Invalid summary output');
+      if (!text || text.length > MAX_SUMMARY_CHARS) throw new Error('Invalid summary output');
       const current = this.resolve(source);
       if (
         controller.signal.aborted ||

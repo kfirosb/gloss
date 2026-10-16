@@ -14,6 +14,7 @@ import {
   removeWorktree,
   summarizeWorktreeChanges,
 } from './session-client.js';
+import { errorMessage } from './error-message.js';
 /** The project a dialog acts on: its key, display name and main checkout. */
 export interface WorktreeProject {
   key: string;
@@ -23,7 +24,6 @@ export interface WorktreeProject {
 }
 /** Mirrors the server's WORKTREE_NAME so the common mistake is caught before a request. */
 const WORKTREE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 const trimSlashes = (path: string) => path.trim().replace(/(.)\/+$/, '$1');
 export const defaultWorktreeLocation = (project: WorktreeProject) => project.path + '/.worktrees';
 function ignoreNote(project: WorktreeProject, location: string) {
@@ -83,7 +83,7 @@ export function CreateWorktreeDialog({
       // Always the location shown: the server would otherwise fall back to the remembered one.
       onCreated(await createWorktree(project.key, { name: value, location: where }));
     } catch (e) {
-      setError(message(e, 'Could not create this worktree'));
+      setError(errorMessage(e, 'Could not create this worktree'));
     } finally {
       setBusy(false);
     }
@@ -234,7 +234,10 @@ export function DeleteWorktreeDialog({
       },
       (e) => {
         if (active)
-          setInspection({ state: 'error', message: message(e, 'Could not check this worktree') });
+          setInspection({
+            state: 'error',
+            message: errorMessage(e, 'Could not check this worktree'),
+          });
       },
     );
     return () => {
@@ -248,7 +251,7 @@ export function DeleteWorktreeDialog({
       (e) =>
         setSummary({
           state: 'error',
-          message: message(e, 'The agent could not summarize these changes'),
+          message: errorMessage(e, 'The agent could not summarize these changes'),
         }),
     );
   };
@@ -264,7 +267,7 @@ export function DeleteWorktreeDialog({
       );
       onDeleted(removal, removeConversations);
     } catch (e) {
-      setError(message(e, 'Could not delete this worktree'));
+      setError(errorMessage(e, 'Could not delete this worktree'));
     } finally {
       setBusy(false);
     }
@@ -433,7 +436,7 @@ export function InitGitDialog({
       const result = await initGit(project.key);
       onInitialized(typeof result?.projectKey === 'string' ? result.projectKey : undefined);
     } catch (e) {
-      setError(message(e, 'Could not initialize Git here'));
+      setError(errorMessage(e, 'Could not initialize Git here'));
     } finally {
       setBusy(false);
     }

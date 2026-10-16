@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { isWithin } from '../../runtime/path-containment.js';
 import {
   mcpEntries,
   mergeEntries,
@@ -64,8 +65,7 @@ async function pluginEntries(
   const dirs = new Set([resolve(plugin.installPath, 'skills')]);
   for (const path of declared) {
     const dir = resolve(plugin.installPath, path);
-    const rel = relative(plugin.installPath, dir);
-    if (rel.startsWith('..') || isAbsolute(rel))
+    if (!isWithin(plugin.installPath, dir))
       ctx.problems.push(`Ignored a skills path outside plugin ${plugin.name}`);
     else dirs.add(dir);
   }

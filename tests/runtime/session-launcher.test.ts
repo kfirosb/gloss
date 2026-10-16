@@ -8,12 +8,11 @@ import {
   createSessionLauncher,
   defaultShell,
   nextTerminalTitle,
-  splitArgs,
   validateCommand,
   type LaunchRecord,
-  type LaunchSettings,
   type SessionLauncher,
 } from '../../src/runtime/session-launcher.js';
+import { splitArgs, type LaunchSettings } from '../../src/core/launch-settings.js';
 import type { Tmux } from '../../src/runtime/tmux.js';
 import type { Target } from '../../src/core/contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';

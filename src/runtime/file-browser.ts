@@ -1,7 +1,9 @@
 import {
   MAX_TEXT_FILE_BYTES,
   MAX_TEXT_CHARS,
+  MAX_IMAGE_PREVIEW_BYTES,
   MAX_MEDIA_PREVIEW_BYTES,
+  MAX_MEDIA_PREVIEW_LABEL,
   MEDIA_MIME_TYPES,
 } from '../core/content-policy.js';
 import { opendir, realpath, stat } from 'node:fs/promises';
@@ -16,7 +18,6 @@ import { readReferencePrefix, readReferenceChunks, requireContained } from './fi
 import { imageMime } from './attachments.js';
 import { fileInventory } from './file-search.js';
 const TEXT_BYTES = 128 * 1024;
-const IMAGE_BYTES = 4 * 1024 * 1024;
 const guidance =
   'Search respects ignore files and excludes .git, node_modules, dist, build and nested worktrees. Up to 50 matches; content scans up to 200 files, the first 128 KiB per file, within 2 seconds. Large and unreadable files may be skipped.';
 /** `nestedWorktrees(root)` returns worktree folders under the root (relative); browsing and search skip them. */
@@ -80,7 +81,7 @@ export function createFileBrowser(
     if (mime) {
       // Content searches classify raster files without reading/encoding their payload.
       if (!includeImageData) return { ...base, state: 'image' };
-      if (info.size > IMAGE_BYTES) return { ...base, state: 'large' };
+      if (info.size > MAX_IMAGE_PREVIEW_BYTES) return { ...base, state: 'large' };
       const bytes = await readReferencePrefix(file, info.size);
       signal.throwIfAborted();
       return {
@@ -104,7 +105,7 @@ export function createFileBrowser(
       const { canonicalRoot, canonical, info } = await lookup(id, relativePath, signal);
       if (!info.isFile()) throw new Error('Select a readable text file');
       if (info.size > MAX_TEXT_FILE_BYTES)
-        throw new Error('File review supports at most 160000 characters');
+        throw new Error(`File review supports at most ${MAX_TEXT_CHARS} characters`);
       const file: FileReference = {
         id: 'file-review',
         sessionId: id,
@@ -124,7 +125,7 @@ export function createFileBrowser(
         signal.throwIfAborted();
         size += chunk.length;
         if (size > MAX_TEXT_FILE_BYTES)
-          throw new Error('File review supports at most 160000 characters');
+          throw new Error(`File review supports at most ${MAX_TEXT_CHARS} characters`);
         chunks.push(chunk);
       }
       const bytes = Buffer.concat(chunks);
@@ -138,7 +139,7 @@ export function createFileBrowser(
       }
       if (!text.trim()) throw new Error('File is empty');
       if (text.length > MAX_TEXT_CHARS)
-        throw new Error('File review supports at most 160000 characters');
+        throw new Error(`File review supports at most ${MAX_TEXT_CHARS} characters`);
       const current = await lookup(id, relativePath, signal);
       const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`;
       if (
@@ -154,7 +155,7 @@ export function createFileBrowser(
       const mime = MEDIA_MIME_TYPES[path.extname(canonical).toLowerCase()];
       if (!info.isFile() || !mime) throw new Error('Only supported media files can be played');
       if (info.size > MAX_MEDIA_PREVIEW_BYTES)
-        throw new Error('Media preview is limited to 128 MiB per file');
+        throw new Error(`Media preview is limited to ${MAX_MEDIA_PREVIEW_LABEL} per file`);
       return {
         id: 'preview-media',
         sessionId: id,

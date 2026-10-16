@@ -1,7 +1,13 @@
 import type { AgentKind } from './contracts.js';
 import type { TerminalView } from './session-contracts.js';
 
-export type PopupMode = 'auto' | 'current-tab' | 'dot-only';
+export const POPUP_MODES = ['auto', 'current-tab', 'dot-only'] as const;
+export type PopupMode = (typeof POPUP_MODES)[number];
+const TERMINAL_VIEWS: readonly TerminalView[] = ['popup', 'workspace'];
+const AGENT_KINDS: readonly AgentKind[] = ['claude', 'codex'];
+/** Bounds on saved extra launch arguments per agent. */
+export const MAX_EXTRA_ARGS = 32;
+export const MAX_EXTRA_ARG_CHARS = 512;
 export interface LaunchSettings {
   extraArgs: Record<AgentKind, string[]>;
   popup: PopupMode;
@@ -58,21 +64,25 @@ export function formatArgs(args: readonly string[]): string {
 export function validateLaunchSettings(value: unknown): LaunchSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Invalid launch settings');
-  const { popup, extraArgs, terminalView = 'popup' } = value as LaunchSettings;
+  const {
+    popup,
+    extraArgs,
+    terminalView = defaultLaunchSettings().terminalView,
+  } = value as LaunchSettings;
   if (
-    !['auto', 'current-tab', 'dot-only'].includes(popup) ||
-    !['popup', 'workspace'].includes(terminalView) ||
+    !POPUP_MODES.includes(popup) ||
+    !TERMINAL_VIEWS.includes(terminalView) ||
     !extraArgs ||
     typeof extraArgs !== 'object' ||
     Array.isArray(extraArgs)
   )
     throw new Error('Invalid launch settings');
-  for (const agent of ['claude', 'codex'] as const) {
+  for (const agent of AGENT_KINDS) {
     const args = extraArgs[agent];
     if (
       !Array.isArray(args) ||
-      args.length > 32 ||
-      args.some((arg) => typeof arg !== 'string' || arg.length > 512)
+      args.length > MAX_EXTRA_ARGS ||
+      args.some((arg) => typeof arg !== 'string' || arg.length > MAX_EXTRA_ARG_CHARS)
     )
       throw new Error('Invalid launch settings');
   }

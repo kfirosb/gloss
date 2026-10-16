@@ -14,6 +14,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_IMAGES,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
   MAX_UPLOAD_BASE64_CHARS,
   MAX_ATTACHMENT_NAME_CHARS,
 } from '../core/content-policy.js';
@@ -127,10 +128,10 @@ export function createFileRegistry(options: {
         input.data.length % 4 !== 0 ||
         !/^[A-Za-z0-9+/]*={0,2}$/.test(input.data)
       )
-        throw new Error('Invalid base64 or file exceeds 10 MB');
+        throw new Error(`Invalid base64 or file exceeds ${MAX_UPLOAD_LABEL}`);
       const bytes = Buffer.from(input.data, 'base64');
       if (bytes.length > MAX_UPLOAD_BYTES || bytes.toString('base64') !== input.data)
-        throw new Error('Invalid base64 or file exceeds 10 MB');
+        throw new Error(`Invalid base64 or file exceeds ${MAX_UPLOAD_LABEL}`);
       const detected = imageMime(bytes);
       if (
         (input.mime?.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(input.name)) &&

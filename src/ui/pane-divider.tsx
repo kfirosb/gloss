@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LAYOUT_SIZE_MAX, LAYOUT_SIZE_MIN } from '../core/session-contracts.js';
 export function PaneDivider({
   name,
   value,
@@ -39,8 +40,8 @@ export function PaneDivider({
       aria-label={name}
       aria-orientation={responsive && wide ? 'vertical' : 'horizontal'}
       aria-valuenow={Math.round(value)}
-      aria-valuemin={10}
-      aria-valuemax={90}
+      aria-valuemin={LAYOUT_SIZE_MIN}
+      aria-valuemax={LAYOUT_SIZE_MAX}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         const parent = e.currentTarget.parentElement!;
@@ -81,9 +82,9 @@ export function PaneDivider({
           e.preventDefault();
           change(
             e.key === 'Home'
-              ? 10
+              ? LAYOUT_SIZE_MIN
               : e.key === 'End'
-                ? 90
+                ? LAYOUT_SIZE_MAX
                 : value + (delta[e.key as keyof typeof delta] ?? 0),
           );
         }

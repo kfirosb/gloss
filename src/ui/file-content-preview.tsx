@@ -1,10 +1,11 @@
-import { MAX_MEDIA_PREVIEW_BYTES } from '../core/content-policy.js';
+import { MAX_IMAGE_PREVIEW_LABEL, MAX_MEDIA_PREVIEW_BYTES } from '../core/content-policy.js';
 import { useMemo, useState, useEffect, useContext, type ReactNode } from 'react';
 import type { FilePreview } from '../core/file-references.js';
 import { FileLinkContext, localFilePath, isLocalFileLink } from './file-links.js';
 import type { SessionClient } from './session-client.js';
 import { RichText } from './rich-text.js';
 import './file-content-preview.css';
+import { errorMessage } from './error-message.js';
 
 function fileFormat(name: string) {
   const extension = name.split('.').at(-1)?.toLowerCase() ?? '';
@@ -207,9 +208,7 @@ function HtmlPreview({
           media.set(source, url);
         } catch (error) {
           if (!controller.signal.aborted)
-            failures.push(
-              `${source}: ${error instanceof Error ? error.message : 'Media unavailable'}`,
-            );
+            failures.push(`${source}: ${errorMessage(error, 'Media unavailable')}`);
         }
       }
       if (!controller.signal.aborted) {
@@ -307,7 +306,7 @@ export function FileContentPreview({
         ) : (
           <p role="status">
             {preview.state === 'large'
-              ? 'Image exceeds the 4 MiB preview limit.'
+              ? `Image exceeds the ${MAX_IMAGE_PREVIEW_LABEL} preview limit.`
               : 'Preview unavailable for this file type. You can still attach the file.'}
           </p>
         )}

@@ -1,3 +1,5 @@
+/** Delay before a live-update client reconnects after its stream ends or fails. */
+export const SERVER_EVENTS_RETRY_MS = 1000;
 /** Reads JSON SSE data frames, including CRLF, multiline data, and split UTF-8 chunks. */
 export async function* readServerEvents<T>(
   body: ReadableStream<Uint8Array>,

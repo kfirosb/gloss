@@ -1,10 +1,9 @@
 import { opendir, realpath } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../../runtime/process-runner.js';
-import { projectIdentity, uuid } from '../shared.js';
+import { codexHomeDir, projectIdentity, uuid } from '../shared.js';
 import { supportsCodexProtocol, type CodexAdapterOptions } from './index.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { resolveLiveness, type LockedThread, type ThreadLiveness } from './liveness.js';
@@ -131,7 +130,7 @@ async function scanWriters(options: CodexAdapterOptions, signal: AbortSignal): P
     scan.complete = false;
     scan.error ??= error;
   };
-  const home = options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  const home = codexHomeDir(options.codexHome);
   let locks = join(home, 'thread-writer-locks');
   const candidates: string[] = [];
   try {
@@ -193,7 +192,7 @@ async function scanWriters(options: CodexAdapterOptions, signal: AbortSignal): P
 
 type MetadataQuery = (id: string) => Metadata[];
 function openMetadata(options: CodexAdapterOptions): { query: MetadataQuery; close(): void } {
-  const home = options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  const home = codexHomeDir(options.codexHome);
   const db = new DatabaseSync(options.databasePath ?? join(home, 'state_5.sqlite'), {
     readOnly: true,
   });

@@ -3,6 +3,7 @@ import type { SummarySource } from '../core/summary-contracts.js';
 import type { SessionClient } from './session-client.js';
 import { RichText } from './rich-text.js';
 import { languageDirection, languageName } from '../core/language-settings.js';
+import { errorMessage } from './error-message.js';
 export function ResponseSummaryView({
   client,
   source,
@@ -44,8 +45,7 @@ export function ResponseSummaryView({
       setText(result.text);
       setCollapsed(true);
     } catch (error) {
-      if (current === generation.current)
-        setError(error instanceof Error ? error.message : 'Summary failed');
+      if (current === generation.current) setError(errorMessage(error, 'Summary failed'));
     } finally {
       if (current === generation.current) setLoading(false);
     }

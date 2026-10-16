@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { AgentKind, Target } from '../core/contracts.js';
 import { validateLanguageOverride, type LanguageOverride } from '../core/language-settings.js';
 import { UNSAFE_COMMAND_CHARACTER, MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
-export { MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
 import type { SessionManager } from './session-manager.js';
 import { sessionNameFor, type Tmux } from './tmux.js';
 import type { LaunchSettings } from '../core/launch-settings.js';
-export { splitArgs, type LaunchSettings } from '../core/launch-settings.js';
 
 import {
   CLAUDE_SETUP_PROMPT,
@@ -74,6 +73,14 @@ export interface SessionLauncher {
 export { CODEX_SETUP_PROMPT } from '../core/session-contracts.js';
 /** Identification attempts back off (1 s, 5 s, 15 s) and then stop instead of polling. */
 export const IDENTIFY_RETRY_DELAYS_MS = [1000, 5000, 15000];
+/** Pause between the two Ctrl+C presses End sends. */
+const EXIT_KEY_GAP_MS = 300;
+/** After asking a session to exit, poll this often, this many times, before killing it. */
+const EXIT_POLL_MS = 500;
+const EXIT_POLL_ATTEMPTS = 20;
+/** Step between readiness checks while a new session starts. */
+const READY_POLL_MS = 100;
+const MAX_ORIGIN_SESSION_ID_CHARS = 128;
 export const MAX_PROMPT_LENGTH = 4000;
 /** A first message typed into the New session dialog; absent means the disclosed default. */
 export function validatePrompt(value: unknown): string | undefined {
@@ -148,7 +155,7 @@ export function createSessionLauncher(options: {
         }
       }
   };
-  const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = options.sleep ?? ((ms) => delay(ms));
   const timeoutMs = options.identifyTimeoutMs ?? 60_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
     throw new Error('Invalid identification timeout');
@@ -403,7 +410,7 @@ export function createSessionLauncher(options: {
   // or clears input and never selects a menu option. A session that survives is killed.
   async function askToExit(tmux: Tmux, name: string) {
     await tmux.sendKeys(name, ['C-c']);
-    await sleep(300);
+    await sleep(EXIT_KEY_GAP_MS);
     await tmux.sendKeys(name, ['C-c']);
   }
   const liveShells = (folder: string) =>
@@ -505,7 +512,9 @@ export function createSessionLauncher(options: {
       requireOpen();
       const text = validateCommand(command);
       const origin =
-        originSessionId === undefined ? undefined : String(originSessionId).slice(0, 128);
+        originSessionId === undefined
+          ? undefined
+          : String(originSessionId).slice(0, MAX_ORIGIN_SESSION_ID_CHARS);
       const cwd = await validFolder(folder);
       const tmux = await options.tmux();
       const titleNumber = (r: LaunchRecord) => Number(TITLE.exec(r.title ?? 'Terminal')?.[1] ?? 1);
@@ -524,7 +533,7 @@ export function createSessionLauncher(options: {
       const launch = await startShell(tmux, cwd, origin);
       const name = sessionNameFor(launch.id);
       let ready = false;
-      for (let waited = 0; waited < readyTimeoutMs; waited += 100) {
+      for (let waited = 0; waited < readyTimeoutMs; waited += READY_POLL_MS) {
         const listed = await tmux.listSessions().catch(() => undefined);
         if (listed) {
           const pane = listed.find((s) => s.name === name);
@@ -534,7 +543,7 @@ export function createSessionLauncher(options: {
             break;
           }
         }
-        await sleep(100);
+        await sleep(READY_POLL_MS);
       }
       const typed = await tmux.typeText(name, text).then(
         () => ready,
@@ -612,7 +621,9 @@ export function createSessionLauncher(options: {
           () => true,
           () => false,
         );
-        if (asked) for (let i = 0; i < 20 && (await tmux.hasSession(name)); i++) await sleep(500);
+        if (asked)
+          for (let i = 0; i < EXIT_POLL_ATTEMPTS && (await tmux.hasSession(name)); i++)
+            await sleep(EXIT_POLL_MS);
         if (await tmux.hasSession(name)) {
           await tmux.killSession(name);
           if (await tmux.hasSession(name)) throw new Error('Session is still running');

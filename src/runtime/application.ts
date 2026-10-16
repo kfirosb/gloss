@@ -5,7 +5,8 @@ import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
 import type { ImageAttachment } from '../core/contracts.js';
 import { createFileRegistry } from './file-registry.js';
-import { splitArgs } from './session-launcher.js';
+import { splitArgs, validateLaunchSettings, type LaunchSettings } from '../core/launch-settings.js';
+import { recordOf } from '../core/json-record.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { PACKAGE_NAME, packageRoot } from './package-root.js';
@@ -50,7 +51,7 @@ import {
   type LanguageSettings,
   type LanguageSettingsStore,
 } from '../core/language-settings.js';
-import type { SessionLauncher, LaunchSettings, LaunchStore } from './session-launcher.js';
+import type { SessionLauncher, LaunchStore } from './session-launcher.js';
 import type { TerminalBridge } from './terminal-bridge.js';
 import type { DictationBridge } from './dictation/bridge.js';
 import { createUsageService, type SessionUsageReport, type UsageService } from './usage.js';
@@ -920,22 +921,21 @@ export { SqliteStore };
 
 /** Accepts each agent's extra arguments as a string (split here, so quoting rules live in splitArgs) or an array. */
 function normalizeLaunchSettings(value: unknown): LaunchSettings {
-  const input = value as { extraArgs?: Record<string, unknown> } | null;
-  if (
-    !input ||
-    typeof input !== 'object' ||
-    !input.extraArgs ||
-    typeof input.extraArgs !== 'object'
-  )
-    return value as LaunchSettings;
-  const extraArgs = Object.fromEntries(
-    Object.entries(input.extraArgs).map(([agent, args]) => [
-      agent,
-      typeof args === 'string' ? splitArgs(args) : args,
-    ]),
-  );
-  return { ...(value as object), extraArgs } as LaunchSettings;
+  const input = recordOf(value);
+  const extraArgs = recordOf(input?.extraArgs);
+  if (!input || !extraArgs) return validateLaunchSettings(value);
+  return validateLaunchSettings({
+    ...input,
+    extraArgs: Object.fromEntries(
+      Object.entries(extraArgs).map(([agent, args]) => [
+        agent,
+        typeof args === 'string' ? splitArgs(args) : args,
+      ]),
+    ),
+  });
 }
+
+const MAX_LISTED_CHANGED_FILES = 199;
 
 /** Statuses, file names and change times only; file contents never leave the computer here. */
 function describeInspection(info: WorktreeInspection): string {
@@ -944,10 +944,11 @@ function describeInspection(info: WorktreeInspection): string {
   const lines = [
     `Worktree ${basename(info.path)}, branch ${info.branch ?? 'detached'}: ${info.modified} modified, ${info.untracked} untracked, ${info.unmergedCommits} unmerged commits`,
     ...info.changedFiles
-      .slice(0, 199)
+      .slice(0, MAX_LISTED_CHANGED_FILES)
       .map((file) => `${file.status} ${file.path} — changed ${when(file.changedAt)}`),
   ];
-  const unlisted = info.modified + info.untracked - Math.min(info.changedFiles.length, 199);
+  const unlisted =
+    info.modified + info.untracked - Math.min(info.changedFiles.length, MAX_LISTED_CHANGED_FILES);
   return [...lines, ...(unlisted > 0 ? [`(${unlisted} more changed files not listed)`] : [])].join(
     '\n',
   );

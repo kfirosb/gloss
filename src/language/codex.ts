@@ -1,6 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
 import { recordOf } from '../core/json-record.js';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { LanguageBackend, LanguageSession } from '../core/contracts.js';
 import {
@@ -13,6 +12,7 @@ import {
   type SessionOptions,
 } from './shared.js';
 import { parseCodexSpend } from '../core/usage.js';
+import { codexHomeDir } from '../agents/shared.js';
 export { LanguageError } from './shared.js';
 
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
@@ -60,9 +60,7 @@ export class CodexLanguageBackend implements LanguageBackend {
   private readonly workers: LanguageWorkers;
   private readonly cachePath: string;
   constructor(private readonly options: BackendOptions = {}) {
-    this.cachePath =
-      options.cachePath ??
-      join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'models_cache.json');
+    this.cachePath = options.cachePath ?? join(codexHomeDir(), 'models_cache.json');
     this.workers = new LanguageWorkers(
       {
         provider: 'codex',
@@ -103,11 +101,12 @@ export class CodexLanguageBackend implements LanguageBackend {
   async models(): Promise<{ id: string; label: string }[]> {
     try {
       if ((await stat(this.cachePath)).size > 2 * 1024 * 1024) throw new Error();
-      const cache = JSON.parse(await readFile(this.cachePath, 'utf8'));
+      const cache = recordOf(JSON.parse(await readFile(this.cachePath, 'utf8')));
       const models: { id: string; label: string }[] = [];
-      if (Array.isArray(cache.models))
-        for (const model of cache.models) {
-          if (!model || typeof model !== 'object' || model.visibility === 'hide') continue;
+      if (Array.isArray(cache?.models))
+        for (const item of cache.models) {
+          const model = recordOf(item);
+          if (!model || model.visibility === 'hide') continue;
           if (
             typeof model.slug !== 'string' ||
             !/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/.test(model.slug)

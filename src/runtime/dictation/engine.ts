@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { accessSync, constants, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { cpus } from 'node:os';
@@ -148,7 +149,6 @@ const freeLoopbackPort = () =>
       s.close(() => resolve(port));
     });
   });
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export function createDictationEngine(options: DictationEngineOptions): DictationEngine {
   const spawn = options.spawn ?? nodeEngineSpawn,

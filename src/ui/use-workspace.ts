@@ -1,12 +1,14 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ConversationSnapshot } from '../core/contracts.js';
 import {
+  clampLayoutSize,
   defaultWorkspace,
   WorkspaceConflict,
   type WorkspaceData,
   type WorkspaceRecord,
 } from '../core/session-contracts.js';
 import { SessionClient, type SessionEnvelope } from './session-client.js';
+import { errorMessage } from './error-message.js';
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>;
 // Resolve browser storage inside the existing guarded reads/writes, not during construction.
 const browserStorage: Storage = {
@@ -226,7 +228,7 @@ export class WorkspaceController {
       this.publish();
       if (this.unsaved) this.schedule();
     } catch (error) {
-      this.error = error instanceof Error ? error.message : 'Workspace unavailable';
+      this.error = errorMessage(error, 'Workspace unavailable');
       this.publish();
       throw error;
     }
@@ -289,8 +291,7 @@ export class WorkspaceController {
         ] as const) {
           const raw = legacyValue(key);
           const value = Number(raw);
-          if (raw !== null && Number.isFinite(value))
-            data.layout[field] = Math.min(90, Math.max(10, value));
+          if (raw !== null && Number.isFinite(value)) data.layout[field] = clampLayoutSize(value);
         }
       }
     });
@@ -378,7 +379,7 @@ export class WorkspaceController {
       } catch (error) {
         if (error instanceof WorkspaceConflict && error.current.sessionId === this.sessionId)
           this.conflict = error.current;
-        this.error = error instanceof Error ? error.message : 'Workspace save failed';
+        this.error = errorMessage(error, 'Workspace save failed');
         this.publish();
         return;
       }
@@ -429,7 +430,7 @@ export class WorkspaceController {
         }
       } catch (error) {
         if (this.conflict === conflict) {
-          this.error = error instanceof Error ? error.message : 'Could not verify composer attempt';
+          this.error = errorMessage(error, 'Could not verify composer attempt');
           this.publish();
         }
         return;

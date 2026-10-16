@@ -3,12 +3,12 @@ import type { FolderListing } from '../runtime/application.js';
 import type { FolderSearchResult } from '../runtime/folder-search.js';
 import { PanelDialog } from './composer-dialogs.js';
 import { connectFolder, searchFolders } from './session-client.js';
+import { errorMessage } from './error-message.js';
 type Search =
   | { state: 'idle' }
   | { state: 'searching' }
   | { state: 'done'; result: FolderSearchResult }
   | { state: 'error'; message: string };
-const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 /** Finds a folder (Spotlight search, or the desktop folder picker) and connects it. */
 export function ConnectFolderDialog({
   open,
@@ -45,7 +45,7 @@ export function ConnectFolderDialog({
         (result) => setSearch({ state: 'done', result }),
         (e) => {
           if (!controller.signal.aborted)
-            setSearch({ state: 'error', message: message(e, 'Search failed') });
+            setSearch({ state: 'error', message: errorMessage(e, 'Search failed') });
         },
       );
     }, 200);
@@ -62,7 +62,7 @@ export function ConnectFolderDialog({
       close();
       onConnected(folder);
     } catch (e) {
-      setError(message(e, 'Could not connect this folder'));
+      setError(errorMessage(e, 'Could not connect this folder'));
     } finally {
       setBusy(false);
     }
@@ -72,7 +72,7 @@ export function ConnectFolderDialog({
     try {
       chosen = await window.languageAssistant?.pickFolder();
     } catch (e) {
-      setError(message(e, 'Could not open the folder picker'));
+      setError(errorMessage(e, 'Could not open the folder picker'));
       return;
     }
     if (chosen) await choose(chosen);

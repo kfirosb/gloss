@@ -1,12 +1,23 @@
-import { MAX_TEXT_CHARS, MAX_ATTACHMENTS, MAX_IMAGES } from './content-policy.js';
+import {
+  ATTACHMENT_AND_IMAGE_LIMIT_MESSAGE,
+  MAX_ATTACHMENTS,
+  MAX_IMAGES,
+  MAX_INSTRUCTION_CHARS,
+  MAX_SUMMARY_CHARS,
+  MAX_TEXT_CHARS,
+} from './content-policy.js';
 import {
   isFileReference,
   uniqueReferences,
   type FileRegistry,
   type FileReference,
 } from './file-references.js';
-import type { Attachment } from './contracts.js';
-import { canSendWhileWorking, isDeliverySubmitted } from './contracts.js';
+import {
+  REQUEST_ID_PATTERN,
+  canSendWhileWorking,
+  isDeliverySubmitted,
+  type Attachment,
+} from './contracts.js';
 import type {
   AgentAdapter,
   AgentEvent,
@@ -98,7 +109,18 @@ export interface Workflow {
   close(): Promise<void>;
 }
 
+/** Remembered channel request IDs, enough to deduplicate recent native echoes. */
+const SEEN_CHANNEL_LIMIT = 1000;
+
 const copy = <T>(value: T): T => structuredClone(value);
+
+function assertAttachmentLimits(attachments: readonly Attachment[]) {
+  if (
+    attachments.length > MAX_ATTACHMENTS ||
+    attachments.filter((f) => f.kind !== 'file').length > MAX_IMAGES
+  )
+    throw new Error(ATTACHMENT_AND_IMAGE_LIMIT_MESSAGE);
+}
 
 const sameTarget = (left: Target, right: Target) =>
   left.agent === right.agent &&
@@ -405,7 +427,10 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
     if (event.type === 'channel-seen') {
       seenChannel.add(event.requestId);
-      if (seenChannel.size > 1000) seenChannel.delete(seenChannel.values().next().value!);
+      if (seenChannel.size > SEEN_CHANNEL_LIMIT) {
+        const oldest = seenChannel.values().next();
+        if (!oldest.done) seenChannel.delete(oldest.value);
+      }
       return;
     }
     if (event.type === 'gap') {
@@ -543,7 +568,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireOpen();
       signal.throwIfAborted();
       if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_CHARS)
-        throw new Error('File review requires text of at most 160000 characters');
+        throw new Error(`File review requires text of at most ${MAX_TEXT_CHARS} characters`);
       if (mode !== 'summary' && mode !== 'translation') throw new Error('Invalid file review mode');
       const version = languageContextVersion;
       const result = await languageOperation(version, async (operationSignal) => {
@@ -558,7 +583,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       });
       requireOpen();
       requireCurrentContext(version);
-      if (!result || (mode === 'summary' && result.length > 4000))
+      if (!result || (mode === 'summary' && result.length > MAX_SUMMARY_CHARS))
         throw new Error('Invalid file review output');
       return result;
     },
@@ -712,11 +737,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireOpen();
       if (!text.trim() && !attachments.length)
         throw new Error('Discussion text or image is required');
-      if (
-        attachments.length > MAX_ATTACHMENTS ||
-        attachments.filter((f) => f.kind !== 'file').length > MAX_IMAGES
-      )
-        throw new Error('Attach at most 10 files and 4 images');
+      assertAttachmentLimits(attachments);
       attachments = await resolveReferences(attachments);
       const contextVersion = languageContextVersion;
       return languageOperation(contextVersion, async (signal) => {
@@ -813,7 +834,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     async sendComposer(requestId, text, attachments = [], transport) {
       requireOpen();
       if (
-        !/^[a-zA-Z0-9-]{1,100}$/.test(requestId) ||
+        !REQUEST_ID_PATTERN.test(requestId) ||
         typeof text !== 'string' ||
         (!text.trim() && !attachments.length) ||
         text.length > MAX_TEXT_CHARS ||
@@ -868,11 +889,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           ))
       )
         throw new Error('Blocked: agent is working or unavailable');
-      if (
-        attachments.length > MAX_ATTACHMENTS ||
-        attachments.filter((f) => f.kind !== 'file').length > MAX_IMAGES
-      )
-        throw new Error('Attach at most 10 files and 4 images');
+      assertAttachmentLimits(attachments);
       const target = copy(state.target);
       composerOperation = true;
       try {
@@ -913,7 +930,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     async translateComposer(text) {
       requireOpen();
       if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_CHARS)
-        throw new Error('Enter text to translate (at most 160000 characters)');
+        throw new Error(`Enter text to translate (at most ${MAX_TEXT_CHARS} characters)`);
       if (!needsSendTranslation(settings)) return text;
       const version = languageContextVersion;
       const result = await languageOperation(version, (signal) =>
@@ -977,7 +994,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         !localizedText.trim() ||
         localizedText.length > MAX_TEXT_CHARS
       )
-        throw new Error('A nonempty review of at most 160000 characters is required');
+        throw new Error(`A nonempty review of at most ${MAX_TEXT_CHARS} characters is required`);
       if (state.codingState !== 'idle') throw new Error('Blocked: agent is working or unavailable');
       reviewOperation = true;
       try {
@@ -1082,7 +1099,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         !localizedText.trim() ||
         localizedText.length > MAX_TEXT_CHARS
       )
-        throw new Error('A nonempty review of at most 160000 characters is required');
+        throw new Error(`A nonempty review of at most ${MAX_TEXT_CHARS} characters is required`);
       const validate = () => {
         requireOpen();
         if (reviews.get(id) !== review) throw new Error('Review already approved or expired');
@@ -1150,7 +1167,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const current = state.currentDraft;
       if (!current || current.id !== id || current.revision !== revision)
         throw new Error('Queue changed; reopen the instruction');
-      if (!englishText?.trim() || englishText.length > 200000)
+      if (!englishText?.trim() || englishText.length > MAX_INSTRUCTION_CHARS)
         throw new Error('A nonempty instruction is required');
       if (
         state.deliveries.some(

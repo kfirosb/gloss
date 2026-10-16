@@ -1,4 +1,4 @@
-import { lstat, mkdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   type ProcessOutcome,
   type ProcessRunner,
 } from './process-runner.js';
+import { ensurePrivateDirectory } from './private-directory.js';
 
 export class TmuxUnavailable extends Error {
   readonly code = 'tmux-unavailable';
@@ -64,17 +65,7 @@ export async function locateTmux(
 
 export async function ensureSocketDirectory(dir: string) {
   await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
-  await mkdir(dir, { mode: 0o700 }).catch((error) => {
-    if (error.code !== 'EEXIST') throw error;
-  });
-  const info = await lstat(dir);
-  if (
-    !info.isDirectory() ||
-    info.isSymbolicLink() ||
-    (info.mode & 0o777) !== 0o700 ||
-    info.uid !== process.getuid?.()
-  )
-    throw new Error('Unsafe tmux directory');
+  await ensurePrivateDirectory(dir, 'Unsafe tmux directory');
 }
 
 export interface Tmux {

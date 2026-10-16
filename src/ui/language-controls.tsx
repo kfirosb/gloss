@@ -29,6 +29,7 @@ import {
   type DarkStyle,
   type Theme,
 } from './display-preferences.js';
+import { errorMessage } from './error-message.js';
 
 export type SessionLanguage = {
   defaults: LanguageSettings;
@@ -92,9 +93,7 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
     if (open) {
       setError('');
       setLaunch(null);
-      readLanguageDefaults().then(setValue, (e) =>
-        setError(e instanceof Error ? e.message : 'Unavailable'),
-      );
+      readLanguageDefaults().then(setValue, (e) => setError(errorMessage(e, 'Unavailable')));
       readLaunchSettings().then(
         (s) => setLaunch(toInput(s)),
         () => {},
@@ -108,7 +107,7 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
       if (launch) await saveLaunchSettings(launch);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(errorMessage(e, 'Save failed'));
     }
   };
   return (
@@ -266,7 +265,7 @@ export function SessionLanguageControl({
         latest.current = result.override ?? next;
       } catch (e) {
         latest.current = null;
-        setError(e instanceof Error ? e.message : 'Change failed');
+        setError(errorMessage(e, 'Change failed'));
       }
     });
   };
@@ -278,7 +277,7 @@ export function SessionLanguageControl({
         latest.current = {};
       } catch (e) {
         latest.current = null;
-        setError(e instanceof Error ? e.message : 'Reset failed');
+        setError(errorMessage(e, 'Reset failed'));
       }
     });
   };

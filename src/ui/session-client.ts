@@ -1,5 +1,5 @@
-import { MAX_MEDIA_PREVIEW_BYTES } from '../core/content-policy.js';
-import { readServerEvents } from './server-events.js';
+import { MAX_MEDIA_PREVIEW_BYTES, MAX_MEDIA_PREVIEW_LABEL } from '../core/content-policy.js';
+import { readServerEvents, SERVER_EVENTS_RETRY_MS } from './server-events.js';
 import type {
   BrowserPage,
   BrowserSearch,
@@ -157,7 +157,7 @@ export class SessionClient {
     }
     if (Number(response.headers.get('content-length')) > maxBytes) {
       await response.body?.cancel();
-      throw new Error('Combined local media exceeds the 128 MiB preview limit');
+      throw new Error(`Combined local media exceeds the ${MAX_MEDIA_PREVIEW_LABEL} preview limit`);
     }
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Media unavailable');
@@ -169,7 +169,9 @@ export class SessionClient {
         if (part.done) break;
         size += part.value.byteLength;
         if (size > maxBytes)
-          throw new Error('Combined local media exceeds the 128 MiB preview limit');
+          throw new Error(
+            `Combined local media exceeds the ${MAX_MEDIA_PREVIEW_LABEL} preview limit`,
+          );
         chunks.push(part.value);
       }
     } finally {
@@ -235,7 +237,8 @@ export class SessionClient {
       } catch {
         if (signal.aborted) return;
       }
-      if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!signal.aborted)
+        await new Promise((resolve) => setTimeout(resolve, SERVER_EVENTS_RETRY_MS));
     }
   }
 }

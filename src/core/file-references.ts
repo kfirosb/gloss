@@ -1,5 +1,6 @@
 import {
   ATTACHMENT_LIMIT_MESSAGE,
+  DISTINCT_ATTACHMENT_LIMIT_MESSAGE,
   IMAGE_LIMIT_MESSAGE,
   MAX_ATTACHMENTS,
   MAX_IMAGES,
@@ -87,8 +88,7 @@ export function selectFileReferences(
 ): FileReference[] {
   if (!Array.isArray(ids) || ids.length > MAX_ATTACHMENTS)
     throw new Error(ATTACHMENT_LIMIT_MESSAGE);
-  if (new Set(ids).size !== ids.length)
-    throw new Error(`Attach at most ${MAX_ATTACHMENTS} distinct files`);
+  if (new Set(ids).size !== ids.length) throw new Error(DISTINCT_ATTACHMENT_LIMIT_MESSAGE);
   const byId = new Map(owned.map((file) => [file.id, file]));
   const selected = ids.map((id) => {
     const file = byId.get(id);

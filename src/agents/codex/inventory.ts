@@ -12,6 +12,7 @@ import {
   type InventoryEntry,
   type InventoryScope,
 } from '../inventory.js';
+import { codexHomeDir } from '../shared.js';
 
 type Server = { command?: string; url?: string };
 type Triple = '"""' | "'''";
@@ -188,7 +189,7 @@ export async function readCodexInventory(options: {
   codexHome?: string;
 }): Promise<Inventory> {
   const home = options.home ?? homedir();
-  const codexHome = options.codexHome ?? (process.env.CODEX_HOME || join(home, '.codex'));
+  const codexHome = codexHomeDir(options.codexHome, home);
   const ctx: InventoryContext = { home, problems: [] };
   const entries: InventoryEntry[] = [
     ...(await readSkillDir(join(codexHome, 'skills'), 'global', ctx)),

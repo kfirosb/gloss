@@ -7,6 +7,7 @@ import {
   type LanguageSettings,
 } from '../core/language-settings.js';
 import { RichText } from './rich-text.js';
+import { errorMessage } from './error-message.js';
 type Mode = 'summary' | 'translation';
 export function FileReview({
   client,
@@ -49,8 +50,7 @@ export function FileReview({
       setResults((current) => ({ ...current, [next]: result.text }));
       setMode(next);
     } catch (error) {
-      if (!controller.signal.aborted)
-        setError(error instanceof Error ? error.message : 'File review failed');
+      if (!controller.signal.aborted) setError(errorMessage(error, 'File review failed'));
     } finally {
       if (!controller.signal.aborted) setLoading(null);
     }

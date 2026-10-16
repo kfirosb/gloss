@@ -28,6 +28,12 @@ export interface SessionRecord {
   enabled: boolean;
 }
 
+/** Panel sizes are percentages of the shared axis, kept within these bounds. */
+export const LAYOUT_SIZE_MIN = 10;
+export const LAYOUT_SIZE_MAX = 90;
+export const clampLayoutSize = (value: number) =>
+  Math.min(LAYOUT_SIZE_MAX, Math.max(LAYOUT_SIZE_MIN, value));
+
 export interface WorkspaceData {
   composer: string;
   attachmentIds: string[];

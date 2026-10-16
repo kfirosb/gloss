@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { Attachment } from '../core/contracts.js';
 import type { FileContentStatus, SessionClient } from './session-client.js';
+import { errorMessage } from './error-message.js';
 export const ImageSessionContext = createContext<SessionClient | null>(null);
 export type CardReference =
   | (Attachment & { contentStatus?: FileContentStatus })
@@ -86,7 +87,7 @@ function ReferenceCard({
         if (!controller.signal.aborted)
           setContentStatus({
             state: 'unreadable',
-            reason: error instanceof Error ? error.message : 'Content unavailable',
+            reason: errorMessage(error, 'Content unavailable'),
           });
       });
     return () => controller.abort();

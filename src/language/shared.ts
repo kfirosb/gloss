@@ -18,6 +18,7 @@ import {
   type ProcessRunner,
 } from '../runtime/process-runner.js';
 import {
+  DISCUSSION_WINDOW,
   discussionPrompt,
   preparationPrompt,
   translationPrompt,
@@ -373,7 +374,7 @@ export class LanguageWorkers {
 function inputImages(input: LanguageInput): ImageAttachment[] {
   return [
     ...new Map(
-      (input.selectedDiscussion ?? input.discussion.slice(-16))
+      (input.selectedDiscussion ?? input.discussion.slice(-DISCUSSION_WINDOW))
         .flatMap((t) => t.attachments ?? [])
         .filter((a): a is ImageAttachment => a.kind !== 'file')
         .map((a) => [a.id, a]),

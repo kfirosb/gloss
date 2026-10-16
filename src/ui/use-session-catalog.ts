@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CatalogSnapshot } from '../core/session-catalog.js';
 import { authHeaders, sessionRequest } from './session-client.js';
-import { readServerEvents } from './server-events.js';
+import { readServerEvents, SERVER_EVENTS_RETRY_MS } from './server-events.js';
+import { errorMessage } from './error-message.js';
 
 export interface SessionCatalogState {
   catalog: CatalogSnapshot | null;
@@ -28,7 +29,7 @@ export function subscribeSessionCatalog(
   };
   const failed = (error: unknown) => {
     if (signal.aborted) return;
-    const message = error instanceof Error ? error.message : 'Catalog connection unavailable';
+    const message = errorMessage(error, 'Catalog connection unavailable');
     listener({
       catalog: current ? { ...current, discovery: { state: 'stale', error: message } } : null,
       error: message,
@@ -80,7 +81,7 @@ export function subscribeSessionCatalog(
     if (!signal.aborted)
       retry = setTimeout(() => {
         void connect();
-      }, 1000);
+      }, SERVER_EVENTS_RETRY_MS);
   };
   void connect();
   return () => {

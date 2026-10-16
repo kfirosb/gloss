@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FolderListing } from '../runtime/application.js';
 import type { ProjectNode } from './session-navigation.js';
 import { PanelDialog } from './composer-dialogs.js';
+import { errorMessage } from './error-message.js';
 /** A connected folder no longer on disk; `newestSessionId` is its newest saved session, when it has one. */
 export type MissingFolder = FolderListing & { newestSessionId?: string | undefined };
 export function HiddenProjectsDialog({
@@ -35,7 +36,7 @@ export function HiddenProjectsDialog({
     try {
       await onForget(path);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not forget this folder');
+      setError(errorMessage(e, 'Could not forget this folder'));
     } finally {
       setBusy(null);
     }

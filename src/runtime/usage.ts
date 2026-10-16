@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { AgentKind, LanguageBackend } from '../core/contracts.js';
 import {
   pricesFor,
@@ -13,6 +11,7 @@ import {
 } from '../core/usage.js';
 import type { LanguageObserver } from '../language/shared.js';
 import { readLatestCodexUsage } from '../agents/codex/usage.js';
+import { codexHomeDir } from '../agents/shared.js';
 
 export interface SessionUsageReport {
   provider: AgentKind;
@@ -48,7 +47,7 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
   const tracker = new UsageTracker();
   const now = options.now ?? Date.now;
   const store = options.store;
-  const codexHome = options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  const codexHome = codexHomeDir(options.codexHome);
   const read = (scope: string, provider: AgentKind, model: string) => {
     const spend = store?.readSpend?.(scope, provider);
     return spend ? priceSpend(provider, model, spend) : null;

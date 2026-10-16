@@ -12,9 +12,8 @@ import { dirname, isAbsolute } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Target } from '../../core/contracts.js';
 import { uuid, validateTarget } from '../shared.js';
-import type { ChannelKey, ChannelReply } from './channel-types.js';
+import { CHANNEL_MAX_TEXT_CHARS, type ChannelKey, type ChannelReply } from './channel-types.js';
 
-const MAX_TEXT = 160_000;
 const MAX_PAGE = 100;
 type KeyRow = {
   panel_session_id: string;
@@ -34,8 +33,8 @@ function checkedKey(key: ChannelKey): void {
   if (!uuid.test(key.nativeSessionId)) throw new Error('Invalid native session identity');
 }
 function checkedText(text: string): void {
-  if (typeof text !== 'string' || text.length > MAX_TEXT)
-    throw new Error('Channel text exceeds 160000 characters');
+  if (typeof text !== 'string' || text.length > CHANNEL_MAX_TEXT_CHARS)
+    throw new Error(`Channel text exceeds ${CHANNEL_MAX_TEXT_CHARS} characters`);
 }
 function canonicalProject(target: Target): string {
   validateTarget(target, 'claude');

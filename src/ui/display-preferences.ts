@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { clampSidebarWidth } from './sidebar-frame.js';
 export type AssistantMode = 'full' | 'compact';
 export type Theme = 'light' | 'dark' | 'auto';
 export type DarkStyle = 'graphite' | 'dimmed' | 'midnight';
@@ -30,7 +31,7 @@ const defaults = (): DisplayPreferences => ({
   darkStyle: 'graphite',
 });
 const clampWidth = (w: unknown) =>
-  typeof w === 'number' && Number.isFinite(w) ? Math.min(440, Math.max(240, Math.round(w))) : 300;
+  typeof w === 'number' && Number.isFinite(w) ? clampSidebarWidth(w) : defaults().sidebarWidth;
 const objectOf = (value: unknown) =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

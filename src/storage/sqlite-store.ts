@@ -16,6 +16,7 @@ import type {
   TranslationKey,
 } from '../core/contracts.js';
 import {
+  clampLayoutSize,
   defaultWorkspace,
   WorkspaceConflict,
   type SessionRecord,
@@ -46,7 +47,8 @@ import {
   type FolderKind,
   type SidebarSettings,
 } from '../runtime/connected-folders.js';
-import type { LaunchRecord, LaunchSettings, LaunchStore } from '../runtime/session-launcher.js';
+import type { LaunchRecord, LaunchStore } from '../runtime/session-launcher.js';
+import type { LaunchSettings } from '../core/launch-settings.js';
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -561,7 +563,6 @@ export class SqliteStore
         .get(data.review.draftId, data.review.revision, sessionId);
       if (!draft) throw new Error('Prepared review does not exist for this session');
     }
-    const clamp = (value: number) => Math.min(90, Math.max(10, value));
     return {
       composer: data.composer,
       attachmentIds: [...data.attachmentIds],
@@ -585,8 +586,8 @@ export class SqliteStore
       layout: {
         mode: data.layout.mode,
         order: [...data.layout.order],
-        liveSize: clamp(data.layout.liveSize),
-        discussionSize: clamp(data.layout.discussionSize),
+        liveSize: clampLayoutSize(data.layout.liveSize),
+        discussionSize: clampLayoutSize(data.layout.discussionSize),
       },
     };
   }

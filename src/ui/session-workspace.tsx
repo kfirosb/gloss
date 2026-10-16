@@ -2,6 +2,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_IMAGES,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
   ATTACHMENT_LIMIT_MESSAGE,
   IMAGE_LIMIT_MESSAGE,
 } from '../core/content-policy.js';
@@ -74,6 +75,7 @@ import {
   isDictationShortcut,
 } from './dictation-state.js';
 import { DictationButton } from './dictation-button.js';
+import { errorMessage } from './error-message.js';
 
 function Message({
   message,
@@ -152,7 +154,7 @@ function Message({
 // Keys already posted in this page; module-level so remounting the workspace (tab switches) never re-posts the same sequence.
 const postedSeen = new Set<string>();
 /** Marks the shown session seen once per response sequence, only while the page is visible and the window focused. Approval attention is cleared by the attention monitor, never here. */
-export function useMarkSeen(entry: CatalogEntry | undefined) {
+function useMarkSeen(entry: CatalogEntry | undefined) {
   const sessionId = entry?.sessionId;
   const attention = entry?.attention;
   const sequence = entry?.latestResponseSequence;
@@ -452,7 +454,7 @@ export function SessionWorkspace({
       setRevealedFile(path);
       openPreview(path);
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'File unavailable');
+      setError(errorMessage(error, 'File unavailable'));
     }
   };
   const attachPath = async (path: string, token: typeof mention = null) => {
@@ -499,7 +501,7 @@ export function SessionWorkspace({
         );
       }
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : 'File unavailable');
+      if (mounted.current) setError(errorMessage(e, 'File unavailable'));
     } finally {
       uploadLock.current = false;
       if (mounted.current) setUploading(false);
@@ -519,7 +521,7 @@ export function SessionWorkspace({
     setError('');
     try {
       for (const file of files) {
-        if (file.size > MAX_UPLOAD_BYTES) throw new Error('Use files up to 10 MB');
+        if (file.size > MAX_UPLOAD_BYTES) throw new Error(`Use files up to ${MAX_UPLOAD_LABEL}`);
         const data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(',')[1]!);
@@ -534,9 +536,7 @@ export function SessionWorkspace({
         await addReference(image);
       }
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : 'File upload failed; existing attachments preserved',
-      );
+      setError(errorMessage(e, 'File upload failed; existing attachments preserved'));
     } finally {
       uploadLock.current = false;
       setUploading(false);
@@ -592,7 +592,7 @@ export function SessionWorkspace({
       });
       apply(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delivery uncertain; text preserved');
+      setError(errorMessage(e, 'Delivery uncertain; text preserved'));
     } finally {
       setComposerSending(false);
     }
@@ -662,7 +662,7 @@ export function SessionWorkspace({
         apply(result);
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not release composer');
+      setError(errorMessage(e, 'Could not release composer'));
     }
   };
   useEffect(() => {
@@ -789,7 +789,7 @@ export function SessionWorkspace({
       apply(value);
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Action failed');
+      setError(errorMessage(e, 'Action failed'));
       return false;
     }
   };
@@ -885,7 +885,7 @@ export function SessionWorkspace({
         setReviewOpen(true);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Preparation failed');
+      setError(errorMessage(e, 'Preparation failed'));
     } finally {
       setPreparing(false);
     }
@@ -920,7 +920,7 @@ export function SessionWorkspace({
       setReviewError('');
       setError('');
     } catch (e) {
-      setResetError(e instanceof Error ? e.message : 'Reset failed; instruction preserved');
+      setResetError(errorMessage(e, 'Reset failed; instruction preserved'));
     } finally {
       setPreparing(false);
     }
@@ -962,7 +962,7 @@ export function SessionWorkspace({
         });
       else if (accepted) setReviewOpen(true);
     } catch (e) {
-      setReviewError(e instanceof Error ? e.message : 'Delivery failed');
+      setReviewError(errorMessage(e, 'Delivery failed'));
       setReviewOpen(true);
     } finally {
       setPreparing(false);
@@ -1011,7 +1011,7 @@ export function SessionWorkspace({
             original={m.role === 'assistant' && !needsReplyTranslation(languageSettings)}
             onTranslate={() =>
               void call({ type: 'translate-message', sourceId: m.sourceId }).catch((e) =>
-                setError(e instanceof Error ? e.message : 'Translation failed'),
+                setError(errorMessage(e, 'Translation failed')),
               )
             }
           />
@@ -1165,7 +1165,7 @@ export function SessionWorkspace({
                 throw new Error('Drop a file from this session');
               void attachPath(value.relativePath);
             } catch (error) {
-              setError(error instanceof Error ? error.message : 'Invalid file drop');
+              setError(errorMessage(error, 'Invalid file drop'));
             }
             return;
           }

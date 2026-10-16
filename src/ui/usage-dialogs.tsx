@@ -19,6 +19,7 @@ import {
   WEEKLY_IDEAS,
   type Suggestion,
 } from './usage.js';
+import { errorMessage } from './error-message.js';
 
 const PLAN_URL: Record<AgentKind, string> = {
   claude: 'https://claude.ai/upgrade',
@@ -198,7 +199,7 @@ export function UsageReadout({
       });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Refresh failed');
+      setError(errorMessage(e, 'Refresh failed'));
     } finally {
       setRefreshing(false);
     }

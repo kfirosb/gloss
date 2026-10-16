@@ -6,6 +6,7 @@ import type { ImageAttachment } from '../core/contracts.js';
 import {
   MAX_UPLOAD_BASE64_CHARS,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
   MAX_ATTACHMENT_NAME_CHARS,
 } from '../core/content-policy.js';
 export const attachmentRoot = join(homedir(), '.language-assistant', 'attachments');
@@ -18,10 +19,10 @@ export async function saveImage(
     input.data.length > MAX_UPLOAD_BASE64_CHARS ||
     !/^[A-Za-z0-9+/]*={0,2}$/.test(input.data)
   )
-    throw new Error('Invalid image or image exceeds 10 MB');
+    throw new Error(`Invalid image or image exceeds ${MAX_UPLOAD_LABEL}`);
   const bytes = Buffer.from(input.data, 'base64');
   if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES)
-    throw new Error('Images must be between 1 byte and 10 MB');
+    throw new Error(`Images must be between 1 byte and ${MAX_UPLOAD_LABEL}`);
   const mime = imageMime(bytes);
   if (!mime) throw new Error('Use a PNG, JPEG, WebP, or GIF image');
   const id = randomUUID();

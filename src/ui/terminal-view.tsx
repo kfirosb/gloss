@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { chunkInput, terminalTicket } from './launch-controls.js';
+import { errorMessage } from './error-message.js';
 
 const COALESCE_MS = 10;
 /** One live attachment to a launch's tmux session. Mount it to connect; unmount to disconnect (the session keeps running). */
@@ -63,7 +64,7 @@ export function TerminalView({
         };
       },
       (e) => {
-        if (!disposed) setError(e instanceof Error ? e.message : 'Terminal unavailable');
+        if (!disposed) setError(errorMessage(e, 'Terminal unavailable'));
       },
     );
     const input = term.onData((data) => {

@@ -216,7 +216,7 @@ it('defines every dark color variable the stylesheets use for each dark style', 
     .join('\n');
   const used = new Set([...sheets.matchAll(/var\((--dk-[\w-]+)\)/g)].map((m) => m[1]!));
   const dark = readFileSync(new URL('../../src/ui/dark-styles.css', import.meta.url), 'utf8');
-  const blocks = [...dark.matchAll(/data-dark-style=(\w+)\] \{([^}]*)\}/g)].map(
+  const blocks = [...dark.matchAll(/data-dark-style='?(\w+)'?\] \{([^}]*)\}/g)].map(
     (m) => [m[1], new Set([...m[2]!.matchAll(/(--dk-[\w-]+):/g)].map((x) => x[1]))] as const,
   );
   expect(blocks.map(([name]) => name)).toEqual(DARK_STYLES.map((s) => s.value));

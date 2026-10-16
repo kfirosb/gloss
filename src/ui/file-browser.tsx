@@ -5,6 +5,7 @@ import { FileReview } from './file-review.js';
 import { FileContentPreview } from './file-content-preview.js';
 import type { LanguageSettings } from '../core/language-settings.js';
 import type { SessionClient } from './session-client.js';
+import { errorMessage } from './error-message.js';
 export const FILE_DRAG_TYPE = 'application/x-session-file';
 export function FileBrowser({
   client,
@@ -41,8 +42,7 @@ export function FileBrowser({
           );
         })
         .catch((error) => {
-          if (!controller.signal.aborted)
-            setStatus(error instanceof Error ? error.message : 'Search unavailable');
+          if (!controller.signal.aborted) setStatus(errorMessage(error, 'Search unavailable'));
         });
     }, 150);
     return () => {
@@ -163,8 +163,7 @@ export function FilePreviewDialog({
         if (!controller.signal.aborted) setPreview(value);
       })
       .catch((error) => {
-        if (!controller.signal.aborted)
-          setError(error instanceof Error ? error.message : 'Preview unavailable');
+        if (!controller.signal.aborted) setError(errorMessage(error, 'Preview unavailable'));
       });
     return () => controller.abort();
   }, [client, path]);

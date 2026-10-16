@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { SessionClient } from './session-client.js';
 import type { FilePickerHandle } from './file-picker.js';
 import type { Inventory, InventoryEntry } from '../agents/inventory.js';
+import { errorMessage } from './error-message.js';
 
 export type InvocationKind = 'skill' | 'mcp';
 export interface InvocationMention {
@@ -88,7 +89,7 @@ export const InventoryPicker = forwardRef<
       })
       .catch((e) => {
         if (!controller.signal.aborted && version === generation.current)
-          setStatus(e instanceof Error ? e.message : 'List unavailable');
+          setStatus(errorMessage(e, 'List unavailable'));
       });
     return () => controller.abort();
   }, [sessionId]);

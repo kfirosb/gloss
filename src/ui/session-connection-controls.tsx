@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { CatalogEntry } from '../core/session-catalog.js';
 import type { Target } from '../core/contracts.js';
 import { agentName } from './session-navigation.js';
+import { errorMessage } from './error-message.js';
 export function SessionMetadata({ entry }: { entry: CatalogEntry }) {
   return (
     <>
@@ -34,7 +35,7 @@ export function SessionConnectionControls({
     try {
       await onRegister(target);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Connection failed');
+      setError(errorMessage(e, 'Connection failed'));
     } finally {
       setPending(false);
     }

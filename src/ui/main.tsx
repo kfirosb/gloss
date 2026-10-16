@@ -67,6 +67,7 @@ import type { CatalogEntry } from '../core/session-catalog.js';
 import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { CreatedWorktree, WorktreeRemoval } from '../runtime/application.js';
 import { SessionWorkspace } from './session-workspace.js';
+import { errorMessage } from './error-message.js';
 
 window.addEventListener('hashchange', () => window.location.reload());
 applyTheme(readDisplayPreferences());
@@ -113,7 +114,7 @@ function App() {
         done.push(entry.sessionId!);
       } catch (e) {
         failed.push(entry);
-        message = e instanceof Error ? e.message : 'Could not remove from history';
+        message = errorMessage(e, 'Could not remove from history');
       }
     }
     if (done.length) {
@@ -352,7 +353,7 @@ function App() {
     const request = selectionRequest.current;
     void pending.catch((e) => {
       if (request === selectionRequest.current)
-        setSelectionError(e instanceof Error ? e.message : 'Could not select session');
+        setSelectionError(errorMessage(e, 'Could not select session'));
     });
   };
   const selectFolder = (key: string) => {
@@ -466,7 +467,7 @@ function App() {
     const e = id ? allEntries.find((x) => x.launchId === id) : undefined;
     if (id && e && !e.sessionId && !launchTerminal?.terminal)
       void retryLaunch(id).catch((err) =>
-        setSelectionError(err instanceof Error ? err.message : 'Could not retry the connection'),
+        setSelectionError(errorMessage(err, 'Could not retry the connection')),
       );
   };
   const waitingCount = (catalog?.entries ?? []).filter(
@@ -541,10 +542,7 @@ function App() {
         if (launchTerminal?.launchId === ended.launchId) setLaunchTerminal(null);
         if (selectedTerminal === ended.launchId) leaveTerminal(ended.folder);
       },
-      (e) =>
-        setSelectionError(
-          `Could not end ${ended.title}: ${e instanceof Error ? e.message : 'unknown error'}`,
-        ),
+      (e) => setSelectionError(`Could not end ${ended.title}: ${errorMessage(e, 'unknown error')}`),
     );
   };
   const [composerInsert, setComposerInsert] = useState<{
@@ -616,7 +614,7 @@ function App() {
     void pending.catch((e) => {
       setComposerInsert((c) => (c?.nonce === nonce ? null : c));
       if (request === selectionRequest.current)
-        setSelectionError(e instanceof Error ? e.message : 'Could not select session');
+        setSelectionError(errorMessage(e, 'Could not select session'));
     });
   };
   const runFromSession = async (record: SessionRecord, command: string) => {
@@ -767,7 +765,7 @@ function App() {
           onRetry={(launchId) => {
             setSelectionError('');
             void retryLaunch(launchId).catch((e) =>
-              setSelectionError(e instanceof Error ? e.message : 'Could not retry the connection'),
+              setSelectionError(errorMessage(e, 'Could not retry the connection')),
             );
           }}
         />
@@ -914,7 +912,7 @@ function App() {
                 })
                   .then(
                     () => setEnding(null),
-                    (e) => setEndError(e instanceof Error ? e.message : 'Could not end session'),
+                    (e) => setEndError(errorMessage(e, 'Could not end session')),
                   )
                   .finally(() => setEndBusy(false));
               }}

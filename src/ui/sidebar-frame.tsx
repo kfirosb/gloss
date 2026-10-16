@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react';
 export const SIDEBAR_MIN = 240,
   SIDEBAR_MAX = 440;
-const clamp = (w: number) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
+export const clampSidebarWidth = (w: number) =>
+  Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
 /** Holds the sidebar at `width` with a draggable, keyboard-operable divider; the width is committed when a drag ends. */
 export function SidebarFrame({
   width,
@@ -17,7 +18,8 @@ export function SidebarFrame({
   const [dragging, setDragging] = useState<number | null>(null);
   const frame = useRef<HTMLDivElement>(null);
   const shown = dragging ?? width;
-  const fromPointer = (x: number) => clamp(x - (frame.current?.getBoundingClientRect().left ?? 0));
+  const fromPointer = (x: number) =>
+    clampSidebarWidth(x - (frame.current?.getBoundingClientRect().left ?? 0));
   return (
     <div
       ref={frame}
@@ -69,7 +71,7 @@ export function SidebarFrame({
                       : undefined;
             if (next === undefined) return;
             e.preventDefault();
-            onWidth(clamp(next));
+            onWidth(clampSidebarWidth(next));
           }}
         />
       )}

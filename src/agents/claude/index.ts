@@ -3,11 +3,17 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createConnection } from 'node:net';
-import type { AgentAdapter, CodingState, Target } from '../../core/contracts.js';
-import type { Attachment } from '../../core/contracts.js';
+import {
+  REQUEST_ID_SOURCE,
+  type AgentAdapter,
+  type Attachment,
+  type CodingState,
+  type Target,
+} from '../../core/contracts.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import {
+  claudeConfigDir,
   observedOwner,
   projectIdentity,
   Transcript,
@@ -23,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { ChannelStore } from './channel-store.js';
-import type { ChannelReply } from './channel-types.js';
+import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
 export const CLAUDE_PROTOCOL = {
@@ -40,12 +46,12 @@ interface Registry {
   cwd: string;
   pid: number;
   version: string;
-  messagingSocketPath?: string;
-  status?: string;
-  peerProtocol?: number;
-  entrypoint?: string;
-  startedAt?: number;
-  updatedAt?: number;
+  messagingSocketPath?: string | undefined;
+  status?: string | undefined;
+  peerProtocol?: number | undefined;
+  entrypoint?: string | undefined;
+  startedAt?: number | undefined;
+  updatedAt?: number | undefined;
   name?: unknown;
 }
 export function claudeActivity(status: unknown): CodingState {
@@ -99,6 +105,11 @@ export interface ClaudeAdapterOptions extends AdapterOptions {
   /** Own-child credentials, supplied by trusted server bootstrap; never a browser API. */
   credentials?: (target: Target) => Promise<ClaudeCredentials | undefined>;
 }
+function optional(value: unknown, type: 'string'): string | undefined;
+function optional(value: unknown, type: 'number'): number | undefined;
+function optional(value: unknown, type: 'string' | 'number') {
+  return typeof value === type ? value : undefined;
+}
 async function registries(config: string): Promise<Registry[]> {
   let names: string[];
   try {
@@ -112,15 +123,28 @@ async function registries(config: string): Promise<Registry[]> {
     try {
       const path = join(config, 'sessions', name);
       if ((await stat(path)).size > 65_536) continue;
-      const r = JSON.parse(await readFile(path, 'utf8'));
+      const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
       if (
-        typeof r.sessionId === 'string' &&
+        typeof r?.sessionId === 'string' &&
         typeof r.cwd === 'string' &&
+        typeof r.pid === 'number' &&
         Number.isInteger(r.pid) &&
         r.pid > 0 &&
         typeof r.version === 'string'
       )
-        records.push(r);
+        records.push({
+          sessionId: r.sessionId,
+          cwd: r.cwd,
+          pid: r.pid,
+          version: r.version,
+          messagingSocketPath: optional(r.messagingSocketPath, 'string'),
+          status: optional(r.status, 'string'),
+          peerProtocol: optional(r.peerProtocol, 'number'),
+          entrypoint: optional(r.entrypoint, 'string'),
+          startedAt: optional(r.startedAt, 'number'),
+          updatedAt: optional(r.updatedAt, 'number'),
+          name: r.name,
+        });
     } catch {
       /* Unreadable metadata does not establish a target. */
     }
@@ -150,7 +174,7 @@ export async function discoverOpenClaude(
 ): Promise<OpenSessionScan> {
   if (signal.aborted)
     return { candidates: [], complete: false, error: 'Claude discovery cancelled' };
-  const config = options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  const config = claudeConfigDir(options.configDir);
   let records: Registry[];
   try {
     records = await registries(config);
@@ -203,9 +227,13 @@ function channelRequest(value: unknown, text: unknown): string | undefined {
   const origin = recordOf(value);
   if (origin?.kind !== 'channel' || origin.server !== CHANNEL_SERVER || typeof text !== 'string')
     return undefined;
-  return /^<channel source="language-assistant" request_id="([a-zA-Z0-9-]{1,100})"/.exec(text)?.[1];
+  return CHANNEL_REQUEST_MARKER.exec(text)?.[1];
 }
 const CHANNEL_SERVER = 'language-assistant';
+const CHANNEL_REQUEST_MARKER = new RegExp(
+  `^<channel source="${CHANNEL_SERVER}" request_id="(${REQUEST_ID_SOURCE})"`,
+);
+const DELIVERY_MARKER = new RegExp(`^\\[Language Assistant delivery: (${REQUEST_ID_SOURCE})\\]\\n`);
 export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {
   if (record.sessionId !== undefined && record.sessionId !== sessionRef)
     throw new Error('Transcript identity mismatch');
@@ -240,7 +268,7 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
     else text = ''; // Unknown wrappers are context, never rendered as reviewed work.
     // Newer Claude versions omit origin.msg_id. Keep a per-request marker in
     // the peer payload so confirmation survives that transcript format change.
-    const marker = /^\[Language Assistant delivery: ([a-zA-Z0-9-]{1,100})\]\n/.exec(text);
+    const marker = DELIVERY_MARKER.exec(text);
     if (marker) {
       if (deliveryId && deliveryId !== marker[1]) return {};
       deliveryId = marker[1];
@@ -307,7 +335,7 @@ async function socketWrite(
   });
 }
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAdapter {
-  const config = options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  const config = claudeConfigDir(options.configDir);
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -565,10 +593,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
                   'Claude channel setup requires a matching panel session; instruction preserved',
               };
             const body = claudeMessage(text, attachments);
-            if (body.length > 160_000)
+            if (body.length > CHANNEL_MAX_TEXT_CHARS)
               return {
                 state: 'failed',
-                reason: 'Channel message exceeds 160000 characters; instruction preserved',
+                reason: `Channel message exceeds ${CHANNEL_MAX_TEXT_CHARS} characters; instruction preserved`,
               };
             const record = await channelRegistry.resolveChannel(target).catch(() => undefined);
             if (!record)

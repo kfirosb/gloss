@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { splitArgs } from '../../src/runtime/session-launcher.js';
+import { splitArgs } from '../../src/core/launch-settings.js';
 import { toInput } from '../../src/ui/launch-controls.js';
 
 it('round-trips every launch argument through the editable settings form', () => {

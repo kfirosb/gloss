@@ -1,6 +1,7 @@
 import { access, realpath, stat } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
+import { isWithin } from './path-containment.js';
 
 export interface FolderHit {
   path: string;
@@ -46,8 +47,7 @@ async function pathCandidate(
     ))
   )
     return none;
-  const rel = relative(home, path);
-  if (!rel || rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) return none;
+  if (path === home || !isWithin(home, path)) return none;
   return {
     hits: [{ path, name: basename(path), git: await isGit(path) }],
     timedOut: false,
@@ -99,8 +99,8 @@ export async function searchFolders(
     const path = await realpath(line).catch(() => undefined);
     if (!path || seen.has(path)) continue;
     seen.add(path);
-    const rel = relative(home, path);
-    if (!rel || rel.startsWith('..') || skipped(rel.split(sep))) continue;
+    if (path === home || !isWithin(home, path) || skipped(relative(home, path).split(sep)))
+      continue;
     hits.push({ path, name: basename(path), git: await isGit(path) });
   }
   return { hits, timedOut: result.outcome.reason === 'timeout', unavailable: false };

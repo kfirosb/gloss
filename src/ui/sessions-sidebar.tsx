@@ -15,6 +15,7 @@ import { projectAttention, attentionLabel } from './session-navigation.js';
 import { AttentionBadge, Spinner } from './attention.js';
 import { AboutDialog } from './about-dialog.js';
 import { readAbout } from './session-client.js';
+import { errorMessage } from './error-message.js';
 export function SessionsSidebar({
   tree,
   hidden = [],
@@ -112,7 +113,7 @@ export function SessionsSidebar({
         if (active && v && typeof v.version === 'string') setAbout(v);
       },
       (e) => {
-        if (active) setAboutError(e instanceof Error ? e.message : 'Version unavailable');
+        if (active) setAboutError(errorMessage(e, 'Version unavailable'));
       },
     );
     return () => {

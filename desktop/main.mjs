@@ -150,15 +150,15 @@ function createWindow() {
           (details.mediaType === 'audio' || details.mediaType === undefined)
         : true,
   );
+  // IPC is accepted only from the app's own page in the main window.
+  const fromMainWindow = (event) =>
+    !!mainWindow &&
+    event.sender === mainWindow.webContents &&
+    new URL(event.senderFrame?.url ?? 'about:blank').origin === origin;
   ipcMain.removeHandler('pick-folder');
   // Only the app's own page may open the picker; the result is validated again by the server.
   ipcMain.handle('pick-folder', async (event) => {
-    if (
-      !mainWindow ||
-      event.sender !== mainWindow.webContents ||
-      new URL(event.senderFrame?.url ?? 'about:blank').origin !== origin
-    )
-      return null;
+    if (!fromMainWindow(event)) return null;
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
@@ -169,12 +169,7 @@ function createWindow() {
   ipcMain.removeAllListeners('attention-count');
   // Only the app's own page may set the badge; the count is validated by the controller.
   ipcMain.on('attention-count', (event, count) => {
-    if (
-      mainWindow &&
-      event.sender === mainWindow.webContents &&
-      new URL(event.senderFrame?.url ?? 'about:blank').origin === origin
-    )
-      badge.setCount(count);
+    if (fromMainWindow(event)) badge.setCount(count);
   });
   const alerts = createAlertHandler({
     playSound: (path) => execFile('/usr/bin/afplay', [path], () => {}),
@@ -183,12 +178,7 @@ function createWindow() {
   });
   ipcMain.removeAllListeners('attention-alert');
   ipcMain.on('attention-alert', (event, payload) => {
-    if (
-      mainWindow &&
-      event.sender === mainWindow.webContents &&
-      new URL(event.senderFrame?.url ?? 'about:blank').origin === origin
-    )
-      alerts.handle(payload);
+    if (fromMainWindow(event)) alerts.handle(payload);
   });
   mainWindow.on('focus', () => badge.refresh());
   mainWindow.on('blur', () => badge.refresh());

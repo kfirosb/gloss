@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { SessionClient } from './session-client.js';
+import { errorMessage } from './error-message.js';
 export interface FilePickerHandle {
   key(key: string): boolean;
 }
@@ -34,7 +35,7 @@ export const FilePicker = forwardRef<
         })
         .catch((e) => {
           if (!controller.signal.aborted && version === generation.current)
-            setStatus(e instanceof Error ? e.message : 'Search unavailable');
+            setStatus(errorMessage(e, 'Search unavailable'));
         });
     }, 150);
     return () => {

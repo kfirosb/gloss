@@ -30,7 +30,10 @@ export function createAsyncCache<K, V>(options: AsyncCacheOptions) {
       }
       const entry = { value, expiresAt: Infinity };
       entries.set(key, entry);
-      if (entries.size > maxEntries) entries.delete(entries.keys().next().value!);
+      if (entries.size > maxEntries) {
+        const oldest = entries.keys().next();
+        if (!oldest.done) entries.delete(oldest.value);
+      }
       void value.then(
         () => {
           entry.expiresAt = now() + ttlMs;

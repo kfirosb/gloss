@@ -1,6 +1,9 @@
 import { recordOf, type JsonRecord } from '../core/json-record.js';
 import { open, realpath } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { canSendWhileWorking, orderAgentMessages } from '../core/contracts.js';
 import type {
   AgentCapabilities,
@@ -12,6 +15,13 @@ import type {
 } from '../core/contracts.js';
 import type { ProviderUsage } from '../core/usage.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../runtime/process-runner.js';
+
+/** Claude's config directory: explicit option, then a nonempty CLAUDE_CONFIG_DIR, then ~/.claude. */
+export const claudeConfigDir = (configDir?: string, home = homedir()) =>
+  configDir ?? (process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'));
+/** Codex's home directory: explicit option, then a nonempty CODEX_HOME, then ~/.codex. */
+export const codexHomeDir = (codexHome?: string, home = homedir()) =>
+  codexHome ?? (process.env.CODEX_HOME || join(home, '.codex'));
 
 export interface AdapterOptions {
   runner?: ProcessRunner;
@@ -78,20 +88,9 @@ export type Parsed = {
 export type RecordParser = (value: JsonRecord, offset: number) => Parsed;
 const CHUNK = 1024 * 1024;
 const MAX_SCAN = 8;
-const sleep = (ms: number, signal: AbortSignal) =>
-  new Promise<void>((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const done = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal.addEventListener('abort', done, { once: true });
-  });
+/** Resolves after `ms`, or early (without rejecting) when the signal aborts. */
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  delay(ms, undefined, { signal }).catch(() => undefined);
 
 /** Versioned append-only JSONL reader. Positions are byte offsets, not JS character offsets. */
 export class Transcript {

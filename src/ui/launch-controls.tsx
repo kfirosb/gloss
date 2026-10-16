@@ -3,7 +3,12 @@ import type { CatalogEntry } from '../core/session-catalog.js';
 import type { LaunchRecord } from '../runtime/session-launcher.js';
 import type { TerminalView } from '../core/session-contracts.js';
 import { sessionRequest } from './session-client.js';
-import { formatArgs, type LaunchSettings, type PopupMode } from '../core/launch-settings.js';
+import {
+  defaultLaunchSettings,
+  formatArgs,
+  type LaunchSettings,
+  type PopupMode,
+} from '../core/launch-settings.js';
 export type { LaunchSettings, PopupMode } from '../core/launch-settings.js';
 
 export type { TerminalView } from '../core/session-contracts.js';
@@ -79,6 +84,9 @@ export function useKeystrokeTracker() {
   }, []);
 }
 
+/** Auto-open waits this long after the last keystroke so it never interrupts typing. */
+const AUTO_OPEN_TYPING_DELAY_MS = 2000;
+const AUTO_OPEN_POLL_MS = 500;
 export function shouldAutoOpen(
   entry: CatalogEntry | undefined,
   selectedId: string,
@@ -89,7 +97,35 @@ export function shouldAutoOpen(
   if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
     return false;
   if (entry.sessionId !== selectedId) return false; // 'auto' and 'current-tab' only ever open the shown session
-  return now - lastKeystrokeAt >= 2000;
+  return now - lastKeystrokeAt >= AUTO_OPEN_TYPING_DELAY_MS;
+}
+type AutoOpenRule = typeof shouldAutoOpen;
+/** Polls `rule` while `entry` waits for approval and calls `open` once per launch and activity. */
+function useAutoOpen(
+  entry: CatalogEntry | undefined,
+  selectedId: string,
+  popup: PopupMode,
+  lastKeystrokeAt: () => number,
+  rule: AutoOpenRule,
+  open: (entry: CatalogEntry) => void,
+) {
+  const [handled, setHandled] = useState('');
+  useEffect(() => {
+    const key = `${entry?.launchId}:${entry?.activity}`;
+    if (handled === key || !entry?.launchId || entry.activity !== 'approval-required') return;
+    const tick = () => {
+      if (rule(entry, selectedId, popup, lastKeystrokeAt(), Date.now())) {
+        setHandled(key);
+        open(entry);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, AUTO_OPEN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [entry?.launchId, entry?.activity, entry?.sessionId, selectedId, popup, handled]);
+  useEffect(() => {
+    if (entry?.activity !== 'approval-required') setHandled('');
+  }, [entry?.activity]);
 }
 export function useAutoOpenTerminal(
   entry: CatalogEntry | undefined,
@@ -98,23 +134,7 @@ export function useAutoOpenTerminal(
   lastKeystrokeAt: () => number,
   open: () => void,
 ) {
-  const [handled, setHandled] = useState('');
-  useEffect(() => {
-    const key = `${entry?.launchId}:${entry?.activity}`;
-    if (handled === key || !entry?.launchId || entry.activity !== 'approval-required') return;
-    const tick = () => {
-      if (shouldAutoOpen(entry, selectedId, popup, lastKeystrokeAt(), Date.now())) {
-        setHandled(key);
-        open();
-      }
-    };
-    tick();
-    const timer = setInterval(tick, 500);
-    return () => clearInterval(timer);
-  }, [entry?.launchId, entry?.activity, entry?.sessionId, selectedId, popup, handled]);
-  useEffect(() => {
-    if (entry?.activity !== 'approval-required') setHandled('');
-  }, [entry?.activity]);
+  useAutoOpen(entry, selectedId, popup, lastKeystrokeAt, shouldAutoOpen, () => open());
 }
 
 /** A launch the user just started and is waiting on: opens even before it is identified, until its session is the shown one. */
@@ -128,7 +148,7 @@ export function shouldAutoOpenLaunch(
   if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
     return false;
   if (entry.sessionId && entry.sessionId === selectedId) return false; // the per-session auto-open owns it
-  return now - lastKeystrokeAt >= 2000;
+  return now - lastKeystrokeAt >= AUTO_OPEN_TYPING_DELAY_MS;
 }
 export function useAutoOpenWaitingLaunch(
   entry: CatalogEntry | undefined,
@@ -137,23 +157,7 @@ export function useAutoOpenWaitingLaunch(
   lastKeystrokeAt: () => number,
   open: (entry: CatalogEntry) => void,
 ) {
-  const [handled, setHandled] = useState('');
-  useEffect(() => {
-    const key = `${entry?.launchId}:${entry?.activity}`;
-    if (handled === key || !entry?.launchId || entry.activity !== 'approval-required') return;
-    const tick = () => {
-      if (shouldAutoOpenLaunch(entry, selectedId, popup, lastKeystrokeAt(), Date.now())) {
-        setHandled(key);
-        open(entry);
-      }
-    };
-    tick();
-    const timer = setInterval(tick, 500);
-    return () => clearInterval(timer);
-  }, [entry?.launchId, entry?.activity, entry?.sessionId, selectedId, popup, handled]);
-  useEffect(() => {
-    if (entry?.activity !== 'approval-required') setHandled('');
-  }, [entry?.activity]);
+  useAutoOpen(entry, selectedId, popup, lastKeystrokeAt, shouldAutoOpenLaunch, open);
 }
 
 // One shared copy so the dialog's save reaches the open workspace at once.
@@ -163,7 +167,6 @@ const publish = (value: LaunchSettings) => {
   current = value;
   listeners.forEach((l) => l());
 };
-const DEFAULT_POPUP: PopupMode = 'auto';
 /** Subscribes to the shared settings copy and triggers the first read; undefined until it arrives. */
 function useLaunchSettings(): LaunchSettings | undefined {
   const [, bump] = useState(0);
@@ -178,11 +181,11 @@ function useLaunchSettings(): LaunchSettings | undefined {
   return current;
 }
 /** Popup behavior for the session view; defaults to 'auto' when the settings cannot be read. */
-export const usePopupMode = (): PopupMode => useLaunchSettings()?.popup ?? DEFAULT_POPUP;
-const DEFAULT_TERMINAL_VIEW: TerminalView = 'popup';
+export const usePopupMode = (): PopupMode =>
+  useLaunchSettings()?.popup ?? defaultLaunchSettings().popup;
 /** How terminal tabs open; 'popup' until the settings are read. */
 export const useTerminalView = (): TerminalView =>
-  useLaunchSettings()?.terminalView ?? DEFAULT_TERMINAL_VIEW;
+  useLaunchSettings()?.terminalView ?? defaultLaunchSettings().terminalView;
 /** Expand and Shrink save only the view; every other launch setting is sent back unchanged. Rejects when the settings cannot be read or written, so callers must catch. */
 export async function saveTerminalView(view: TerminalView) {
   const base = current ?? (await readLaunchSettings());

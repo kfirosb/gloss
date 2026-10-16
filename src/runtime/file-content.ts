@@ -3,10 +3,9 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import type { FileReference } from '../core/file-references.js';
+import { isWithin } from './path-containment.js';
 export function requireContained(root: string, file: string): void {
-  const relative = path.relative(root, file);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-    throw new Error('File is outside the selected worktree');
+  if (!isWithin(root, file)) throw new Error('File is outside the selected worktree');
 }
 export async function validateFileReference(file: FileReference): Promise<void> {
   if (file.source === 'worktree') {

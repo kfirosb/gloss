@@ -88,9 +88,14 @@ async function attachmentRoute(
 // Saved records carry the repository's project key (git common dir) so worktrees group under their repository.
 const projectMetadataCache = createAsyncCache<string, ProjectMetadata>({ ttlMs: 30_000 });
 function cachedProjectMetadata(path: string) {
-  return projectMetadataCache
-    .get(path, () => readProjectMetadata(path))
-    .catch((): ProjectMetadata => ({ canonicalRoot: '', projectName: path, available: false }));
+  // The unavailable fallback is cached too, so a missing folder is not re-read on every listing.
+  return projectMetadataCache.get(path, () =>
+    readProjectMetadata(path).catch((): ProjectMetadata => ({
+      canonicalRoot: '',
+      projectName: path,
+      available: false,
+    })),
+  );
 }
 async function sessionRoute(
   app: Application,

@@ -1,5 +1,8 @@
 import type { Target } from '../../core/contracts.js';
 
+/** Native channel message bound; an adapter limit, independent of the product composer limit. */
+export const CHANNEL_MAX_TEXT_CHARS = 160_000;
+
 export type ChannelKey = {
   panelSessionId: string;
   nativeSessionId: string;

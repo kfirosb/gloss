@@ -2,6 +2,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { ensureIgnoreEntry } from './gitignore.js';
+import { isWithin } from './path-containment.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
 import { createAsyncCache } from '../core/async-cache.js';
 
@@ -63,10 +64,6 @@ export async function insideFolderReal(candidate: string, root: string): Promise
   const [c, r] = await Promise.all([real(candidate), real(root)]);
   return insideFolder(c, r);
 }
-const inside = (parent: string, child: string) => {
-  const rel = relative(parent, child);
-  return rel === '' || (!rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel));
-};
 
 export function createWorktreeService(options: { runner?: ProcessRunner } = {}): WorktreeService {
   const runner = options.runner ?? runProcess;
@@ -223,7 +220,7 @@ export function createWorktreeService(options: { runner?: ProcessRunner } = {}):
       await git(main, ['worktree', 'add', '-b', name, target, 'HEAD'], 60_000);
       const path = await real(target);
       const canonical = await real(where);
-      if (!inside(main, where)) return { path, branch: name, location: canonical };
+      if (!isWithin(main, where)) return { path, branch: name, location: canonical };
       const rel = relative(main, where).split(sep).join('/');
       const ignore = await ensureIgnoreEntry(main, '/' + (rel || name) + '/');
       return { path, branch: name, location: canonical, ignore };
@@ -257,7 +254,7 @@ export function createNestedWorktreeLookup(
       service.list(root).then(
         (worktrees) =>
           worktrees
-            .filter((w) => w.path !== root && inside(root, w.path))
+            .filter((w) => w.path !== root && isWithin(root, w.path))
             .map((w) => relative(root, w.path)),
         () => [] as string[],
       ),

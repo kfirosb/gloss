@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { BrowserEntry } from '../core/file-references.js';
 import type { SessionClient } from './session-client.js';
 import './file-tree.css';
+import { errorMessage } from './error-message.js';
 
 export function FileRow({
   entry,
@@ -146,7 +147,7 @@ function SessionFileTree({
             [path]: {
               ...(current[path] ?? emptyFolder()),
               loading: false,
-              error: error instanceof Error ? error.message : 'Files unavailable',
+              error: errorMessage(error, 'Files unavailable'),
             },
           }));
       })
