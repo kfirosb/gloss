@@ -133,6 +133,7 @@ const NOT_CONNECTED_REASON = 'Claude is not connected';
 const ROUTE_UNAVAILABLE_REASON =
   'Gloss couldn’t check how to reach this session; it will check again';
 const NOT_TYPED_REASON = 'Gloss couldn’t reach the terminal; nothing was sent';
+const ROUTE_MISMATCH_REASON = 'Gloss reaches this session another way; nothing was sent';
 
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -432,17 +433,22 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
   };
   const holdReason = () =>
     state.codingState === 'working' ? WORKING_HOLD_REASON : DIALOG_OPEN_REASON;
-  /** Claude needs a route; other agents have one transport. Throws the route's reason when there is none. */
+  /**
+   * Claude needs a route; other agents have one transport. Throws the route's reason when there is none. An explicit
+   * transport only names the route the session offers; it never skips the route order or the Desktop exclusion.
+   */
   const resolveTransport = async (
     target: Target,
     explicit: DeliveryTransport | undefined,
     active: CodingConnection,
   ): Promise<DeliveryTransport | undefined> => {
     if (target.agent !== 'claude') return undefined;
-    if (explicit) return explicit;
-    if (!active.deliveryRoute) return 'channel';
-    const route = await active.deliveryRoute();
+    const route: DeliveryRoute = active.deliveryRoute
+      ? await active.deliveryRoute()
+      : { transport: 'channel' };
     if (route.transport === null) throw new Error(route.reason);
+    if (explicit !== undefined && explicit !== route.transport)
+      throw new Error(ROUTE_MISMATCH_REASON);
     return route.transport;
   };
   /** Cancels a message nothing was sent for yet, so no later check, nor one running now, can type or send it. */

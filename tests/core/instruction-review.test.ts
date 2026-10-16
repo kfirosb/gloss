@@ -136,6 +136,7 @@ it('persists the Claude route before transport and never reroutes historical req
     expect(first).toMatchObject({ transport: 'channel', channelGeneration: 'generation-one' });
     expect(await workflow.sendComposer('first', 'First', [], 'peer')).toEqual(first);
     workflow.releaseComposer('first');
+    agent.route = { transport: 'peer' };
     const second = await workflow.sendComposer('second', 'Second', [], 'peer');
     expect(second.transport).toBe('peer');
     expect(observed).toEqual([

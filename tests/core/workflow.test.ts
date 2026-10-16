@@ -217,6 +217,7 @@ describe('portable workflow', () => {
     });
     it('blocks peer composer send while working', async () => {
       const { agent, workflow } = await claudeApp('working');
+      agent.route = { transport: 'peer' };
       await expect(workflow.sendComposer('busy-peer', 'Ask Claude', [], 'peer')).rejects.toThrow(
         'Blocked',
       );
@@ -225,6 +226,7 @@ describe('portable workflow', () => {
     });
     it('allows peer composer send while working when the agent queues peer messages', async () => {
       const { agent, workflow } = await claudeApp('working', { peerSendWhileBusy: true });
+      agent.route = { transport: 'peer' };
       expect((await workflow.sendComposer('busy-peer-ok', 'Ask Claude', [], 'peer')).state).toBe(
         'queued',
       );
@@ -244,9 +246,11 @@ describe('portable workflow', () => {
     it('allows prepared review send over channel but not peer while working', async () => {
       const { agent, workflow } = await claudeApp('working');
       const draft = await workflow.prepare();
+      agent.route = { transport: 'peer' };
       await expect(workflow.send(draft.id, draft.revision, 'peer')).rejects.toThrow(
         'Agent is busy',
       );
+      agent.route = { transport: 'channel' };
       const receipt = await workflow.send(draft.id, draft.revision, 'channel');
       expect(receipt.state).toBe('queued');
       expect(agent.sent).toHaveLength(1);

@@ -257,8 +257,9 @@ it('never sends a channel message again after a restart that interrupted it behi
     context?.transport === 'channel' ? new Promise<void>(() => {}) : undefined;
   const app = await terminalApp({ store, agent: first });
   await app.workflow.sendComposer('r1', 'ראשון');
+  first.route = { transport: 'channel' };
   const draft = await app.workflow.prepare();
-  expect(await app.workflow.send(draft.id, draft.revision, 'channel')).toMatchObject({
+  expect(await app.workflow.send(draft.id, draft.revision)).toMatchObject({
     state: 'held',
     transport: 'channel',
   });
@@ -348,4 +349,23 @@ it('a terminal send that failed after typing started stays unconfirmed', async (
     state: 'unconfirmed',
     nativeAfterRevision: 3,
   });
+});
+it('an explicit transport never skips the route the session offers', async () => {
+  const { agent, workflow } = await terminalApp();
+  await expect(workflow.sendComposer('r1', 'שלום', [], 'channel')).rejects.toThrow(
+    'Gloss reaches this session another way; nothing was sent',
+  );
+  const draft = await workflow.prepare();
+  await expect(workflow.send(draft.id, draft.revision, 'peer')).rejects.toThrow(
+    'Gloss reaches this session another way; nothing was sent',
+  );
+  agent.route = {
+    transport: null,
+    reason: 'Claude Desktop sessions can’t receive messages from Gloss.',
+  };
+  await expect(workflow.sendComposer('r2', 'שלום', [], 'peer')).rejects.toThrow(
+    'Claude Desktop sessions can’t receive messages from Gloss.',
+  );
+  expect(agent.sent).toEqual([]);
+  expect(workflow.snapshot().deliveries).toEqual([]);
 });

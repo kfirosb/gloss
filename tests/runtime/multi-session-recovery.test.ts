@@ -125,6 +125,8 @@ it('releases recovered channel attempts atomically before reopen, keeps newer dr
   });
   expect(third.agents.B.sent).toEqual([]);
   third.agents.B.result = { state: 'unconfirmed' };
+  // An explicit transport must be the route the session offers.
+  third.agents.B.route = { transport: 'peer' };
   await third.app.sessions!.action('B', {
     type: 'send-composer',
     requestId: 'new',
