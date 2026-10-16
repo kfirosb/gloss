@@ -53,6 +53,7 @@ export function InstructionReviewDialog({
     : delivery
       ? {
           sending: 'Sending',
+          held: 'Waiting for the terminal',
           queued: 'Queued',
           unconfirmed:
             review.draft.target.agent === 'claude' ? 'Awaiting Claude confirmation' : 'Unconfirmed',

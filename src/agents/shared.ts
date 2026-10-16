@@ -4,7 +4,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { canSendWhileWorking, orderAgentMessages } from '../core/contracts.js';
+import {
+  DIALOG_OPEN_REASON,
+  WORKING_HOLD_REASON,
+  orderAgentMessages,
+  sendGate,
+} from '../core/contracts.js';
 import type {
   AgentCapabilities,
   AgentEvent,
@@ -615,13 +620,16 @@ export async function transcriptConnection(spec: {
       pendingEvents.push(...(await refresh()));
       if (!transcript.caughtUp)
         return { state: 'failed', reason: 'Transcript is still syncing; instruction preserved' };
-      if (
-        lastState !== 'idle' &&
-        !(lastState === 'working' && canSendWhileWorking(spec.capabilities, context?.transport))
-      )
+      const gate = sendGate(lastState ?? 'disconnected', spec.capabilities, context?.transport);
+      if (gate === 'block')
         return {
           state: 'failed',
           reason: 'Agent is disconnected, busy, or requires native approval',
+        };
+      if (gate === 'hold')
+        return {
+          state: 'held',
+          reason: lastState === 'working' ? WORKING_HOLD_REASON : DIALOG_OPEN_REASON,
         };
       if (detached || stop.signal.aborted)
         return { state: 'failed', reason: 'Connection detached' };

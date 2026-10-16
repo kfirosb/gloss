@@ -28,7 +28,7 @@ import {
 import { MIGRATIONS } from './migrations.js';
 
 import { summaryCacheKey, type SummaryKey } from '../core/summary-contracts.js';
-import { orderAgentMessages } from '../core/contracts.js';
+import { isDeliveryTransport, orderAgentMessages } from '../core/contracts.js';
 import type { SeenStore } from '../core/session-catalog.js';
 import {
   INITIAL_LANGUAGE_DEFAULTS,
@@ -692,9 +692,7 @@ export class SqliteStore
         target: parse<Target>(item.target_json),
         englishText: String(item.english_text),
         state: String(item.state) as Delivery['state'],
-        ...(item.transport === 'channel' || item.transport === 'peer'
-          ? { transport: item.transport }
-          : {}),
+        ...(isDeliveryTransport(item.transport) ? { transport: item.transport } : {}),
         ...(typeof item.channel_generation === 'string'
           ? { channelGeneration: item.channel_generation }
           : {}),
@@ -976,9 +974,7 @@ export class SqliteStore
       target: parse<Target>(item.target_json),
       englishText: String(item.english_text),
       state: String(item.state) as Delivery['state'],
-      ...(item.transport === 'channel' || item.transport === 'peer'
-        ? { transport: item.transport }
-        : {}),
+      ...(isDeliveryTransport(item.transport) ? { transport: item.transport } : {}),
       ...(typeof item.channel_generation === 'string'
         ? { channelGeneration: item.channel_generation }
         : {}),

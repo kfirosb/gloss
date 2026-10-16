@@ -365,3 +365,23 @@ it('repairs inherited reply images without changing original images or prepared 
   expect(restored.currentDraft).toEqual(state.currentDraft);
   reopened.close();
 });
+
+it('keeps a held terminal delivery across reopen and leaves it held on recovery', () => {
+  const path = databasePath();
+  const store = new SqliteStore(path);
+  store.save(snapshot());
+  const held: Delivery = {
+    ...delivery,
+    state: 'held',
+    reason: 'Checking the terminal',
+    transport: 'tmux',
+    nativeAfterRevision: 10,
+  };
+  expect(store.claimDelivery(held)).toBe(true);
+  store.close();
+  const reopened = new SqliteStore(path);
+  expect(reopened.recoverInFlightDeliveries()).toBe(0);
+  expect(reopened.getDelivery(held.draftId, held.revision)).toEqual(held);
+  expect(reopened.load('conversation-1')?.deliveries).toContainEqual(held);
+  reopened.close();
+});
