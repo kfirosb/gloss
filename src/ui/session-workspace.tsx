@@ -306,9 +306,13 @@ export function SessionWorkspace({
   const wideLayout = useWideLayout();
   const approval = entry?.activity === 'approval-required';
   const liveLayout = preferences.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT;
+  // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
+  // A manual choice saves itself and drops this override.
+  const [approvalView, setApprovalView] = useState<LiveView | null>(null);
   // A remembered terminal view falls back to its conversation side while there is no terminal to show.
   const liveView: LiveView =
-    launchId || !showsTerminal(liveLayout.view) ? liveLayout.view : liveLayout.conversation;
+    (launchId && approvalView) ||
+    (launchId || !showsTerminal(liveLayout.view) ? liveLayout.view : liveLayout.conversation);
   const conversationView = selectView(liveView, liveLayout.conversation);
   const setLiveLayout = (change: Partial<LiveLayout>) =>
     setPreferences((value) => ({
@@ -318,17 +322,15 @@ export function SessionWorkspace({
         [record.id]: { ...(value.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT), ...change },
       },
     }));
-  // The view to restore when the approval that switched to the terminal ends; a manual choice clears it.
-  const [approvalReturn, setApprovalReturn] = useState<LiveView | null>(null);
   const [terminalFocus, setTerminalFocus] = useState(true);
   const chooseLiveView = (view: LiveView) => {
-    setApprovalReturn(null);
+    setApprovalView(null);
     setTerminalFocus(true);
     setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
   };
   const chooseConversation = (conversation: ConversationView) => {
-    setApprovalReturn(null);
-    setLiveLayout({ conversation });
+    setApprovalView(null);
+    setLiveLayout({ view: liveView, conversation });
   };
   // The approval poll keeps its first callback, so it reads the current view through a ref.
   const liveViewNow = useRef(liveView);
@@ -336,15 +338,12 @@ export function SessionWorkspace({
   useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => {
     const { view, returnTo } = approvalSwitch(liveViewNow.current);
     if (!returnTo) return;
-    setApprovalReturn(returnTo);
     setTerminalFocus(false);
-    setLiveLayout({ view });
+    setApprovalView(view);
   });
   useEffect(() => {
-    if (approval || !approvalReturn) return;
-    setApprovalReturn(null);
-    setLiveLayout({ view: approvalReturn });
-  }, [approval, approvalReturn]);
+    if (!approval) setApprovalView(null);
+  }, [approval]);
   useEffect(() => {
     if (!launchId) return;
     // Capture phase: the terminal's own textarea would otherwise take the key first.
@@ -1141,7 +1140,8 @@ export function SessionWorkspace({
       }}
     >
       <div
-        className={`live-body live-${liveView}`}
+        className="live-body"
+        data-view={liveView}
         dir="ltr"
         style={
           {

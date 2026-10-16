@@ -96,6 +96,13 @@ const typed = (received: Frame[]) =>
 const switcher = (page: Page) => page.getByRole('radiogroup', { name: 'Live Conversation view' });
 const view = (page: Page, name: string) => switcher(page).getByRole('radio', { name });
 const terminal = (page: Page) => page.locator('.pane-live .live-terminal');
+const storedView = (page: Page) =>
+  page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('language-assistant:display:v1') ?? '{}') as {
+      liveViews?: Record<string, { view: string }>;
+    };
+    return saved.liveViews?.['L-panel']?.view;
+  });
 const feed = (page: Page) => page.getByRole('region', { name: 'Live Hebrew conversation' });
 
 test('Terminal view streams output and sends keystrokes', async ({ page }) => {
@@ -183,11 +190,19 @@ test('approval switches to Split with a red outline and restores Translated when
   page,
 }) => {
   const { setActivity } = await withLaunch(page, 'approval-required', 'auto');
+  await page.addInitScript(() => {
+    const key = 'language-assistant:display:v1';
+    const saved = JSON.parse(localStorage.getItem(key) ?? '{"version":1}') as object;
+    const liveViews = { 'L-panel': { view: 'translated', conversation: 'translated', split: 50 } };
+    localStorage.setItem(key, JSON.stringify({ ...saved, liveViews }));
+  });
   await page.goto('/#capability=test');
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
   await expect(terminal(page)).toHaveClass(/attn-ring/);
   await expect(view(page, 'Terminal').locator('.live-view-dot')).toBeVisible();
   await expect(terminal(page).locator('.xterm-helper-textarea')).not.toBeFocused();
+  // Only the user's choices are remembered: the approval's Split is not saved.
+  expect(await storedView(page)).toBe('translated');
   setActivity('idle');
   await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true', {
     timeout: 6000,

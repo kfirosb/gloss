@@ -2885,6 +2885,16 @@ pre {
   min-height: 0;
   padding: 6px 8px;
 }
+.launch-terminal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.launch-terminal small {
+  color: light-dark(#8a5a00, var(--dk-fg-8a5a00));
+  font-size: 0.75rem;
+}
 .approval-toast {
   display: flex;
   align-items: center;
@@ -3984,24 +3994,24 @@ button.dictation-finishing .dictation-icon {
   display: flex;
   flex-direction: column;
 }
-.live-split {
+.live-body[data-view='split'] {
   flex-direction: row;
 }
-.live-split > .live-terminal {
+.live-body[data-view='split'] > .live-terminal {
   flex: var(--terminal-share) 1 0;
 }
-.live-split > .live-conversation {
+.live-body[data-view='split'] > .live-conversation {
   flex: var(--conversation-share) 1 0;
 }
-.live-split > .pane-divider {
+.live-body[data-view='split'] > .pane-divider {
   flex: none;
   width: 12px;
 }
 @media (max-width: 760px) {
-  .live-split {
+  .live-body[data-view='split'] {
     flex-direction: column;
   }
-  .live-split > .pane-divider {
+  .live-body[data-view='split'] > .pane-divider {
     width: auto;
     height: 12px;
   }
