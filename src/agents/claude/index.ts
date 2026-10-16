@@ -62,14 +62,23 @@ interface TypedInFlight {
   sourceId?: string | undefined;
 }
 /**
- * Messages typed into one session while any of them still waits for confirmation. The workflow's `earlier` is a
- * snapshot taken at dispatch, so it can miss a send typed just before; this keeps identical texts confirming in
- * send order. Cleared once nothing in the session is waiting.
+ * Messages typed into one session, including pastes whose outcome is uncertain. The workflow's `earlier` is a
+ * snapshot taken when a send is claimed, so it can miss a send typed just before; this keeps identical texts
+ * confirming in typing order. Kept while any terminal send to the session is in progress (queued for its typing turn,
+ * typing, or waiting for confirmation) and for a grace period after the last one returns.
  */
 interface SessionTyping {
   typed: Map<string, TypedInFlight>;
-  waiting: Set<string>;
+  /** Terminal sends to the session that have not returned yet. */
+  inProgress: number;
+  /** When the last of them returned, in epoch milliseconds. */
+  idleSince: number;
 }
+/**
+ * How long a session's typing memory outlives its last terminal send, in milliseconds. It only has to bridge the
+ * moment between a later send's claim (its snapshot) and its arrival at the adapter; generous on purpose.
+ */
+const TYPED_MEMORY_GRACE_MS = 30_000;
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
 export const CLAUDE_PROTOCOL = {
@@ -440,6 +449,14 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   /** Shared by every connection to a session, so two sends never type into the same pane at once. */
   const typeInTurn = createTypingQueue();
   const typingBySession = new Map<string, SessionTyping>();
+  const now = () => options.clock?.now?.() ?? Date.now();
+  /** The session's typing memory, dropping any session idle past the grace period. */
+  const typingMemory = (sessionRef: string): SessionTyping | undefined => {
+    for (const [ref, session] of typingBySession)
+      if (!session.inProgress && now() - session.idleSince > TYPED_MEMORY_GRACE_MS)
+        typingBySession.delete(ref);
+    return typingBySession.get(sessionRef);
+  };
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -688,17 +705,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
             precedes: true,
           });
         }
-        const remembered = [...(typingBySession.get(target.sessionRef)?.typed.values() ?? [])];
+        const remembered = [...(typingMemory(target.sessionRef)?.typed.values() ?? [])];
         const position = remembered.findIndex((entry) => entry.send.id === send.id);
         remembered.forEach((entry, index) => {
-          if (entry.send.id === send.id || entries.get(entry.send.id)?.sourceId) return;
+          if (entry.send.id === send.id) return;
+          const known = entries.get(entry.send.id);
+          // The snapshot decides for a delivery it describes; memory only adds a confirmation it has not seen yet.
+          if (known) {
+            if (!known.sourceId && entry.sourceId)
+              entries.set(entry.send.id, { ...known, sourceId: entry.sourceId, awaiting: false });
+            return;
+          }
           // Without `send` in memory (it settled earlier), only a strictly earlier paste can come before it.
           const precedes = position >= 0 ? index < position : entry.send.after < send.after;
-          entries.set(entry.send.id, {
-            ...entry,
-            awaiting: !entry.sourceId,
-            precedes: entries.get(entry.send.id)?.precedes ?? precedes,
-          });
+          entries.set(entry.send.id, { ...entry, awaiting: !entry.sourceId, precedes });
         });
         return [...entries.values()];
       };
@@ -723,26 +743,23 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         );
         return assignTypedMessages(sends, messages, taken).get(send.id);
       };
-      const rememberTyped = (send: TypedSend) => {
-        const session = typingBySession.get(target.sessionRef) ?? {
+      /** Keeps the session's memory while this send is in progress, from before it queues for its turn until it returns. */
+      const beginTerminalSend = (): SessionTyping => {
+        const session = typingMemory(target.sessionRef) ?? {
           typed: new Map(),
-          waiting: new Set(),
+          inProgress: 0,
+          idleSince: 0,
         };
-        session.typed.set(send.id, { send });
-        session.waiting.add(send.id);
+        session.inProgress += 1;
         typingBySession.set(target.sessionRef, session);
+        return session;
       };
-      const settleTyped = (id: string, sourceId?: string) => {
-        const session = typingBySession.get(target.sessionRef);
-        if (!session) return;
-        const entry = session.typed.get(id);
-        if (entry && sourceId) entry.sourceId = sourceId;
-        session.waiting.delete(id);
-        if (!session.waiting.size) typingBySession.delete(target.sessionRef);
+      const endTerminalSend = (session: SessionTyping) => {
+        session.inProgress -= 1;
+        if (!session.inProgress) session.idleSince = now();
       };
       /** Ends the confirmation wait when the connection detaches. */
       const confirmationStop = new AbortController();
-      const now = () => options.clock?.now?.() ?? Date.now();
       const pause = (ms: number) =>
         (options.clock
           ? options.clock.sleep(ms, confirmationStop.signal)
@@ -760,7 +777,25 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       ) => {
         const { onTyping } = sendContext;
         if (!onTyping) return { state: 'failed' as const, reason: NO_TYPING_RECORD_REASON };
-        const body = claudeMessage(text, attachments);
+        const session = beginTerminalSend();
+        try {
+          return await typeAndConfirm(session, requestId, claudeMessage(text, attachments), {
+            onTyping,
+            earlier: sendContext.earlier ?? [],
+          });
+        } finally {
+          endTerminalSend(session);
+        }
+      };
+      const typeAndConfirm = async (
+        session: SessionTyping,
+        requestId: string,
+        body: string,
+        {
+          onTyping,
+          earlier,
+        }: { onTyping: NonNullable<SendContext['onTyping']>; earlier: readonly Delivery[] },
+      ) => {
         const typed = await typeInTurn(target.sessionRef, async () => {
           const current = await exact(target);
           const terminal = await terminalFor(current);
@@ -773,20 +808,22 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
             transcriptSize: async () => (await stat(path)).size,
             onTyping,
           });
-          // Registered inside the turn, so the next send's confirmation already sees this one.
-          if (result.state === 'typed')
-            rememberTyped({ id: requestId, body, after: result.nativeAfterRevision });
+          // Registered inside the turn, so the next send's confirmation already sees this one. An uncertain paste may
+          // still reach Claude, so it keeps its place in typing order and can take its record from a later send.
+          if (result.state === 'typed' || result.state === 'unconfirmed')
+            session.typed.set(requestId, {
+              send: { id: requestId, body, after: result.nativeAfterRevision },
+            });
           return result;
         });
         if (typed.state !== 'typed') return typed;
         const send = { id: requestId, body, after: typed.nativeAfterRevision };
         const deadline = now() + TMUX_CONFIRM_TIMEOUT_MS;
         for (;;) {
-          const sourceId = await confirmTyped(send, sendContext.earlier ?? []).catch(
-            () => undefined,
-          );
+          const sourceId = await confirmTyped(send, earlier).catch(() => undefined);
           if (sourceId) {
-            settleTyped(requestId, sourceId);
+            const entry = session.typed.get(requestId);
+            if (entry) entry.sourceId = sourceId;
             return {
               state: 'sent' as const,
               nativeAfterRevision: send.after,
@@ -796,7 +833,6 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           if (now() >= deadline || confirmationStop.signal.aborted) break;
           await pause(TMUX_CONFIRM_POLL_MS);
         }
-        settleTyped(requestId);
         return {
           state: 'unconfirmed' as const,
           reason: TMUX_UNCONFIRMED_REASON,

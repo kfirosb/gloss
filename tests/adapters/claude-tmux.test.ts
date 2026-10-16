@@ -267,6 +267,70 @@ it('confirms identical messages typed back to back in the order they were typed'
   expect(evidence.nativeMessageId).toMatch(/^transcript:/);
   expect(evidence.nativeMessageId).not.toBe(a.nativeMessageId);
 });
+it('lets an uncertain paste keep its place, so an identical later send cannot take its record', async () => {
+  const h = await claudeSession();
+  const fixture = fixtureTerminal('2.1.301', 'empty');
+  let enters = 0;
+  // The first Enter reaches tmux but reports an error, as when the pane closes its pipe mid-keystroke.
+  const flakyEnter: GlossTerminal = {
+    ...fixture.terminal,
+    pressEnter: async () => {
+      await fixture.terminal.pressEnter();
+      if (++enters === 1) throw new Error('send-keys failed');
+    },
+  };
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let secondWaiting = () => {};
+  const waiting = new Promise<void>((resolve) => {
+    secondWaiting = resolve;
+  });
+  const { clock } = testClock(async () => {
+    secondWaiting();
+    await released;
+  });
+  const connection = await connect(h, flakyEnter, false, clock);
+  // The second send may reach the adapter only after the first returned: the first's place outlives its send.
+  const first = connection.send('first', 'yes', [], tmux);
+  const second = connection.send('second', 'yes', [], tmux);
+  expect(await first).toMatchObject({ state: 'unconfirmed', reason: TYPING_UNCERTAIN_REASON });
+  await waiting;
+  // Claude shows the first paste only now, after the second was typed.
+  await recordTyped(h)('yes');
+  release();
+  expect(await second).toMatchObject({ state: 'unconfirmed', reason: TMUX_UNCONFIRMED_REASON });
+  expect(fixture.log.calls.filter((call) => call === 'enter')).toHaveLength(2);
+});
+it('lets the workflow’s record of an earlier send overrule the adapter’s memory of it', async () => {
+  const h = await claudeSession();
+  const fixture = fixtureTerminal('2.1.301', 'empty', {
+    onEnter: async (text) => {
+      if (fixture.log.calls.filter((call) => call === 'enter').length === 2)
+        await recordTyped(h)(text);
+    },
+  });
+  let enters = 0;
+  const flakyEnter: GlossTerminal = {
+    ...fixture.terminal,
+    pressEnter: async () => {
+      await fixture.terminal.pressEnter();
+      if (++enters === 1) throw new Error('send-keys failed');
+    },
+  };
+  const connection = await connect(h, flakyEnter);
+  const first = await connection.send('first', 'yes', [], tmux);
+  expect(first).toMatchObject({ state: 'unconfirmed', reason: TYPING_UNCERTAIN_REASON });
+  // The user released the first one: it no longer waits for a record, so the second may confirm.
+  const released: Delivery = {
+    ...typedDelivery(h, 'first', 'yes', first.nativeAfterRevision ?? -1),
+    state: 'failed',
+  };
+  expect(
+    await connection.send('second', 'yes', [], { ...tmux, earlier: [released] }),
+  ).toMatchObject({ state: 'sent' });
+});
 it('measures the confirmation wait in elapsed time, not in polls', async () => {
   const h = await claudeSession();
   const { terminal } = fixtureTerminal('2.1.301', 'empty');
