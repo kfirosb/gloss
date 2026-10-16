@@ -6,6 +6,8 @@ This is the detailed behaviour reference. The short public introduction is the r
 
 Future updates follow the [Mac release protocol](mac-release-protocol.md).
 
+Version 0.10.4 fixes a regression from 0.10.3: Claude session metadata with a malformed `entrypoint` or `messagingSocketPath` (present but not a string) was treated as if the field were missing, so such a record could be offered as a send destination or skip the socket ownership check. These records are now rejected; missing fields keep their legacy meaning.
+
 Version 0.10.3 is a code-quality release with no intended behavior change for users, apart from two small fixes. The code was reformatted with a pinned Prettier, split into clearer modules and given stricter types. Shared limits, path checks, private-directory checks and agent config-folder lookups now each have one owner. Agent messages are labeled "translated" only once their translation has completed. A folder whose name starts with `..` is no longer treated as outside its parent. An empty `CLAUDE_CONFIG_DIR` or `CODEX_HOME` now falls back to the default folder.
 
 Version 0.10.2 keeps saved Claude channel commands working after the app is renamed, moved or updated. Each `claude --mcp-config ~/.language-assistant/claude-channel-setup/<hash>.json …` command names its config file forever; files written before the Language Assistant → Gloss rename still started the old 0.3.5 helper, which cannot match its Claude session (it compares local-time process start times with Claude's UTC ones) and exits, leaving the session at "Channel setup required". On startup the backend now rewrites every config it wrote whose helper path differs from the running build; other files are left untouched.
