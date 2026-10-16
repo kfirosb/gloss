@@ -51,15 +51,15 @@ export function TerminalView({
       pending = '';
       for (const part of chunkInput(data)) send({ type: 'input', data: part });
     };
-    if (inputRef)
-      inputRef.current = (text) => {
-        if (ws?.readyState !== WebSocket.OPEN) return false;
-        // Keep order with keystrokes still waiting in the coalescing window.
-        if (timer) clearTimeout(timer);
-        pending += text;
-        flush();
-        return true;
-      };
+    const handle = (text: string) => {
+      if (ws?.readyState !== WebSocket.OPEN) return false;
+      // Keep order with keystrokes still waiting in the coalescing window.
+      if (timer) clearTimeout(timer);
+      pending += text;
+      flush();
+      return true;
+    };
+    if (inputRef) inputRef.current = handle;
     terminalTicket(launchId).then(
       ({ ticket }) => {
         if (disposed) return;
@@ -98,7 +98,7 @@ export function TerminalView({
     observer.observe(host.current);
     return () => {
       disposed = true;
-      if (inputRef) inputRef.current = null;
+      if (inputRef?.current === handle) inputRef.current = null;
       if (timer) clearTimeout(timer);
       observer.disconnect();
       input.dispose();

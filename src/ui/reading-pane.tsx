@@ -99,7 +99,6 @@ export function ReadingPane({
           <h2>{title}</h2>
           <LivePill state={liveState} />
           {controls}
-          {controls}
           {onHistory && (
             <button
               type="button"
