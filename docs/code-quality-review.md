@@ -4,6 +4,31 @@ This pass improves the existing architecture without replacing product workflows
 changing database schemas, upgrading agent protocols, or preparing a release.
 The large diff is predominantly formatting of previously compressed code.
 
+## Latest integration status — 2026-10-16
+
+Merged public `origin/main` at `e43d4f6` (Gloss 0.10.2) into `reorder`, preserving
+the reviewed refactor in checkpoint `a124bf3`. Local merge commit: `3c5d1d2`.
+The merge retains dark mode and its three palettes, UTF-8 tmux behavior for Dock
+launches, approval version floors, the agent-launch/reconcile race fix, and saved
+Claude channel configuration repair after app relocation. The repair code uses
+validated JSON object fields to match the refactor's stricter types.
+
+Formatting-normalized three-way comparison resolved the formatting-only conflicts;
+the remaining import conflicts were combined explicitly. Package and lockfile retain
+version 0.10.2 and the existing pinned formatter. The upstream consent-screen fixture
+is preserved byte-for-byte, including its captured trailing blank line.
+
+Cleanup groups imports left between declarations by the earlier module extraction.
+Production source has no unused-local/parameter diagnostics; an optional stricter
+check still reports eight pre-existing unused parameters in test fixtures. Those
+unrelated test signatures were not changed. Future sessions should follow
+`docs/clean-code-guidelines.md`, linked from `AGENTS.md`.
+
+**Integrated-version unit/browser tests and build are pending at the user's request.**
+The historical passing results below describe the pre-merge refactor only, not
+the integrated version. Integration verification is limited to TypeScript checking,
+formatting, whitespace/conflict checks, ancestry confirmation and semantic review.
+
 ## Changes worth reviewing first
 
 | Concern | Ownership after this refactor |
@@ -101,7 +126,7 @@ reviewer also checked the subsequent type cleanup and reported no material findi
 No live subscription-consuming agent probes, app installation, DMG build, release,
 push or merge was performed. The installed app and user data were not modified.
 
-## Verification
+## Historical verification before main integration
 
 The initial unit run exposed the compiler-path assumption and timing-sensitive tmux
 checks; both were corrected. After installing local development dependencies, the

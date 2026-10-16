@@ -24,13 +24,6 @@ import {
   type WorkspaceRecord,
 } from '../core/session-contracts.js';
 
-type Row = Record<string, SQLOutputValue>;
-
-const json = (value: unknown) => JSON.stringify(value);
-const parse = <T>(value: SQLOutputValue | undefined): T => JSON.parse(String(value)) as T;
-const optionalString = (value: SQLOutputValue | undefined) =>
-  value === null || value === undefined ? undefined : String(value);
-
 import { MIGRATIONS } from './migrations.js';
 
 import { summaryCacheKey, type SummaryKey } from '../core/summary-contracts.js';
@@ -54,6 +47,14 @@ import {
   type SidebarSettings,
 } from '../runtime/connected-folders.js';
 import type { LaunchRecord, LaunchSettings, LaunchStore } from '../runtime/session-launcher.js';
+
+type Row = Record<string, SQLOutputValue>;
+
+const json = (value: unknown) => JSON.stringify(value);
+const parse = <T>(value: SQLOutputValue | undefined): T => JSON.parse(String(value)) as T;
+const optionalString = (value: SQLOutputValue | undefined) =>
+  value === null || value === undefined ? undefined : String(value);
+
 export class SqliteStore
   implements
     ConversationStore,

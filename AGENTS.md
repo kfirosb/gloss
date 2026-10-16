@@ -1,3 +1,7 @@
+# Development guidance
+
+Before changing source code, read [docs/clean-code-guidelines.md](docs/clean-code-guidelines.md). Preserve existing behavior and security boundaries, reuse the shared contracts and policies, and report verification accurately.
+
 # Release work
 
 For requests to update the Mac app, create a new version, or build a DMG, read and follow [docs/mac-release-protocol.md](docs/mac-release-protocol.md).

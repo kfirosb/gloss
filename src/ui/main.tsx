@@ -66,11 +66,11 @@ import type { CatalogEntry } from '../core/session-catalog.js';
 
 import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { CreatedWorktree, WorktreeRemoval } from '../runtime/application.js';
+import { SessionWorkspace } from './session-workspace.js';
 
 window.addEventListener('hashchange', () => window.location.reload());
 applyTheme(readDisplayPreferences());
 const token = capabilityToken();
-import { SessionWorkspace } from './session-workspace.js';
 function App() {
   const { catalog, error: catalogError } = useSessionCatalog();
   const [records, setRecords] = useState<SessionRecord[]>([]);
