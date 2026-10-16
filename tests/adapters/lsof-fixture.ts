@@ -28,24 +28,10 @@ export function lsofRunner(
     if (executable !== '/usr/sbin/lsof') throw new Error('Unexpected process');
     calls.push(args);
     options.push(opts);
-    const paths = args.slice(args.indexOf('--') + 1);
+    const paths = lsofPaths(args);
     const chosen = typeof behavior === 'function' ? behavior(paths, calls.length - 1) : behavior;
     if (chosen?.wait) await chosen.wait;
-    const byPid = new Map<number, { command: string; paths: string[] }>();
-    for (const path of paths)
-      for (const owner of owners[path] ?? []) {
-        const entry = byPid.get(owner.pid) ?? { command: owner.command, paths: [] };
-        entry.paths.push(path);
-        byPid.set(owner.pid, entry);
-      }
-    for (const [pid, { command, paths: held }] of byPid) {
-      yield { type: 'line', line: `p${pid}` };
-      yield { type: 'line', line: `c${command}` };
-      for (const [index, path] of held.entries()) {
-        yield { type: 'line', line: `f${10 + index}` };
-        yield { type: 'line', line: `n${path}` };
-      }
-    }
+    for (const line of ownerLines(owners, paths)) yield { type: 'line', line };
     for (const line of chosen?.extraLines ?? []) yield { type: 'line', line };
     const unowned = paths.some((path) => !owners[path]?.length);
     yield {
@@ -60,3 +46,25 @@ export function lsofRunner(
   };
   return { runner, calls, options };
 }
+
+/** `-Fpcfn` output for the requested paths: one p/c record per holder, then f/n per held path. */
+export function ownerLines(
+  owners: Record<string, LsofOwner[]>,
+  paths: readonly string[],
+): string[] {
+  const byPid = new Map<number, { command: string; paths: string[] }>();
+  for (const path of paths)
+    for (const owner of owners[path] ?? []) {
+      const entry = byPid.get(owner.pid) ?? { command: owner.command, paths: [] };
+      entry.paths.push(path);
+      byPid.set(owner.pid, entry);
+    }
+  const lines: string[] = [];
+  for (const [pid, { command, paths: held }] of byPid) {
+    lines.push(`p${pid}`, `c${command}`);
+    for (const [index, path] of held.entries()) lines.push(`f${10 + index}`, `n${path}`);
+  }
+  return lines;
+}
+/** The socket paths of a batched owner query. */
+export const lsofPaths = (args: readonly string[]) => args.slice(args.indexOf('--') + 1);

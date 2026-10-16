@@ -54,30 +54,6 @@ export function validateTarget(target: Target, kind: Target['agent']) {
   if (target.agent !== kind || !uuid.test(target.sessionRef))
     throw new Error('Invalid target identity');
 }
-/** `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, which would clip `claude.exe`. */
-export async function observedOwner(
-  path: string,
-  command: string | readonly string[],
-  runner: ProcessRunner = runProcess,
-  pid?: number,
-): Promise<boolean> {
-  if (process.platform !== 'darwin') return false;
-  const result = await collectProcess(
-    runner('/usr/sbin/lsof', ['-Fpc', '+c', '0', '--', path], '', new AbortController().signal, {
-      timeoutMs: 3000,
-      maxOutputBytes: 32_768,
-    }),
-  );
-  if (result.outcome.code !== 0 || result.outcome.reason !== 'exited') return false;
-  let currentPid = 0;
-  return result.lines.some((line) => {
-    if (/^p\d+$/.test(line)) currentPid = Number(line.slice(1));
-    const commands = typeof command === 'string' ? [command] : command;
-    return (
-      commands.some((name) => line === `c${name}`) && (pid === undefined || currentPid === pid)
-    );
-  });
-}
 export interface SocketOwner {
   pid: number;
   command: string;
@@ -137,6 +113,7 @@ async function ownersOfBatch(
   runner: ProcessRunner,
   signal: AbortSignal,
 ): Promise<Map<string, SocketOwner[]>> {
+  // `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, clipping `claude.exe`.
   const result = await collectProcess(
     runner('/usr/sbin/lsof', ['-Fpcfn', '+c', '0', '--', ...paths], '', signal, {
       timeoutMs: OWNER_PROBE_TIMEOUT_MS,

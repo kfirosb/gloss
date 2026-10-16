@@ -14,7 +14,6 @@ import { attachmentManifest, isFileReference } from '../../core/file-references.
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import {
   claudeConfigDir,
-  observedOwner,
   projectIdentity,
   Transcript,
   transcriptConnection,
@@ -28,6 +27,7 @@ import { normalizeSessionTitle } from '../../core/session-title.js';
 import { randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
 import { createChannelRegistry } from './channel-registry.js';
+import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { ChannelStore } from './channel-store.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 
@@ -60,14 +60,28 @@ export function claudeActivity(status: unknown): CodingState {
     return 'approval-required';
   return 'working';
 }
+type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
+function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
+  return createClaudeLiveness({
+    ...(options.runner ? { runner: options.runner } : {}),
+    processExists: options.processExists ?? (options.runner ? () => true : pidExists),
+  });
+}
 /** A native Claude binary is named after its version; the npm package runs as `claude.exe`. Older terminals may have no messaging socket. */
 async function liveClaude(
+  record: Registry,
+  liveness: ClaudeLiveness,
+  runner: ClaudeAdapterOptions['runner'],
+): Promise<Liveness> {
+  const { messagingSocketPath } = record;
+  if (messagingSocketPath) return liveness.check({ ...record, messagingSocketPath });
+  return (await psOwnsPid(record, runner)) ? 'alive' : 'not-alive';
+}
+async function psOwnsPid(
   record: Registry,
   runner: ClaudeAdapterOptions['runner'],
 ): Promise<boolean> {
   const names = ['claude', 'claude.exe', record.version];
-  if (record.messagingSocketPath)
-    return observedOwner(record.messagingSocketPath, names, runner, record.pid);
   if (process.platform !== 'darwin') return false;
   const result = await collectProcess(
     (runner ?? runProcess)(
@@ -104,6 +118,12 @@ export interface ClaudeAdapterOptions extends AdapterOptions {
   transcriptPath?: (target: Target) => Promise<string>;
   /** Own-child credentials, supplied by trusted server bootstrap; never a browser API. */
   credentials?: (target: Target) => Promise<ClaudeCredentials | undefined>;
+  /**
+   * Pre-check before the socket-owner probe; only "gone" is decided here. Defaults to
+   * `kill(pid, 0)`, or to "exists" when `runner` is injected, because an injected
+   * runner stands in for the whole process table.
+   */
+  processExists?: (pid: number) => boolean;
 }
 function optional(value: unknown, type: 'string'): string | undefined;
 function optional(value: unknown, type: 'number'): number | undefined;
@@ -174,6 +194,7 @@ async function locateTranscript(config: string, id: string): Promise<string> {
 export async function discoverOpenClaude(
   options: ClaudeAdapterOptions,
   signal: AbortSignal,
+  liveness: ClaudeLiveness = claudeLiveness(options),
 ): Promise<OpenSessionScan> {
   if (signal.aborted)
     return { candidates: [], complete: false, error: 'Claude discovery cancelled' };
@@ -185,22 +206,33 @@ export async function discoverOpenClaude(
     return { candidates: [], complete: false, error: 'Claude session metadata unavailable' };
   }
   const result: OpenSessionScan = { candidates: [], complete: true };
+  // Language workers run Claude through the SDK entrypoint; only terminal sessions are destinations.
+  const terminals = records.filter((r) => r.entrypoint === undefined || r.entrypoint === 'cli');
+  // One batched socket-owner probe covers every terminal that has a socket.
+  const socketed = terminals.flatMap((record) =>
+    record.messagingSocketPath
+      ? [{ record, socket: { ...record, messagingSocketPath: record.messagingSocketPath } }]
+      : [],
+  );
+  const checked = await liveness.checkMany(socketed.map(({ socket }) => socket));
+  const states = new Map(socketed.map(({ record }, i) => [record, checked[i] ?? 'failed']));
   let next = 0;
-  const workers = Array.from({ length: Math.min(4, records.length) }, async () => {
+  const workers = Array.from({ length: Math.min(4, terminals.length) }, async () => {
     while (!signal.aborted) {
-      const record = records[next++];
+      const record = terminals[next++];
       if (!record) return;
-      // Language workers run Claude through the SDK entrypoint; only terminal sessions are destinations.
-      if (record.entrypoint !== undefined && record.entrypoint !== 'cli') continue;
-      let live = false;
+      let state: Liveness;
       try {
-        live = await liveClaude(record, options.runner);
+        state = states.get(record) ?? (await liveClaude(record, liveness, options.runner));
       } catch {
+        state = 'failed';
+      }
+      if (state === 'failed') {
         result.complete = false;
         result.error ??= 'Claude liveness verification failed';
         continue;
       }
-      if (!live || signal.aborted) continue;
+      if (state !== 'alive' || signal.aborted) continue;
       let projectId: string;
       try {
         projectId = await projectIdentity(record.cwd);
@@ -339,6 +371,7 @@ async function socketWrite(
 }
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAdapter {
   const config = claudeConfigDir(options.configDir);
+  const liveness = claudeLiveness(options);
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -357,7 +390,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       projectMatches.map(async (record, index) => ({
         record,
         index,
-        live: await liveClaude(record, options.runner).catch(() => false),
+        live: await liveClaude(record, liveness, options.runner).then(
+          (state) => state === 'alive',
+          () => false,
+        ),
       })),
     );
     ranked.sort(
@@ -372,7 +408,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   }
   return {
     kind: 'claude',
-    discoverOpen: (signal) => discoverOpenClaude(options, signal),
+    discoverOpen: (signal) => discoverOpenClaude(options, signal, liveness),
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       const targets: Target[] = [];
@@ -560,7 +596,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           return 'disconnected';
         const live = options.observeLive
           ? await options.observeLive(target)
-          : await liveClaude(current, options.runner);
+          : (await liveClaude(current, liveness, options.runner)) === 'alive';
         if (!live) return 'disconnected';
         return claudeActivity(current.status);
       };
