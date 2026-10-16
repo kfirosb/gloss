@@ -6,6 +6,8 @@ This is the detailed behaviour reference. The short public introduction is the r
 
 Future updates follow the [Mac release protocol](mac-release-protocol.md).
 
+Version 0.10.6 applies the same treatment to Codex session checks. Session discovery and status polls each ran their own `ps` and `lsof` round (status shared one for only 1 s); one round per adapter is now shared by discovery, status and sends and reused for 3 s after it finishes. Incomplete rounds are never reused, every send and every launch identification probes afresh, cancelled discovery stops waiting at once, and no probes run off macOS.
+
 Version 0.10.5 stops the `lsof` storm from Claude session checks. 0.10.4 started one `/usr/sbin/lsof` per Claude socket on every 2 s session refresh and every 750 ms status poll (about 31 per second with 9 sessions, each walking the whole process table). Now one batched call covers every socket, answers are reused for 3 s per PID/socket/version, and a process that no longer exists is ruled out with `kill(pid, 0)` without running `lsof`. The ownership check is as strict as before (the recorded PID must hold the socket as `claude`, `claude.exe` or the recorded version) and any probe failure still counts as not alive. A failed probe keeps the session list from closing sessions, one bad record cannot fail the others, and every send re-checks the session first, without the cache.
 
 Version 0.10.4 fixes a regression from 0.10.3: Claude session metadata with a malformed `entrypoint` or `messagingSocketPath` (present but not a string) was treated as if the field were missing, so such a record could be offered as a send destination or skip the socket ownership check. These records are now rejected; missing fields keep their legacy meaning.

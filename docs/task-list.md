@@ -14,7 +14,8 @@ Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh
 - [x] A failed probe keeps discovery incomplete; one bad record cannot fail the others; every send re-checks without the cache.
 - [x] Measured: built backend 2–3 Claude `lsof` runs per 10 s; packaged 0.10.5 1 Claude run per 6 s. Browser suite 279/279 in about 5 minutes.
 - [x] Installed 0.10.5 (9 Claude records, 93 catalog entries): all `lsof` runs fell from 143 per 5 s to 42–52 per 10 s; Claude's share is 6 per 10 s. Load average fell from 12–14 to about 4. Unit 1102/1102; browser 279/279 in 4.7 min.
-- [ ] Follow-up: Codex probes (`lsof -Fpcfn` on writer locks and `lsof -a -d cwd`) now account for most remaining `lsof` runs, about 3/s in the packaged test copy.
+- [x] Codex probes (`ps`, `lsof -Fpcfn` on writer locks, `lsof -a -d cwd`) share one round across discovery, status and sends for 3 s (Gloss 0.10.6).
+- [ ] Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in.
 
 ## 15. Claude discovery accepts invalid `entrypoint` values
 
