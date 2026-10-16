@@ -80,10 +80,18 @@ it('reports channel messages from the renamed gloss server and the legacy name a
     channelSeen: 'delivery-old',
   });
   expect(parseClaudeRecord(user('glossary', 'delivery-x'), 0, 's')).toEqual({});
-  // The source attribute must name the same server as the record's origin.
+  // Both names are Gloss's own, so the source attribute need not repeat the origin's name.
   expect(
     parseClaudeRecord(
       { ...user('gloss', 'delivery-y'), origin: { kind: 'channel', server: 'language-assistant' } },
+      0,
+      's',
+    ),
+  ).toEqual({ channelSeen: 'delivery-y' });
+  // A source attribute naming another server is not a Gloss delivery.
+  expect(
+    parseClaudeRecord(
+      { ...user('glossary', 'delivery-z'), origin: { kind: 'channel', server: 'gloss' } },
       0,
       's',
     ),

@@ -101,3 +101,33 @@ it('reads and allows the peer setting only for a known session and only with the
   });
   expect(allowAll).toHaveBeenCalledExactlyOnceWith(project);
 });
+
+it('rejects the peer setting for a session that is not Claude', async () => {
+  const folder = await root();
+  const project = join(folder, 'project');
+  await mkdir(project);
+  const read = vi.fn(async (): Promise<PeerSetting> => ({ user: 'unset' }));
+  const allowAll = vi.fn(async (): Promise<PeerSetting> => ({ user: 'accept' }));
+  const app = createApplication({
+    store: new SqliteStore(':memory:'),
+    agents: [],
+    languageBackends: {},
+    capability: 'cap',
+    attachmentRoot: join(folder, 'uploads'),
+    claudePeerSetting: { read, allowAll },
+  });
+  clean.push(() => app.close());
+  await app.sessions?.register(
+    { agent: 'codex', sessionRef: '22222222-2222-4222-8222-222222222222', projectId: project },
+    'C',
+  );
+  const server = await startServer(app);
+  clean.push(() => server.close());
+  const url = new URL('/api/sessions/C/claude-peer', server.url).href;
+  const get = await call(url, 'GET');
+  expect(get.status).toBe(400);
+  expect(await get.json()).toMatchObject({ code: 'bad-request' });
+  expect((await call(url, 'POST', { action: 'accept' })).status).toBe(400);
+  expect(read).not.toHaveBeenCalled();
+  expect(allowAll).not.toHaveBeenCalled();
+});

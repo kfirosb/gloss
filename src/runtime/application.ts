@@ -343,14 +343,21 @@ export function createApplication(options: ApplicationOptions): Application {
       : {}),
   });
   const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
-  const claudeRegistration =
-    options.claudeRegistration ?? createClaudeRegistration({ claude: createClaudeExecutable() });
+  // One lookup (and its cached capability probe) for both registration and channel setup.
+  const claude = createClaudeExecutable();
+  const claudeRegistration = options.claudeRegistration ?? createClaudeRegistration({ claude });
   const channelSetup =
-    options.channelSetup ?? createClaudeChannelSetup({ registration: claudeRegistration });
+    options.channelSetup ?? createClaudeChannelSetup({ claude, registration: claudeRegistration });
   const claudePeerSetting = options.claudePeerSetting ?? createClaudePeerSetting();
   const savedTarget = (id: string) => {
     sessions.snapshot(id);
     return sessions.list().find((record) => record.id === id)!.target;
+  };
+  /** Claude's peer setting is meaningless for another agent's session; reject it as a bad request. */
+  const claudeProject = (id: string) => {
+    const target = savedTarget(id);
+    if (target.agent !== 'claude') throw new Error('Peer settings apply only to Claude sessions.');
+    return target.projectId;
   };
   const pkg = readPackage();
   const folderStore = options.store as Partial<ConnectedFolderStore>;
@@ -787,11 +794,11 @@ export function createApplication(options: ApplicationOptions): Application {
     },
     async claudePeerSetting(id) {
       requireOpen();
-      return claudePeerSetting.read(savedTarget(id).projectId);
+      return claudePeerSetting.read(claudeProject(id));
     },
     async allowClaudePeers(id) {
       requireOpen();
-      return claudePeerSetting.allowAll(savedTarget(id).projectId);
+      return claudePeerSetting.allowAll(claudeProject(id));
     },
     async claudeRegistration() {
       requireOpen();

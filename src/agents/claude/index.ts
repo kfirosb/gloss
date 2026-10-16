@@ -232,7 +232,8 @@ function channelRequest(value: unknown, text: unknown): string | undefined {
   if (origin?.kind !== 'channel' || !isChannelServer(origin.server) || typeof text !== 'string')
     return undefined;
   const match = CHANNEL_REQUEST_MARKER.exec(text);
-  return match && match[1] === origin.server ? match[2] : undefined;
+  // Both names are Gloss's own; Claude may not repeat the origin's name in the source attribute.
+  return match && isChannelServer(match[1]) ? match[2] : undefined;
 }
 const CHANNEL_REQUEST_MARKER = new RegExp(
   `^<channel source="([^"]+)" request_id="(${REQUEST_ID_SOURCE})"`,
