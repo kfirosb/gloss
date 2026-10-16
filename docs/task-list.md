@@ -61,6 +61,62 @@ Status: designed and approved on 2026-10-14; implemented on branch `terminal`. S
 - [x] Run button on shell code blocks, reusing the folder's idle terminal.
 - [x] Popup and full-workspace views with Expand/Shrink and the "Terminal tabs open as" setting.
 
+## 6. Session-to-session updates across worktrees
+
+Status: idea captured on 2026-10-16; benefits and feasibility still to be worked out.
+
+- [ ] Use a Gloss channel/MCP server so every session in a project tells the others what it is working on, including sessions in other worktrees.
+- [ ] Work out the concrete advantages (avoiding overlapping edits, sharing findings, coordinating merges) before designing.
+- [ ] Check whether the same can work for Codex sessions, not only Claude.
+
+## 7. Remove the large end-of-session popup
+
+Status: captured.
+
+- [ ] Ending a session opens a huge popup; the user does not want it.
+
+## 8. Smaller usage-limit notice
+
+Status: captured.
+
+- [ ] When tokens run out and the usage limit is hit, the window that opens is too big and too long. Make it short and compact.
+
+## 9. Redesign the whole window
+
+Status: captured; needs its own design pass.
+
+- [ ] Redesign the full app window.
+
+## 10. "Summarize in Hebrew" is not working
+
+Status: captured; reproduce and find the cause.
+
+- [ ] Something in "Summarize in Hebrew" does not work for the user; details still needed.
+
+## 11. Terminal scrollback reaches the top
+
+Status: captured.
+
+- [ ] Scrolling up in a terminal session stops before the beginning; let the user scroll all the way to the top.
+
+## 12. Show running Claude subagents
+
+Status: captured; check what Claude Code exposes.
+
+- [ ] If possible, show the subagents a Claude session is running.
+
+## 13. Logs of background servers
+
+Status: captured.
+
+- [ ] When a session runs a server in the background, let the user see its logs.
+
+## 14. Local DevOps tools and their permissions
+
+Status: idea captured; brainstorm separately.
+
+- [ ] Show the CLIs installed on the computer (AWS, Docker, GitHub, and others), let the user connect to them, and show what permissions each one has.
+
 ## Shared constraints
 
 - Keep terminal output and instructions delivered to coding agents in English; Hebrew discussion and translations stay in the panel.
