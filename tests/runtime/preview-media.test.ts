@@ -17,10 +17,14 @@ test('preview media reads a local video without registering it and rejects escap
     const signal = new AbortController().signal;
     const file = await browser.media('session', 'clip.webm', signal);
     expect(file.mime).toBe('video/webm');
-    const chunks = []; for await (const chunk of readReferenceChunks(file)) chunks.push(chunk);
+    const chunks = [];
+    for await (const chunk of readReferenceChunks(file)) chunks.push(chunk);
     expect(Buffer.concat(chunks).toString()).toBe('video bytes');
     await expect(browser.media('session', 'escape.webm', signal)).rejects.toThrow('outside');
     await expect(browser.media('session', '../clip.webm', signal)).rejects.toThrow('outside');
     await expect(browser.media('session', 'secret.txt', signal)).rejects.toThrow('media');
-  } finally { await rm(root, { recursive: true }); await rm(outside, { recursive: true }); }
+  } finally {
+    await rm(root, { recursive: true });
+    await rm(outside, { recursive: true });
+  }
 });

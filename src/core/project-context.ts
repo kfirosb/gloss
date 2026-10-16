@@ -6,7 +6,11 @@ export interface ProjectContextInput {
   maxCharacters: number;
 }
 
-export function buildProjectContext({ notes = '', messages, maxCharacters }: ProjectContextInput): string {
+export function buildProjectContext({
+  notes = '',
+  messages,
+  maxCharacters,
+}: ProjectContextInput): string {
   if (maxCharacters <= 0) return '';
   const visibleNotes = notes.slice(0, maxCharacters);
   if (visibleNotes.length === maxCharacters) return visibleNotes;

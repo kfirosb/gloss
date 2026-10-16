@@ -1,7 +1,11 @@
 import { orderAgentMessages, type AgentKind, type AgentMessage } from '../core/contracts.js';
 
 /** The panel intentionally shows a bounded, chronological recent window. */
-export function recentMessages(messages: AgentMessage[], limit = 10, agent?: AgentKind): AgentMessage[] {
+export function recentMessages(
+  messages: AgentMessage[],
+  limit = 10,
+  agent?: AgentKind,
+): AgentMessage[] {
   if (limit <= 0) return [];
   const unique = new Map<string, AgentMessage>();
   for (const message of messages) {

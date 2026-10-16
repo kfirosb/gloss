@@ -8,18 +8,25 @@ import type {
 const copy = <T>(value: T): T => structuredClone(value);
 const translationKey = (key: TranslationKey) => JSON.stringify(key);
 
-import {summaryCacheKey,type SummaryKey} from '../../src/core/summary-contracts.js';
+import { summaryCacheKey, type SummaryKey } from '../../src/core/summary-contracts.js';
 export class MemoryConversationStore implements ConversationStore {
-  private readonly summaries=new Map<string,string>();
-  getSummary(key:SummaryKey){return this.summaries.get(summaryCacheKey(key));}
-  putSummary(key:SummaryKey,text:string){this.summaries.set(summaryCacheKey(key),text);}
+  private readonly summaries = new Map<string, string>();
+  getSummary(key: SummaryKey) {
+    return this.summaries.get(summaryCacheKey(key));
+  }
+  putSummary(key: SummaryKey, text: string) {
+    this.summaries.set(summaryCacheKey(key), text);
+  }
   readonly operationLog: string[] = [];
   private readonly snapshots = new Map<string, ConversationSnapshot>();
   private readonly deliveries = new Map<string, Delivery>();
   private readonly translations = new Map<string, string>();
   private readonly contexts = new Map<string, string>();
 
-  load(id: string) { const value = this.snapshots.get(id); return value && copy(value); }
+  load(id: string) {
+    const value = this.snapshots.get(id);
+    return value && copy(value);
+  }
   save(snapshot: ConversationSnapshot) {
     this.operationLog.push('save');
     this.snapshots.set(snapshot.id, copy(snapshot));
@@ -39,18 +46,33 @@ export class MemoryConversationStore implements ConversationStore {
     this.operationLog.push(`update:${delivery.state}`);
     this.deliveries.set(`${delivery.draftId}:${delivery.revision}`, copy(delivery));
   }
-  getTranslation(key: TranslationKey) { return this.translations.get(translationKey(key)); }
-  putTranslation(key: TranslationKey, text: string) { this.translations.set(translationKey(key), text); }
-  readContext(projectId: string) { return this.contexts.get(projectId); }
-  writeContext(projectId: string, text: string) { this.contexts.set(projectId, text); }
-  deleteContext(projectId: string) { this.contexts.delete(projectId); }
-  deleteConversation(id: string) { this.snapshots.delete(id); }
+  getTranslation(key: TranslationKey) {
+    return this.translations.get(translationKey(key));
+  }
+  putTranslation(key: TranslationKey, text: string) {
+    this.translations.set(translationKey(key), text);
+  }
+  readContext(projectId: string) {
+    return this.contexts.get(projectId);
+  }
+  writeContext(projectId: string, text: string) {
+    this.contexts.set(projectId, text);
+  }
+  deleteContext(projectId: string) {
+    this.contexts.delete(projectId);
+  }
+  deleteConversation(id: string) {
+    this.snapshots.delete(id);
+  }
   list(projectId?: string) {
     return [...this.snapshots.values()]
       .filter((snapshot) => projectId === undefined || snapshot.target?.projectId === projectId)
       .map(({ id, target, language, languageModel, sourceRevision }) => ({
-        id, ...(target && { target: copy(target), projectId: target.projectId }),
-        language, languageModel, sourceRevision,
+        id,
+        ...(target && { target: copy(target), projectId: target.projectId }),
+        language,
+        languageModel,
+        sourceRevision,
       }));
   }
   recoverInFlightDeliveries() {

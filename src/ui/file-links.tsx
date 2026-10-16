@@ -1,15 +1,24 @@
 import { createContext } from 'react';
 
-export const FileLinkContext = createContext<{ root: string; open(path: string, basePath?: string): void } | null>(null);
+export const FileLinkContext = createContext<{
+  root: string;
+  open(path: string, basePath?: string): void;
+} | null>(null);
 export function isLocalFileLink(href: string): boolean {
   href = href.replace(/(\.[a-zA-Z0-9]+):\d+(?::\d+)?$/, '$1');
-  return Boolean(href) && !href.startsWith('#') && !href.startsWith('//') && (/^file:/i.test(href) || !/^[a-z][a-z\d+.-]*:/i.test(href));
+  return (
+    Boolean(href) &&
+    !href.startsWith('#') &&
+    !href.startsWith('//') &&
+    (/^file:/i.test(href) || !/^[a-z][a-z\d+.-]*:/i.test(href))
+  );
 }
 export function localFilePath(href: string, root: string, basePath = ''): string {
   let value = href;
   if (/^file:/i.test(value)) {
     const url = new URL(value);
-    if (url.hostname && url.hostname !== 'localhost') throw new Error('File is outside the selected worktree');
+    if (url.hostname && url.hostname !== 'localhost')
+      throw new Error('File is outside the selected worktree');
     value = url.pathname;
   }
   value = decodeURIComponent(value.split(/[?#]/)[0]!).replace(/:\d+(?::\d+)?$/, '');

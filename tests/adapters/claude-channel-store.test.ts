@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,9 +24,22 @@ let target: Target;
 let stores: ChannelStore[];
 const nativeSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const otherNativeId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-const key: ChannelKey = { panelSessionId: 'panel-1', nativeSessionId, generation: 'generation-1', requestId: 'request-1' };
-const openStore = () => { const store = new ChannelStore(path); stores.push(store); return store; };
-const registeredStore = () => { const store = openStore(); store.registerGeneration(key.generation, target); return store; };
+const key: ChannelKey = {
+  panelSessionId: 'panel-1',
+  nativeSessionId,
+  generation: 'generation-1',
+  requestId: 'request-1',
+};
+const openStore = () => {
+  const store = new ChannelStore(path);
+  stores.push(store);
+  return store;
+};
+const registeredStore = () => {
+  const store = openStore();
+  store.registerGeneration(key.generation, target);
+  return store;
+};
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'claude-channel-store-')));
@@ -40,7 +63,8 @@ describe('ChannelStore', () => {
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('delete');
       expect(db.prepare('PRAGMA synchronous').get()?.synchronous).toBe(2);
     }
-    first.claim(key, 'durable'); first.recordReply(key, 'persisted');
+    first.claim(key, 'durable');
+    first.recordReply(key, 'persisted');
     for (const store of stores) store.close();
     const reopened = openStore();
     expect(reopened.claim(key, 'durable')).toBe('existing');
@@ -50,7 +74,9 @@ describe('ChannelStore', () => {
 
   it('fails closed while a legacy WAL reader prevents conversion, then converts without losing data', () => {
     const initial = registeredStore();
-    initial.claim(key, 'legacy'); initial.recordReply(key, 'legacy answer'); initial.close();
+    initial.claim(key, 'legacy');
+    initial.recordReply(key, 'legacy answer');
+    initial.close();
     const legacy = new DatabaseSync(path);
     legacy.exec('PRAGMA journal_mode = WAL; BEGIN');
     legacy.prepare('SELECT * FROM requests').all();
@@ -58,49 +84,79 @@ describe('ChannelStore', () => {
       expect(() => openStore()).toThrow(/locked|busy/i);
       expect(legacy.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(legacy.prepare('SELECT COUNT(*) AS count FROM requests').get()?.count).toBe(1);
-    } finally { legacy.exec('ROLLBACK'); legacy.close(); }
+    } finally {
+      legacy.exec('ROLLBACK');
+      legacy.close();
+    }
     const converted = openStore();
     expect(converted.claim(key, 'legacy')).toBe('existing');
     expect(converted.readReply(key)?.text).toBe('legacy answer');
     const db = new DatabaseSync(path, { readOnly: true });
-    try { expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('delete'); }
-    finally { db.close(); }
+    try {
+      expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('delete');
+    } finally {
+      db.close();
+    }
   }, 10000);
 
   it('opens read-only without creating a missing database or its parent', () => {
-    expect(() => { const reader = new ChannelStore(path, { readOnly: true }); stores.push(reader); }).toThrow();
+    expect(() => {
+      const reader = new ChannelStore(path, { readOnly: true });
+      stores.push(reader);
+    }).toThrow();
     expect(existsSync(join(root, 'private'))).toBe(false);
     mkdirSync(join(root, 'private'));
-    expect(() => { const reader = new ChannelStore(path, { readOnly: true }); stores.push(reader); }).toThrow();
+    expect(() => {
+      const reader = new ChannelStore(path, { readOnly: true });
+      stores.push(reader);
+    }).toThrow();
     expect(existsSync(path)).toBe(false);
   });
 
   it('opens read-only without permission repair or schema initialization', () => {
     mkdirSync(join(root, 'private'));
-    const empty = new DatabaseSync(path); empty.exec('CREATE TABLE unrelated (value TEXT)'); empty.close();
+    const empty = new DatabaseSync(path);
+    empty.exec('CREATE TABLE unrelated (value TEXT)');
+    empty.close();
     chmodSync(path, 0o400);
     const original = readFileSync(path);
-    const reader = new ChannelStore(path, { readOnly: true }); stores.push(reader);
+    const reader = new ChannelStore(path, { readOnly: true });
+    stores.push(reader);
     expect(() => reader.readReply(key)).toThrow(/no such table/);
     expect(statSync(path).mode & 0o777).toBe(0o400);
     expect(readFileSync(path)).toEqual(original);
     const inspection = new DatabaseSync(path, { readOnly: true });
-    try { expect(inspection.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name)).toEqual(['unrelated']); }
-    finally { inspection.close(); }
+    try {
+      expect(
+        inspection
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all()
+          .map((row) => row.name),
+      ).toEqual(['unrelated']);
+    } finally {
+      inspection.close();
+    }
   });
 
   it('reads committed replies under a reserved writer lock, observes later commits and rejects mutation', () => {
-    const writer = registeredStore(); writer.claim(key, 'question');
+    const writer = registeredStore();
+    writer.claim(key, 'question');
     const reply = writer.recordReply(key, 'answer');
-    const lock = new DatabaseSync(path); lock.exec('BEGIN IMMEDIATE');
+    const lock = new DatabaseSync(path);
+    lock.exec('BEGIN IMMEDIATE');
     let reader: ChannelStore;
     try {
-      reader = new ChannelStore(path, { readOnly: true }); stores.push(reader);
+      reader = new ChannelStore(path, { readOnly: true });
+      stores.push(reader);
       expect(reader.readReply(key)).toEqual(reply);
       expect(reader.replies(target, 0, 100, 'panel-1')).toEqual([reply]);
-    } finally { lock.exec('ROLLBACK'); lock.close(); }
+    } finally {
+      lock.exec('ROLLBACK');
+      lock.close();
+    }
     const nextKey = { ...key, requestId: 'next' };
-    writer.claim(nextKey, 'next'); const next = writer.recordReply(nextKey, 'next answer');
+    writer.claim(nextKey, 'next');
+    const next = writer.recordReply(nextKey, 'next answer');
     expect(reader.replies(target, reply.sequence, 100, 'panel-1')).toEqual([next]);
     expect(() => reader.claim({ ...key, requestId: 'must-not-write' }, 'no')).toThrow(/read.only/i);
     expect(() => reader.registerGeneration('must-not-register', target)).toThrow(/read.only/i);
@@ -109,8 +165,10 @@ describe('ChannelStore', () => {
   }, 10000);
 
   it('refuses read-only symlink and directory paths without changing the destination', () => {
-    registeredStore().close(); const original = readFileSync(path);
-    const alias = join(root, 'alias.db'); symlinkSync(path, alias);
+    registeredStore().close();
+    const original = readFileSync(path);
+    const alias = join(root, 'alias.db');
+    symlinkSync(path, alias);
     expect(() => new ChannelStore(alias, { readOnly: true })).toThrow();
     expect(() => new ChannelStore(root, { readOnly: true })).toThrow();
     expect(readFileSync(path)).toEqual(original);
@@ -165,9 +223,21 @@ describe('ChannelStore', () => {
     store.close();
     const reopened = openStore();
     expect(() => reopened.registerGeneration(key.generation, target)).not.toThrow();
-    expect(() => reopened.registerGeneration(key.generation, { ...target, sessionRef: otherNativeId })).toThrow();
-    expect(() => reopened.registerGeneration(key.generation, { ...target, projectId: join(root, 'other-project') })).toThrow();
-    expect(() => reopened.registerGeneration('generation-2', { ...target, projectId: join(root, 'other-project') })).toThrow();
+    expect(() =>
+      reopened.registerGeneration(key.generation, { ...target, sessionRef: otherNativeId }),
+    ).toThrow();
+    expect(() =>
+      reopened.registerGeneration(key.generation, {
+        ...target,
+        projectId: join(root, 'other-project'),
+      }),
+    ).toThrow();
+    expect(() =>
+      reopened.registerGeneration('generation-2', {
+        ...target,
+        projectId: join(root, 'other-project'),
+      }),
+    ).toThrow();
     // Failed registration must not reserve the generation or corrupt the first binding.
     reopened.registerGeneration('generation-2', target);
     expect(reopened.claim(key, 'hello')).toBe('new');
@@ -192,7 +262,8 @@ describe('ChannelStore', () => {
       { ...target, sessionRef: 'not-a-uuid' },
       { ...target, projectId: '.' },
       { ...target, projectId: join(root, 'missing') },
-    ]) expect(() => store.registerGeneration(key.generation, invalid)).toThrow();
+    ])
+      expect(() => store.registerGeneration(key.generation, invalid)).toThrow();
     expect(() => store.registerGeneration('', target)).toThrow();
     store.registerGeneration(key.generation, target);
     expect(store.claim(key, 'hello')).toBe('new');
@@ -218,8 +289,10 @@ describe('ChannelStore', () => {
     store.claim(key, 'hello');
     store.registerGeneration('generation-2', target);
     for (const changed of [
-      { requestId: 'unknown' }, { panelSessionId: 'panel-2' },
-      { generation: 'generation-2' }, { nativeSessionId: otherNativeId },
+      { requestId: 'unknown' },
+      { panelSessionId: 'panel-2' },
+      { generation: 'generation-2' },
+      { nativeSessionId: otherNativeId },
     ]) {
       expect(() => store.recordReply({ ...key, ...changed }, 'wrong reply')).toThrow();
       expect(store.readReply({ ...key, ...changed })).toBeUndefined();
@@ -246,16 +319,22 @@ describe('ChannelStore', () => {
     const secondTarget = { ...target, sessionRef: otherNativeId };
     store.registerGeneration('generation-2', secondTarget);
     const keys = [
-      { ...key, panelSessionId: 'panel-2' }, key,
+      { ...key, panelSessionId: 'panel-2' },
+      key,
       { ...key, nativeSessionId: otherNativeId, generation: 'generation-2' },
       { ...key, requestId: 'request-2' },
     ];
-    for (const k of keys) { store.claim(k, 'question'); store.recordReply(k, k.requestId); }
-    expect(store.replies(target, 0, 1, 'panel-1').map(r => r.sequence)).toEqual([2]);
-    expect(store.replies(target, 2, 1, 'panel-1').map(r => r.sequence)).toEqual([4]);
-    expect(store.replies(target, 0, 100).map(r => r.sequence)).toEqual([1, 2, 4]);
-    expect(store.replies(secondTarget, 0, 100).map(r => r.sequence)).toEqual([3]);
-    expect(store.replies({ ...target, projectId: join(root, 'other-project') }, 0, 100)).toEqual([]);
+    for (const k of keys) {
+      store.claim(k, 'question');
+      store.recordReply(k, k.requestId);
+    }
+    expect(store.replies(target, 0, 1, 'panel-1').map((r) => r.sequence)).toEqual([2]);
+    expect(store.replies(target, 2, 1, 'panel-1').map((r) => r.sequence)).toEqual([4]);
+    expect(store.replies(target, 0, 100).map((r) => r.sequence)).toEqual([1, 2, 4]);
+    expect(store.replies(secondTarget, 0, 100).map((r) => r.sequence)).toEqual([3]);
+    expect(store.replies({ ...target, projectId: join(root, 'other-project') }, 0, 100)).toEqual(
+      [],
+    );
     expect(store.replies(target, 0, 100, 'unknown-panel')).toEqual([]);
     expect(() => store.replies({ ...target, agent: 'codex' }, 0, 100)).toThrow();
   });
@@ -264,23 +343,30 @@ describe('ChannelStore', () => {
     const store = registeredStore();
     for (let i = 0; i < 103; i++) {
       const k = { ...key, requestId: `request-${i}` };
-      store.claim(k, 'question'); store.recordReply(k, 'answer');
+      store.claim(k, 'question');
+      store.recordReply(k, 'answer');
     }
     const page = store.replies(target, 0, 1000);
     expect(page).toHaveLength(100);
     expect(page[0]?.sequence).toBe(1);
     expect(page.at(-1)?.sequence).toBe(100);
-    expect(store.replies(target, 100, 1000).map(r => r.sequence)).toEqual([101, 102, 103]);
+    expect(store.replies(target, 100, 1000).map((r) => r.sequence)).toEqual([101, 102, 103]);
     expect(store.replies(target, 103, 100)).toEqual([]);
   });
 
-  it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid cursor %s', cursor => {
-    expect(() => registeredStore().replies(target, cursor, 100)).toThrow();
-  });
+  it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid cursor %s',
+    (cursor) => {
+      expect(() => registeredStore().replies(target, cursor, 100)).toThrow();
+    },
+  );
 
-  it.each([0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid page size %s', limit => {
-    expect(() => registeredStore().replies(target, 0, limit)).toThrow();
-  });
+  it.each([0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid page size %s',
+    (limit) => {
+      expect(() => registeredStore().replies(target, 0, limit)).toThrow();
+    },
+  );
 
   it('bounds both texts at 160000 characters without truncation or partial writes', () => {
     const store = registeredStore();
@@ -319,7 +405,9 @@ describe('ChannelStore', () => {
     try {
       const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table'").all();
       expect(JSON.stringify(schema)).not.toMatch(/token|secret|credential/i);
-    } finally { db.close(); }
+    } finally {
+      db.close();
+    }
     store.close();
     expect(readFileSync(path).includes(Buffer.from('SECRET-'))).toBe(false);
     chmodSync(path, 0o644);
@@ -337,13 +425,15 @@ describe('ChannelStore', () => {
     expect(readFileSync(path)).toEqual(original);
   });
 
-  it.each([0, 350])('atomically deduplicates competing claims and replies across independent connections with writer delay %sms', async writerDelay => {
-    registeredStore().close();
-    const gate = new SharedArrayBuffer(8);
-    const workers: Worker[] = [];
-    // Load the actual TypeScript implementation in Node workers. The resolver only
-    // bridges this repository's .js source imports to .ts; no store or SQLite mocks.
-    const source = `
+  it.each([0, 350])(
+    'atomically deduplicates competing claims and replies across independent connections with writer delay %sms',
+    async (writerDelay) => {
+      registeredStore().close();
+      const gate = new SharedArrayBuffer(8);
+      const workers: Worker[] = [];
+      // Load the actual TypeScript implementation in Node workers. The resolver only
+      // bridges this repository's .js source imports to .ts; no store or SQLite mocks.
+      const source = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { registerHooks } = require('node:module');
       registerHooks({ resolve(specifier, context, next) {
@@ -381,29 +471,59 @@ describe('ChannelStore', () => {
         } finally { store.close(); }
       })().catch(error => { throw error; });
     `;
-    let ready = 0;
-    try {
-      const results = await Promise.all(['answer A', 'answer B', 'reader'].map(text => new Promise<{ claim: string; reply: ChannelReply }>((resolve, reject) => {
-        const worker = new Worker(source, { eval: true, execArgv: ['--experimental-transform-types'], workerData: {
-          module: new URL('../../src/agents/claude/channel-store.ts', import.meta.url).href,
-          path, key, text, gate, writerDelay, reader: text === 'reader',
-        } });
-        workers.push(worker);
-        worker.on('error', reject);
-        worker.on('exit', code => { if (code !== 0) reject(new Error(`Worker exited ${code}`)); });
-        worker.on('message', message => {
-          if (!message.ready) { resolve(message); return; }
-          if (++ready === 3) { Atomics.store(new Int32Array(gate), 0, 1); Atomics.notify(new Int32Array(gate), 0); }
-        });
-      })));
-      expect(results.map(r => r.claim).sort()).toEqual(['existing', 'new', 'reader']);
-      expect(results[0]!.reply).toEqual(results[1]!.reply);
-      expect(results[2]!.reply).toEqual(results[0]!.reply);
-      expect(['answer A', 'answer B']).toContain(results[0]!.reply.text);
-      expect(openStore().replies(target, 0, 100)).toEqual([results[0]!.reply]);
-      const db = new DatabaseSync(path, { readOnly: true });
-      try { expect(db.prepare('SELECT COUNT(*) AS count FROM replies').get()?.count).toBe(1); }
-      finally { db.close(); }
-    } finally { await Promise.all(workers.map(worker => worker.terminate())); }
-  }, 15000);
+      let ready = 0;
+      try {
+        const results = await Promise.all(
+          ['answer A', 'answer B', 'reader'].map(
+            (text) =>
+              new Promise<{ claim: string; reply: ChannelReply }>((resolve, reject) => {
+                const worker = new Worker(source, {
+                  eval: true,
+                  execArgv: ['--experimental-transform-types'],
+                  workerData: {
+                    module: new URL('../../src/agents/claude/channel-store.ts', import.meta.url)
+                      .href,
+                    path,
+                    key,
+                    text,
+                    gate,
+                    writerDelay,
+                    reader: text === 'reader',
+                  },
+                });
+                workers.push(worker);
+                worker.on('error', reject);
+                worker.on('exit', (code) => {
+                  if (code !== 0) reject(new Error(`Worker exited ${code}`));
+                });
+                worker.on('message', (message) => {
+                  if (!message.ready) {
+                    resolve(message);
+                    return;
+                  }
+                  if (++ready === 3) {
+                    Atomics.store(new Int32Array(gate), 0, 1);
+                    Atomics.notify(new Int32Array(gate), 0);
+                  }
+                });
+              }),
+          ),
+        );
+        expect(results.map((r) => r.claim).sort()).toEqual(['existing', 'new', 'reader']);
+        expect(results[0]!.reply).toEqual(results[1]!.reply);
+        expect(results[2]!.reply).toEqual(results[0]!.reply);
+        expect(['answer A', 'answer B']).toContain(results[0]!.reply.text);
+        expect(openStore().replies(target, 0, 100)).toEqual([results[0]!.reply]);
+        const db = new DatabaseSync(path, { readOnly: true });
+        try {
+          expect(db.prepare('SELECT COUNT(*) AS count FROM replies').get()?.count).toBe(1);
+        } finally {
+          db.close();
+        }
+      } finally {
+        await Promise.all(workers.map((worker) => worker.terminate()));
+      }
+    },
+    15000,
+  );
 });

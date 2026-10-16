@@ -85,10 +85,16 @@ There is also a browser mode: `node dist/server/runtime/cli.js --agent codex --s
 ### Verify
 
 ```sh
+npm run format:check
 npm run typecheck
 npm test
 npm run test:e2e -- --workers=1
 ```
+
+Use `npm run format` to apply the shared code style. Browser tests start their own
+server and fail if the port is busy; set `PLAYWRIGHT_PORT` to use another port.
+See [the code quality review](docs/code-quality-review.md) for shared module
+ownership, refactoring notes, and remaining opportunities.
 
 ## How it works, briefly
 

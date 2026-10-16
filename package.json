@@ -7,6 +7,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "format": "prettier --write src tests desktop scripts/*.mjs *.ts *.json index.html",
+    "format:check": "prettier --check src tests desktop scripts/*.mjs *.ts *.json index.html",
     "test": "vitest run",
     "dev": "vite",
     "typecheck": "tsc --noEmit",
@@ -44,6 +46,7 @@
     "@types/ws": "8.18.2",
     "electron": "44.4.3",
     "electron-builder": "26.16.1",
+    "prettier": "3.9.10",
     "typescript": "7.0.2",
     "vitest": "5.0.1"
   },

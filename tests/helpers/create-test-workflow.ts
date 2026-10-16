@@ -1,5 +1,10 @@
 import { createWorkflow } from '../../src/core/workflow.js';
-import type { AgentCapabilities, CodingState, DeliveryState, Target } from '../../src/core/contracts.js';
+import type {
+  AgentCapabilities,
+  CodingState,
+  DeliveryState,
+  Target,
+} from '../../src/core/contracts.js';
 import { FakeAgent } from './fake-agent.js';
 import { FakeLanguageSession } from './fake-language.js';
 import { MemoryConversationStore } from './memory-store.js';
@@ -21,13 +26,22 @@ export async function createTestWorkflow(options: TestWorkflowOptions = {}) {
   const store = new MemoryConversationStore();
   let sequence = 0;
   const workflow = createWorkflow({
-    conversationId: 'conversation-1', language: 'he', projectContext: 'project notes',
-    languageModel: 'test-model', languageSession: language, agents: [agent], store,
+    conversationId: 'conversation-1',
+    language: 'he',
+    projectContext: 'project notes',
+    languageModel: 'test-model',
+    languageSession: language,
+    agents: [agent],
+    store,
     createId: (prefix) => `${prefix}-${++sequence}`,
   });
   if (options.target !== false) {
     await workflow.connect(options.target ?? DEFAULT_TARGET);
-    for (let attempt = 0; attempt < 20 && workflow.snapshot().codingState === 'disconnected'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && workflow.snapshot().codingState === 'disconnected';
+      attempt += 1
+    ) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }

@@ -1,4 +1,14 @@
-import type { Target } from './contracts.js';
+import type { Target, ConversationSnapshot, Draft } from './contracts.js';
+
+/** Snapshot envelope shared by the HTTP server and browser transport. */
+export interface SessionEnvelope {
+  epoch?: string;
+  sessionId: string;
+  sequence: number;
+  snapshot: ConversationSnapshot;
+  review?: Draft;
+  translation?: string;
+}
 
 /** Lifecycle of a session Gloss launched in its private tmux server. */
 export type LaunchState = 'starting' | 'running' | 'unidentified' | 'ended';
@@ -32,7 +42,11 @@ export interface WorkspaceData {
   };
 }
 
-export interface WorkspaceRecord { sessionId: string; revision: number; data: WorkspaceData }
+export interface WorkspaceRecord {
+  sessionId: string;
+  revision: number;
+  data: WorkspaceData;
+}
 
 export interface SessionStore {
   updateSessionTitle(id: string, title: string): void;
@@ -77,4 +91,13 @@ export type LaunchAgent = 'claude' | 'codex' | 'shell';
 /** How terminal tabs open: the popup over the conversation, or in place of the conversation panels. */
 export type TerminalView = 'popup' | 'workspace';
 /** A live terminal as the catalog publishes it; never a session. */
-export interface TerminalEntry { key: string; launchId: string; title: string; busy: boolean; folder: string; projectKey: string; projectName: string; originSessionId?: string }
+export interface TerminalEntry {
+  key: string;
+  launchId: string;
+  title: string;
+  busy: boolean;
+  folder: string;
+  projectKey: string;
+  projectName: string;
+  originSessionId?: string;
+}

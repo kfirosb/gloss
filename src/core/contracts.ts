@@ -6,14 +6,31 @@ export type AgentKind = 'claude' | 'codex';
 export type CodingState = 'idle' | 'working' | 'approval-required' | 'disconnected';
 export type DeliveryState = 'sending' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
 
-export interface Target { agent: AgentKind; sessionRef: string; projectId: string }
-export interface ImageAttachment { kind?: 'image'; index?:number; id:string; name:string; mime:string; size:number; path:string }
+export interface Target {
+  agent: AgentKind;
+  sessionRef: string;
+  projectId: string;
+}
+export interface ImageAttachment {
+  kind?: 'image';
+  index?: number;
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  path: string;
+}
 export type Attachment = FileReference | ImageAttachment;
 export interface Draft {
   attachments?: Attachment[];
   selectedDiscussion?: number[];
-  id: string; revision: number; target: Target; sourceRevision: number;
-  language: string; localizedText: string; englishText: string;
+  id: string;
+  revision: number;
+  target: Target;
+  sourceRevision: number;
+  language: string;
+  localizedText: string;
+  englishText: string;
 }
 export interface Delivery {
   transport?: 'channel' | 'peer';
@@ -22,8 +39,13 @@ export interface Delivery {
   attachments?: Attachment[];
   nativeMessageId?: string;
   nativeAfterRevision?: number;
-  id: string; draftId: string; revision: number; target: Target;
-  englishText: string; state: DeliveryState; reason?: string;
+  id: string;
+  draftId: string;
+  revision: number;
+  target: Target;
+  englishText: string;
+  state: DeliveryState;
+  reason?: string;
 }
 /** The channel accepted the handoff; Claude's matching reply is still pending. */
 export function isChannelAwaitingReply(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
@@ -35,10 +57,14 @@ export function isDeliverySubmitted(delivery: Pick<Delivery, 'state' | 'transpor
 }
 export interface AgentMessage {
   clientId?: string;
-  sourceId: string; revision: number; role: 'user' | 'assistant';
-  text: string; complete: boolean;
+  sourceId: string;
+  revision: number;
+  role: 'user' | 'assistant';
+  text: string;
+  complete: boolean;
   timestamp?: string;
-  translatedText?: string; translationStatus?: 'pending' | 'complete' | 'error';
+  translatedText?: string;
+  translationStatus?: 'pending' | 'complete' | 'error';
 }
 /** Revisions belong to a source namespace. Claude channel sequences are not byte offsets. */
 export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind): AgentMessage[] {
@@ -52,13 +78,20 @@ export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind):
     return channelA === channelB ? a.revision - b.revision : Number(channelA) - Number(channelB);
   });
 }
-export function canSendWhileWorking(capabilities: Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy'> | undefined, transport?: 'channel' | 'peer'): boolean {
-  return Boolean(capabilities?.sendWhileBusy || (transport === 'channel' && capabilities?.channelSendWhileBusy));
+export function canSendWhileWorking(
+  capabilities: Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy'> | undefined,
+  transport?: 'channel' | 'peer',
+): boolean {
+  return Boolean(
+    capabilities?.sendWhileBusy || (transport === 'channel' && capabilities?.channelSendWhileBusy),
+  );
 }
 export interface AgentCapabilities {
   imageAttachments?: boolean;
   fileReferences?: boolean;
-  history: boolean; liveMessages: boolean; attachExisting: boolean;
+  history: boolean;
+  liveMessages: boolean;
+  attachExisting: boolean;
   sendWhileBusy: boolean;
   /** Verified channel transport queues messages until the agent is free, so it may send while 'working'. */
   channelSendWhileBusy?: boolean;
@@ -73,32 +106,60 @@ export type AgentEvent =
   | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
   | { type: 'gap'; reason: string };
 export interface CodingConnection {
-  target: Target; capabilities: AgentCapabilities;
+  target: Target;
+  capabilities: AgentCapabilities;
   history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }>;
   events(signal: AbortSignal): AsyncIterable<AgentEvent>;
   reconcileDelivery?(delivery: Delivery): Promise<boolean>;
-  send(requestId: string, englishText: string, attachments?: Attachment[], context?: SendContext): Promise<{ state: DeliveryState; reason?: string; nativeMessageId?: string; nativeAfterRevision?: number; channelGeneration?: string }>;
+  send(
+    requestId: string,
+    englishText: string,
+    attachments?: Attachment[],
+    context?: SendContext,
+  ): Promise<{
+    state: DeliveryState;
+    reason?: string;
+    nativeMessageId?: string;
+    nativeAfterRevision?: number;
+    channelGeneration?: string;
+  }>;
   detach(): Promise<void>;
 }
-export interface SendContext { panelSessionId: string; transport: 'channel' | 'peer' }
+export interface SendContext {
+  panelSessionId: string;
+  transport: 'channel' | 'peer';
+}
 export interface AgentAdapter {
   kind: AgentKind;
   discover(projectPath: string): Promise<Target[]>;
   discoverOpen?(signal: AbortSignal): Promise<OpenSessionScan>;
   attach(target: Target, context?: { panelSessionId: string }): Promise<CodingConnection>;
 }
-export interface LanguageTurn { id?:string; complete?:boolean; attachments?: Attachment[]; role: 'user' | 'assistant'; text: string }
+export interface LanguageTurn {
+  id?: string;
+  complete?: boolean;
+  attachments?: Attachment[];
+  role: 'user' | 'assistant';
+  text: string;
+}
 export interface LanguageInput {
-  fileContext?: {id:string; index:number; text?:string; unreadable?:string}[];
+  fileContext?: { id: string; index: number; text?: string; unreadable?: string }[];
   reviewText?: string;
-  language: string; deliveryLanguage?: string; projectContext: string;
-  codingMessages: AgentMessage[]; discussion: LanguageTurn[]; selectedDiscussion?: LanguageTurn[];
+  language: string;
+  deliveryLanguage?: string;
+  projectContext: string;
+  codingMessages: AgentMessage[];
+  discussion: LanguageTurn[];
+  selectedDiscussion?: LanguageTurn[];
 }
 export interface LanguageSession {
-  summarize(text:string,language:string,signal:AbortSignal):Promise<string>;
+  summarize(text: string, language: string, signal: AbortSignal): Promise<string>;
   id: string;
   discuss(input: LanguageInput, signal: AbortSignal): AsyncIterable<string>;
-  prepare(input: LanguageInput, signal: AbortSignal): Promise<{ localizedText: string; englishText: string }>;
+  prepare(
+    input: LanguageInput,
+    signal: AbortSignal,
+  ): Promise<{ localizedText: string; englishText: string }>;
   translate(text: string, language: string, signal: AbortSignal): Promise<string>;
   resetContext(): Promise<void>;
   close(): Promise<void>;
@@ -171,7 +232,7 @@ export interface ConversationSummary {
 export interface ConversationStore {
   releaseComposerAttempt(conversationId: string, requestId: string): void;
   getSummary(key: import('./summary-contracts.js').SummaryKey): string | undefined;
-  putSummary(key: import('./summary-contracts.js').SummaryKey, text:string): void;
+  putSummary(key: import('./summary-contracts.js').SummaryKey, text: string): void;
   load(id: string): ConversationSnapshot | undefined;
   save(snapshot: ConversationSnapshot): void;
   claimDelivery(delivery: Delivery): boolean;

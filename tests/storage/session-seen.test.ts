@@ -5,8 +5,23 @@ import { join } from 'node:path';
 import type { ConversationSnapshot } from '../../src/core/contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 
-const target = (id: string) => ({ agent: 'codex' as const, sessionRef: id, projectId: process.cwd() });
-const snapshot = (id: string): ConversationSnapshot => ({ id, target: target(id), codingState: 'disconnected', codingMessages: [], discussion: [], deliveries: [], language: 'he', languageSessionId: 'l', languageModel: 'm', sourceRevision: 0 });
+const target = (id: string) => ({
+  agent: 'codex' as const,
+  sessionRef: id,
+  projectId: process.cwd(),
+});
+const snapshot = (id: string): ConversationSnapshot => ({
+  id,
+  target: target(id),
+  codingState: 'disconnected',
+  codingMessages: [],
+  discussion: [],
+  deliveries: [],
+  language: 'he',
+  languageSessionId: 'l',
+  languageModel: 'm',
+  sourceRevision: 0,
+});
 
 it('markSeen stores a sequence, never lowers it, and reads back undefined for unknown sessions', () => {
   const store = new SqliteStore(':memory:');
@@ -24,7 +39,9 @@ it('markSeen stores a sequence, never lowers it, and reads back undefined for un
 
 it('seen sequences survive reopening the database file', () => {
   const path = join(mkdtempSync(join(tmpdir(), 'gloss-seen-')), 'state.db');
-  const first = new SqliteStore(path); first.markSeen('A', 7); first.close();
+  const first = new SqliteStore(path);
+  first.markSeen('A', 7);
+  first.close();
   const second = new SqliteStore(path);
   expect(second.seenSequence('A')).toBe(7);
   second.close();
@@ -32,7 +49,13 @@ it('seen sequences survive reopening the database file', () => {
 
 it('deleting a conversation deletes its seen row', () => {
   const store = new SqliteStore(':memory:');
-  store.registerSession({ id: 'A', target: target('A'), canonicalRoot: process.cwd(), projectName: 'p', enabled: true });
+  store.registerSession({
+    id: 'A',
+    target: target('A'),
+    canonicalRoot: process.cwd(),
+    projectName: 'p',
+    enabled: true,
+  });
   store.save(snapshot('A'));
   store.markSeen('A', 4);
   store.deleteConversation('A');

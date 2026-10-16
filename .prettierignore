@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+vendor/
+test-results/
+playwright-report/
+tests/fixtures/
+docs/previews/
+package-lock.json
+.worktrees/
+.superpowers/

@@ -7,7 +7,15 @@ export const PACKAGE_NAME = 'language-assistant';
 export function packageRoot(start: string, maxLevels = 6): string | undefined {
   let dir = start;
   for (let level = 0; level < maxLevels; level += 1, dir = dirname(dir)) {
-    try { if ((JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown }).name === PACKAGE_NAME) return dir; } catch { /* keep walking up */ }
+    try {
+      if (
+        (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown }).name ===
+        PACKAGE_NAME
+      )
+        return dir;
+    } catch {
+      /* keep walking up */
+    }
     if (dirname(dir) === dir) break;
   }
   return undefined;

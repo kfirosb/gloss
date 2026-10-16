@@ -1,8 +1,18 @@
 export const TRANSLATION_PROMPT_VERSION = 'v2-natural-hebrew-english-terms';
 export const englishProductTerms = [
-  'Live Conversation', 'Language Assistant', 'Copy code', 'Send to Terminal',
-  'Codex', 'Claude Code', 'code blocks', 'code block',
-  'Markdown', 'Queue', 'layout', 'refresh', 'Codex',
+  'Live Conversation',
+  'Language Assistant',
+  'Copy code',
+  'Send to Terminal',
+  'Codex',
+  'Claude Code',
+  'code blocks',
+  'code block',
+  'Markdown',
+  'Queue',
+  'layout',
+  'refresh',
+  'Codex',
 ];
 export const isHebrew = (language: string) => /^(he(?:-[a-z0-9]+)*|hebrew)$/i.test(language.trim());
 export function languageStyle(language: string): string {

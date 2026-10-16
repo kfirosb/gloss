@@ -31,9 +31,15 @@ export class FakeAgent implements AgentAdapter {
   readonly detachedTargets: string[] = [];
   private eventsQueue: AgentEvent[] = [];
 
-  constructor(kind: AgentKind = 'codex') { this.kind = kind; }
-  async discover() { return []; }
-  emit(event: AgentEvent) { this.eventsQueue.push(event); }
+  constructor(kind: AgentKind = 'codex') {
+    this.kind = kind;
+  }
+  async discover() {
+    return [];
+  }
+  emit(event: AgentEvent) {
+    this.eventsQueue.push(event);
+  }
   async attach(target: Target): Promise<CodingConnection> {
     await this.attachGates.get(target.sessionRef);
     const agent = this;
@@ -54,12 +60,14 @@ export class FakeAgent implements AgentAdapter {
         }
       },
       async send(requestId, englishText, attachments) {
-        agent.sent.push({ requestId, englishText, ...(attachments?{attachments}:{}) });
+        agent.sent.push({ requestId, englishText, ...(attachments ? { attachments } : {}) });
         if (agent.sendGate) await agent.sendGate;
         if (agent.sendError) throw agent.sendError;
         return agent.result;
       },
-      async detach() { agent.detachedTargets.push(target.sessionRef); },
+      async detach() {
+        agent.detachedTargets.push(target.sessionRef);
+      },
     };
   }
 }

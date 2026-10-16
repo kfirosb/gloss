@@ -6,6 +6,8 @@ try {
   if (!statSync(binary).isFile()) throw new Error('not a file');
   accessSync(binary, constants.X_OK);
 } catch {
-  console.error(`Bundled whisper-server is missing or not executable: ${binary}\nRun npm run build:whisper first.`);
+  console.error(
+    `Bundled whisper-server is missing or not executable: ${binary}\nRun npm run build:whisper first.`,
+  );
   process.exit(1);
 }

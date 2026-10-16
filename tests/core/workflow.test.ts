@@ -9,28 +9,56 @@ describe('portable workflow', () => {
   it('keeps the verified live connection when older history cannot be read', async () => {
     const app = await createTestWorkflow({ target: false });
     const attach = app.agent.attach.bind(app.agent);
-    app.agent.attach = async target => ({
-      ...await attach(target),
-      history: async () => { throw new Error('Transcript record exceeds read bound'); },
+    app.agent.attach = async (target) => ({
+      ...(await attach(target)),
+      history: async () => {
+        throw new Error('Transcript record exceeds read bound');
+      },
     });
     try {
       await app.workflow.connect({ agent: 'codex', sessionRef: 'large-history', projectId: 'p1' });
       await expect.poll(() => app.workflow.snapshot().codingState).toBe('idle');
-      expect(app.workflow.snapshot().sourceGaps?.some(reason => reason.includes('history'))).toBe(true);
-      app.agent.emit({ type: 'message', message: { sourceId: 'live', revision: 1, role: 'user', text: 'Recent message', complete: true } });
-      await expect.poll(() => app.workflow.snapshot().codingMessages.some(message => message.sourceId === 'live')).toBe(true);
-    } finally { await app.workflow.close(); }
+      expect(app.workflow.snapshot().sourceGaps?.some((reason) => reason.includes('history'))).toBe(
+        true,
+      );
+      app.agent.emit({
+        type: 'message',
+        message: {
+          sourceId: 'live',
+          revision: 1,
+          role: 'user',
+          text: 'Recent message',
+          complete: true,
+        },
+      });
+      await expect
+        .poll(() =>
+          app.workflow.snapshot().codingMessages.some((message) => message.sourceId === 'live'),
+        )
+        .toBe(true);
+    } finally {
+      await app.workflow.close();
+    }
   });
   it('preserves discussion identity while streaming and marks only successful replies complete', async () => {
-    const app=await createTestWorkflow();let release!:()=>void;
-    app.language.discussGate=new Promise<void>(resolve=>{release=resolve;});
-    const pending=app.workflow.discuss('Hello');
-    await expect.poll(()=>app.workflow.snapshot().discussion.length).toBe(2);
-    const reply=app.workflow.snapshot().discussion[1]!;
-    expect(reply).toMatchObject({id:expect.any(String),complete:false});
+    const app = await createTestWorkflow();
+    let release!: () => void;
+    app.language.discussGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = app.workflow.discuss('Hello');
+    await expect.poll(() => app.workflow.snapshot().discussion.length).toBe(2);
+    const reply = app.workflow.snapshot().discussion[1]!;
+    expect(reply).toMatchObject({ id: expect.any(String), complete: false });
     expect(app.store.load('conversation-1')!.discussion[1]).toEqual(reply);
-    release();await pending;
-    expect(app.workflow.snapshot().discussion[1]).toMatchObject({id:reply.id,complete:true,text:app.language.discussionReply});await app.workflow.close();
+    release();
+    await pending;
+    expect(app.workflow.snapshot().discussion[1]).toMatchObject({
+      id: reply.id,
+      complete: true,
+      text: app.language.discussionReply,
+    });
+    await app.workflow.close();
   });
   it('removes only the confirmed sent draft and persists its removal', async () => {
     const app = await createTestWorkflow();
@@ -41,13 +69,16 @@ describe('portable workflow', () => {
     expect(app.workflow.snapshot().deliveries[0]?.state).toBe('sent');
     await app.workflow.close();
   });
-  it.each(['queued', 'failed', 'unconfirmed'] as const)('retains the draft when delivery is %s', async state => {
-    const app = await createTestWorkflow({ deliveryResult: { state } });
-    const draft = await app.workflow.prepare();
-    await app.workflow.send(draft.id, draft.revision);
-    expect(app.workflow.snapshot().currentDraft).toEqual(draft);
-    await app.workflow.close();
-  });
+  it.each(['queued', 'failed', 'unconfirmed'] as const)(
+    'retains the draft when delivery is %s',
+    async (state) => {
+      const app = await createTestWorkflow({ deliveryResult: { state } });
+      const draft = await app.workflow.prepare();
+      await app.workflow.send(draft.id, draft.revision);
+      expect(app.workflow.snapshot().currentDraft).toEqual(draft);
+      await app.workflow.close();
+    },
+  );
   it('clears a queued draft only on a later sent receipt', async () => {
     const app = await createTestWorkflow({ deliveryResult: { state: 'queued' } });
     const draft = await app.workflow.prepare();
@@ -58,22 +89,56 @@ describe('portable workflow', () => {
     await app.workflow.close();
   });
   it('completes the oldest pending Claude channel delivery when a native assistant reply arrives', async () => {
-    const agent = new FakeAgent('claude'); agent.result = { state: 'queued' }; agent.capabilities.sendWhileBusy = true;
-    const language = new FakeLanguageSession(); language.translationReply = 'Ask Claude'; const store = new MemoryConversationStore();
-    const workflow = createWorkflow({ conversationId: 'claude-panel', language: 'he', languageModel: 'test', languageSession: language, projectContext: '', agents: [agent], store });
+    const agent = new FakeAgent('claude');
+    agent.result = { state: 'queued' };
+    agent.capabilities.sendWhileBusy = true;
+    const language = new FakeLanguageSession();
+    language.translationReply = 'Ask Claude';
+    const store = new MemoryConversationStore();
+    const workflow = createWorkflow({
+      conversationId: 'claude-panel',
+      language: 'he',
+      languageModel: 'test',
+      languageSession: language,
+      projectContext: '',
+      agents: [agent],
+      store,
+    });
     await workflow.connect({ agent: 'claude', sessionRef: 'claude-session', projectId: 'p1' });
     await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
     await workflow.sendComposer('channel-request', 'Ask Claude', [], 'channel');
     expect(workflow.snapshot().deliveries[0]?.state).toBe('queued');
-    agent.emit({ type: 'message', message: { sourceId: 'native-answer', revision: 1, role: 'assistant', text: 'Claude answered', complete: true } });
+    agent.emit({
+      type: 'message',
+      message: {
+        sourceId: 'native-answer',
+        revision: 1,
+        role: 'assistant',
+        text: 'Claude answered',
+        complete: true,
+      },
+    });
     await expect.poll(() => workflow.snapshot().deliveries[0]?.state).toBe('sent');
-    expect(workflow.snapshot().codingMessages.some(message => message.sourceId === 'native-answer')).toBe(true);
+    expect(
+      workflow.snapshot().codingMessages.some((message) => message.sourceId === 'native-answer'),
+    ).toBe(true);
     await workflow.close();
   });
   it('completes every channel delivery Claude saw during the turn when two messages share one answer', async () => {
-    const agent = new FakeAgent('claude'); agent.result = { state: 'queued' }; agent.capabilities.sendWhileBusy = true;
-    const language = new FakeLanguageSession(); language.translationReply = 'Ask Claude';
-    const workflow = createWorkflow({ conversationId: 'claude-panel', language: 'he', languageModel: 'test', languageSession: language, projectContext: '', agents: [agent], store: new MemoryConversationStore() });
+    const agent = new FakeAgent('claude');
+    agent.result = { state: 'queued' };
+    agent.capabilities.sendWhileBusy = true;
+    const language = new FakeLanguageSession();
+    language.translationReply = 'Ask Claude';
+    const workflow = createWorkflow({
+      conversationId: 'claude-panel',
+      language: 'he',
+      languageModel: 'test',
+      languageSession: language,
+      projectContext: '',
+      agents: [agent],
+      store: new MemoryConversationStore(),
+    });
     await workflow.connect({ agent: 'claude', sessionRef: 'claude-session', projectId: 'p1' });
     await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
     await workflow.sendComposer('first', 'First question', [], 'channel');
@@ -82,18 +147,51 @@ describe('portable workflow', () => {
     const [first, second, third] = workflow.snapshot().deliveries;
     agent.emit({ type: 'channel-seen', requestId: first!.id });
     agent.emit({ type: 'channel-seen', requestId: second!.id });
-    agent.emit({ type: 'message', message: { sourceId: 'one-answer', revision: 1, role: 'assistant', text: 'Both answered', complete: true } });
-    await expect.poll(() => workflow.snapshot().deliveries.map(d => d.state)).toEqual(['sent', 'sent', 'queued']);
+    agent.emit({
+      type: 'message',
+      message: {
+        sourceId: 'one-answer',
+        revision: 1,
+        role: 'assistant',
+        text: 'Both answered',
+        complete: true,
+      },
+    });
+    await expect
+      .poll(() => workflow.snapshot().deliveries.map((d) => d.state))
+      .toEqual(['sent', 'sent', 'queued']);
     agent.emit({ type: 'channel-seen', requestId: third!.id });
-    agent.emit({ type: 'message', message: { sourceId: 'next-answer', revision: 2, role: 'assistant', text: 'Third answered', complete: true } });
-    await expect.poll(() => workflow.snapshot().deliveries.map(d => d.state)).toEqual(['sent', 'sent', 'sent']);
+    agent.emit({
+      type: 'message',
+      message: {
+        sourceId: 'next-answer',
+        revision: 2,
+        role: 'assistant',
+        text: 'Third answered',
+        complete: true,
+      },
+    });
+    await expect
+      .poll(() => workflow.snapshot().deliveries.map((d) => d.state))
+      .toEqual(['sent', 'sent', 'sent']);
     await workflow.close();
   });
   describe('Claude channel send while working', () => {
     async function claudeApp(state: 'working' | 'approval-required' | 'disconnected') {
-      const agent = new FakeAgent('claude'); agent.result = { state: 'queued' }; agent.capabilities.channelSendWhileBusy = true;
-      const language = new FakeLanguageSession(); language.translationReply = 'Ask Claude';
-      const workflow = createWorkflow({ conversationId: 'claude-busy', language: 'he', languageModel: 'test', languageSession: language, projectContext: '', agents: [agent], store: new MemoryConversationStore() });
+      const agent = new FakeAgent('claude');
+      agent.result = { state: 'queued' };
+      agent.capabilities.channelSendWhileBusy = true;
+      const language = new FakeLanguageSession();
+      language.translationReply = 'Ask Claude';
+      const workflow = createWorkflow({
+        conversationId: 'claude-busy',
+        language: 'he',
+        languageModel: 'test',
+        languageSession: language,
+        projectContext: '',
+        agents: [agent],
+        store: new MemoryConversationStore(),
+      });
       await workflow.connect({ agent: 'claude', sessionRef: 'claude-session', projectId: 'p1' });
       await expect.poll(() => workflow.snapshot().codingState).toBe('idle');
       agent.emit({ type: 'status', state });
@@ -106,20 +204,26 @@ describe('portable workflow', () => {
       expect(receipt.state).toBe('queued');
       expect(agent.sent).toHaveLength(1);
       // Same request id is idempotent: no second dispatch.
-      expect((await workflow.sendComposer('busy-1', 'Ask Claude', [], 'channel')).id).toBe(receipt.id);
+      expect((await workflow.sendComposer('busy-1', 'Ask Claude', [], 'channel')).id).toBe(
+        receipt.id,
+      );
       expect(agent.sent).toHaveLength(1);
       await workflow.close();
     });
     it('blocks peer composer send while working', async () => {
       const { agent, workflow } = await claudeApp('working');
-      await expect(workflow.sendComposer('busy-peer', 'Ask Claude', [], 'peer')).rejects.toThrow('Blocked');
+      await expect(workflow.sendComposer('busy-peer', 'Ask Claude', [], 'peer')).rejects.toThrow(
+        'Blocked',
+      );
       expect(agent.sent).toEqual([]);
       await workflow.close();
     });
     it('blocks channel send for approval-required and disconnected', async () => {
       for (const state of ['approval-required', 'disconnected'] as const) {
         const { agent, workflow } = await claudeApp(state);
-        await expect(workflow.sendComposer('busy-' + state, 'Ask Claude', [], 'channel')).rejects.toThrow();
+        await expect(
+          workflow.sendComposer('busy-' + state, 'Ask Claude', [], 'channel'),
+        ).rejects.toThrow();
         expect(agent.sent).toEqual([]);
         await workflow.close();
       }
@@ -127,7 +231,9 @@ describe('portable workflow', () => {
     it('allows prepared review send over channel but not peer while working', async () => {
       const { agent, workflow } = await claudeApp('working');
       const draft = await workflow.prepare();
-      await expect(workflow.send(draft.id, draft.revision, 'peer')).rejects.toThrow('Agent is busy');
+      await expect(workflow.send(draft.id, draft.revision, 'peer')).rejects.toThrow(
+        'Agent is busy',
+      );
       const receipt = await workflow.send(draft.id, draft.revision, 'channel');
       expect(receipt.state).toBe('queued');
       expect(agent.sent).toHaveLength(1);
@@ -147,10 +253,34 @@ describe('portable workflow', () => {
 
   it('ingests bridge messages idempotently and keeps source order', async () => {
     const app = await createTestWorkflow();
-    app.workflow.ingestSourceMessage({ sourceSessionId: 'session-1', sourceId: 'm2', sequence: 2, role: 'assistant', text: 'second', cursor: 'c2' });
-    app.workflow.ingestSourceMessage({ sourceSessionId: 'session-1', sourceId: 'm1', sequence: 1, role: 'user', text: 'first', cursor: 'c1' });
-    app.workflow.ingestSourceMessage({ sourceSessionId: 'session-1', sourceId: 'm2', sequence: 2, role: 'assistant', text: 'second', cursor: 'c2' });
-    expect(app.workflow.snapshot().codingMessages.map(message => message.sourceId)).toEqual(['m1', 'm2']);
+    app.workflow.ingestSourceMessage({
+      sourceSessionId: 'session-1',
+      sourceId: 'm2',
+      sequence: 2,
+      role: 'assistant',
+      text: 'second',
+      cursor: 'c2',
+    });
+    app.workflow.ingestSourceMessage({
+      sourceSessionId: 'session-1',
+      sourceId: 'm1',
+      sequence: 1,
+      role: 'user',
+      text: 'first',
+      cursor: 'c1',
+    });
+    app.workflow.ingestSourceMessage({
+      sourceSessionId: 'session-1',
+      sourceId: 'm2',
+      sequence: 2,
+      role: 'assistant',
+      text: 'second',
+      cursor: 'c2',
+    });
+    expect(app.workflow.snapshot().codingMessages.map((message) => message.sourceId)).toEqual([
+      'm1',
+      'm2',
+    ]);
     expect(app.workflow.snapshot().sourceRevision).toBe(2);
     expect(app.workflow.snapshot().sourceCursor).toBe('c2');
   });
@@ -167,7 +297,10 @@ describe('portable workflow', () => {
       { sourceId: 'newer', revision: 1, role: 'assistant', text: 'newer', complete: true },
     ]);
     await app.workflow.connect({ agent: 'codex', sessionRef: 'same', projectId: 'p1' });
-    expect(app.workflow.snapshot().codingMessages.map(({ sourceId }) => sourceId)).toEqual(['older', 'newer']);
+    expect(app.workflow.snapshot().codingMessages.map(({ sourceId }) => sourceId)).toEqual([
+      'older',
+      'newer',
+    ]);
     expect(app.workflow.snapshot().sourceRevision).toBe(revision);
   });
 
@@ -178,9 +311,13 @@ describe('portable workflow', () => {
     store.writeContext('p1', 'secret note');
     language.retainProjectContext = true;
     const workflow = createWorkflow({
-      conversationId: 'dynamic-context', language: 'he', languageModel: 'm1',
-      projectContext: () => store.readContext('p1') ?? '', languageSession: language,
-      agents: [agent], store,
+      conversationId: 'dynamic-context',
+      language: 'he',
+      languageModel: 'm1',
+      projectContext: () => store.readContext('p1') ?? '',
+      languageSession: language,
+      agents: [agent],
+      store,
     });
     await workflow.connect({ agent: 'codex', sessionRef: 'session-1', projectId: 'p1' });
     await workflow.discuss('first');
@@ -198,7 +335,9 @@ describe('portable workflow', () => {
     app.language.ignoreAbort = true;
     app.language.retainProjectContext = true;
     app.language.retainContextOnCompletion = true;
-    app.language.discussGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.discussGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const discussion = app.workflow.discuss('old context work');
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     const invalidation = app.workflow.invalidateProjectContext();
@@ -208,7 +347,12 @@ describe('portable workflow', () => {
     await invalidation;
     expect(app.language.resetContextCalls).toBe(1);
     expect(app.language.retainedProjectContext).toBe('');
-    expect(app.workflow.snapshot().discussion.at(-1)).toEqual({ id:expect.any(String),complete:false,role: 'assistant', text: '' });
+    expect(app.workflow.snapshot().discussion.at(-1)).toEqual({
+      id: expect.any(String),
+      complete: false,
+      role: 'assistant',
+      text: '',
+    });
   });
 
   it('builds a prepare input after an in-progress context reset', async () => {
@@ -217,10 +361,17 @@ describe('portable workflow', () => {
     const store = new MemoryConversationStore();
     let context = 'before reset';
     let releaseReset!: () => void;
-    language.resetContextGate = new Promise<void>((resolve) => { releaseReset = resolve; });
+    language.resetContextGate = new Promise<void>((resolve) => {
+      releaseReset = resolve;
+    });
     const workflow = createWorkflow({
-      conversationId: 'reset-gate', language: 'he', languageModel: 'm1',
-      projectContext: () => context, languageSession: language, agents: [agent], store,
+      conversationId: 'reset-gate',
+      language: 'he',
+      languageModel: 'm1',
+      projectContext: () => context,
+      languageSession: language,
+      agents: [agent],
+      store,
     });
     await workflow.connect({ agent: 'codex', sessionRef: 'session-1', projectId: 'p1' });
     const invalidation = workflow.invalidateProjectContext();
@@ -236,14 +387,35 @@ describe('portable workflow', () => {
   it('keeps the newest target when an older connection finishes later', async () => {
     const app = await createTestWorkflow();
     let releaseOld!: () => void;
-    app.agent.attachGates.set('old', new Promise<void>((resolve) => { releaseOld = resolve; }));
-    app.agent.historyMessages.set('old', [{
-      sourceId: 'old-message', revision: 1, role: 'assistant', text: 'old', complete: true,
-    }]);
-    app.agent.historyMessages.set('new', [{
-      sourceId: 'new-message', revision: 1, role: 'assistant', text: 'new', complete: true,
-    }]);
-    const oldConnection = app.workflow.connect({ agent: 'codex', sessionRef: 'old', projectId: 'p1' });
+    app.agent.attachGates.set(
+      'old',
+      new Promise<void>((resolve) => {
+        releaseOld = resolve;
+      }),
+    );
+    app.agent.historyMessages.set('old', [
+      {
+        sourceId: 'old-message',
+        revision: 1,
+        role: 'assistant',
+        text: 'old',
+        complete: true,
+      },
+    ]);
+    app.agent.historyMessages.set('new', [
+      {
+        sourceId: 'new-message',
+        revision: 1,
+        role: 'assistant',
+        text: 'new',
+        complete: true,
+      },
+    ]);
+    const oldConnection = app.workflow.connect({
+      agent: 'codex',
+      sessionRef: 'old',
+      projectId: 'p1',
+    });
     await app.workflow.connect({ agent: 'codex', sessionRef: 'new', projectId: 'p1' });
     releaseOld();
     await oldConnection;
@@ -257,26 +429,55 @@ describe('portable workflow', () => {
   it('does not let stale history overwrite a newer target', async () => {
     const app = await createTestWorkflow();
     let releaseHistory!: () => void;
-    app.agent.historyGates.set('old', new Promise<void>((resolve) => { releaseHistory = resolve; }));
-    app.agent.historyMessages.set('old', [{
-      sourceId: 'old-message', revision: 1, role: 'assistant', text: 'old', complete: true,
-    }]);
-    app.agent.historyMessages.set('new', [{
-      sourceId: 'new-message', revision: 1, role: 'assistant', text: 'new', complete: true,
-    }]);
-    const oldConnection = app.workflow.connect({ agent: 'codex', sessionRef: 'old', projectId: 'p1' });
+    app.agent.historyGates.set(
+      'old',
+      new Promise<void>((resolve) => {
+        releaseHistory = resolve;
+      }),
+    );
+    app.agent.historyMessages.set('old', [
+      {
+        sourceId: 'old-message',
+        revision: 1,
+        role: 'assistant',
+        text: 'old',
+        complete: true,
+      },
+    ]);
+    app.agent.historyMessages.set('new', [
+      {
+        sourceId: 'new-message',
+        revision: 1,
+        role: 'assistant',
+        text: 'new',
+        complete: true,
+      },
+    ]);
+    const oldConnection = app.workflow.connect({
+      agent: 'codex',
+      sessionRef: 'old',
+      projectId: 'p1',
+    });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.connect({ agent: 'codex', sessionRef: 'new', projectId: 'p1' });
     releaseHistory();
     await oldConnection;
-    expect(app.workflow.snapshot().codingMessages.map((message) => message.sourceId)).toEqual(['new-message']);
+    expect(app.workflow.snapshot().codingMessages.map((message) => message.sourceId)).toEqual([
+      'new-message',
+    ]);
   });
 
   it('clears messages when the new target does not expose history', async () => {
     const app = await createTestWorkflow();
-    app.agent.historyMessages.set('with-history', [{
-      sourceId: 'message', revision: 1, role: 'assistant', text: 'history', complete: true,
-    }]);
+    app.agent.historyMessages.set('with-history', [
+      {
+        sourceId: 'message',
+        revision: 1,
+        role: 'assistant',
+        text: 'history',
+        complete: true,
+      },
+    ]);
     await app.workflow.connect({ agent: 'codex', sessionRef: 'with-history', projectId: 'p1' });
     app.agent.capabilities.history = false;
     await app.workflow.connect({ agent: 'codex', sessionRef: 'without-history', projectId: 'p1' });
@@ -286,8 +487,17 @@ describe('portable workflow', () => {
   it('detaches an attachment that completes after close', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
-    app.agent.attachGates.set('late', new Promise<void>((resolve) => { release = resolve; }));
-    const connecting = app.workflow.connect({ agent: 'codex', sessionRef: 'late', projectId: 'p1' });
+    app.agent.attachGates.set(
+      'late',
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const connecting = app.workflow.connect({
+      agent: 'codex',
+      sessionRef: 'late',
+      projectId: 'p1',
+    });
     await app.workflow.close();
     release();
     await expect(connecting).rejects.toThrow('Workflow is closed');
@@ -297,8 +507,17 @@ describe('portable workflow', () => {
   it('detaches a connection whose history completes after close', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
-    app.agent.historyGates.set('late-history', new Promise<void>((resolve) => { release = resolve; }));
-    const connecting = app.workflow.connect({ agent: 'codex', sessionRef: 'late-history', projectId: 'p1' });
+    app.agent.historyGates.set(
+      'late-history',
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const connecting = app.workflow.connect({
+      agent: 'codex',
+      sessionRef: 'late-history',
+      projectId: 'p1',
+    });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.close();
     release();
@@ -310,20 +529,29 @@ describe('portable workflow', () => {
     const app = await createTestWorkflow();
     let release!: () => void;
     app.language.ignoreAbort = true;
-    app.language.discussGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.discussGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const discussion = app.workflow.discuss('late');
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.close();
     release();
     await expect(discussion).rejects.toThrow('Workflow is closed');
-    expect(app.workflow.snapshot().discussion.at(-1)).toEqual({ id:expect.any(String),complete:false,role: 'assistant', text: '' });
+    expect(app.workflow.snapshot().discussion.at(-1)).toEqual({
+      id: expect.any(String),
+      complete: false,
+      role: 'assistant',
+      text: '',
+    });
   });
 
   it('ignores a late preparation response after close even if the backend ignores cancellation', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
     app.language.ignoreAbort = true;
-    app.language.prepareGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.prepareGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const preparation = app.workflow.prepare();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.close();
@@ -337,7 +565,9 @@ describe('portable workflow', () => {
     const draft = await app.workflow.prepare();
     let release!: () => void;
     app.language.ignoreAbort = true;
-    app.language.prepareGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.prepareGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const revision = app.workflow.reviseDraft(draft.id, 'late revision');
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.close();
@@ -350,7 +580,9 @@ describe('portable workflow', () => {
     const app = await createTestWorkflow();
     const draft = await app.workflow.prepare();
     let release!: () => void;
-    app.agent.sendGate = new Promise<void>((resolve) => { release = resolve; });
+    app.agent.sendGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const sending = app.workflow.send(draft.id, draft.revision);
     app.agent.capabilities.acknowledgement = 'none';
     await app.workflow.connect({ agent: 'codex', sessionRef: 'new', projectId: 'p1' });
@@ -361,13 +593,15 @@ describe('portable workflow', () => {
   it('keeps concurrent discussion replies paired with their user turns', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
-    app.language.discussGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.discussGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     app.language.discussionReply = 'reply';
     const first = app.workflow.discuss('first');
     const second = app.workflow.discuss('second');
     release();
     await Promise.all([first, second]);
-    expect(app.workflow.snapshot().discussion.map(({id,complete,...turn})=>turn)).toEqual([
+    expect(app.workflow.snapshot().discussion.map(({ id, complete, ...turn }) => turn)).toEqual([
       { role: 'user', text: 'first' },
       { role: 'assistant', text: 'reply' },
       { role: 'user', text: 'second' },
@@ -378,7 +612,9 @@ describe('portable workflow', () => {
   it('aborts active language work when closed', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
-    app.language.discussGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.discussGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const discussion = app.workflow.discuss('wait');
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await app.workflow.close();
@@ -390,7 +626,9 @@ describe('portable workflow', () => {
   it('does not publish a draft if the target changes while preparation is running', async () => {
     const app = await createTestWorkflow();
     let release!: () => void;
-    app.language.prepareGate = new Promise<void>((resolve) => { release = resolve; });
+    app.language.prepareGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const preparation = app.workflow.prepare();
     await app.workflow.connect({ agent: 'codex', sessionRef: 'other', projectId: 'p1' });
     release();
@@ -409,7 +647,7 @@ describe('portable workflow', () => {
     unsubscribe();
     await app.workflow.prepare();
     expect(updates).toContain('Explain it|הנה הסבר');
-    expect(app.workflow.snapshot().discussion.map(({id,complete,...turn})=>turn)).toEqual([
+    expect(app.workflow.snapshot().discussion.map(({ id, complete, ...turn }) => turn)).toEqual([
       { role: 'user', text: 'Explain it' },
       { role: 'assistant', text: 'הנה הסבר' },
     ]);
@@ -434,7 +672,9 @@ describe('portable workflow', () => {
     const app = await createTestWorkflow();
     const draft = await app.workflow.prepare();
     let release!: () => void;
-    app.agent.sendGate = new Promise<void>((resolve) => { release = resolve; });
+    app.agent.sendGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const first = app.workflow.send(draft.id, draft.revision);
     const duplicate = app.workflow.send(draft.id, draft.revision);
     release();
@@ -447,7 +687,9 @@ describe('portable workflow', () => {
     const app = await createTestWorkflow();
     const draft = await app.workflow.prepare();
     await app.workflow.reviseDraft(draft.id, 'שנה את ההוראה');
-    await expect(app.workflow.send(draft.id, draft.revision)).rejects.toThrow('Stale draft revision');
+    await expect(app.workflow.send(draft.id, draft.revision)).rejects.toThrow(
+      'Stale draft revision',
+    );
     expect(app.agent.sent).toEqual([]);
   });
 
@@ -455,12 +697,12 @@ describe('portable workflow', () => {
     const app = await createTestWorkflow();
     const draft = await app.workflow.prepare();
     await app.workflow.send(draft.id, draft.revision);
-    expect(app.store.operationLog).toEqual(expect.arrayContaining([
-      `claim:${draft.id}:${draft.revision}`,
-      'update:sent',
-    ]));
-    expect(app.store.operationLog.indexOf(`claim:${draft.id}:${draft.revision}`))
-      .toBeLessThan(app.store.operationLog.indexOf('update:sent'));
+    expect(app.store.operationLog).toEqual(
+      expect.arrayContaining([`claim:${draft.id}:${draft.revision}`, 'update:sent']),
+    );
+    expect(app.store.operationLog.indexOf(`claim:${draft.id}:${draft.revision}`)).toBeLessThan(
+      app.store.operationLog.indexOf('update:sent'),
+    );
   });
 
   it.each([
@@ -478,7 +720,8 @@ describe('portable workflow', () => {
 
   it('allows delivery while working when the connection supports queueing', async () => {
     const app = await createTestWorkflow({
-      codingState: 'working', capabilities: { sendWhileBusy: true },
+      codingState: 'working',
+      capabilities: { sendWhileBusy: true },
       deliveryResult: { state: 'queued' },
     });
     const draft = await app.workflow.prepare();
@@ -487,26 +730,36 @@ describe('portable workflow', () => {
     expect(app.agent.sent).toHaveLength(1);
   });
 
-  it.each(['return', 'throw'] as const)('preserves correlated sent evidence racing a transport %s', async outcome => {
-    const app = await createTestWorkflow({ deliveryResult: { state: 'unconfirmed' } });
-    const draft = await app.workflow.prepare(); let release!: () => void;
-    app.agent.sendGate = new Promise<void>(resolve => { release = resolve; });
-    if (outcome === 'throw') app.agent.sendError = new Error('late transport error');
-    const pending = app.workflow.send(draft.id, draft.revision);
-    const requestId = app.agent.sent[0]!.requestId;
-    app.agent.emit({ type: 'delivery', requestId, state: 'sent' });
-    await expect.poll(() => app.workflow.snapshot().deliveries[0]?.state).toBe('sent');
-    release(); expect((await pending).state).toBe('sent');
-    app.agent.emit({ type: 'delivery', requestId, state: 'unconfirmed' });
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(app.workflow.snapshot().deliveries[0]?.state).toBe('sent');
-    await app.workflow.close();
-  });
+  it.each(['return', 'throw'] as const)(
+    'preserves correlated sent evidence racing a transport %s',
+    async (outcome) => {
+      const app = await createTestWorkflow({ deliveryResult: { state: 'unconfirmed' } });
+      const draft = await app.workflow.prepare();
+      let release!: () => void;
+      app.agent.sendGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      if (outcome === 'throw') app.agent.sendError = new Error('late transport error');
+      const pending = app.workflow.send(draft.id, draft.revision);
+      const requestId = app.agent.sent[0]!.requestId;
+      app.agent.emit({ type: 'delivery', requestId, state: 'sent' });
+      await expect.poll(() => app.workflow.snapshot().deliveries[0]?.state).toBe('sent');
+      release();
+      expect((await pending).state).toBe('sent');
+      app.agent.emit({ type: 'delivery', requestId, state: 'unconfirmed' });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(app.workflow.snapshot().deliveries[0]?.state).toBe('sent');
+      await app.workflow.close();
+    },
+  );
   it('records a definitive transport rejection as failed', async () => {
-    const app = await createTestWorkflow({ deliveryResult: { state: 'failed', reason: 'rejected' } });
+    const app = await createTestWorkflow({
+      deliveryResult: { state: 'failed', reason: 'rejected' },
+    });
     const draft = await app.workflow.prepare();
     await expect(app.workflow.send(draft.id, draft.revision)).resolves.toMatchObject({
-      state: 'failed', reason: 'rejected',
+      state: 'failed',
+      reason: 'rejected',
     });
   });
 

@@ -1,14 +1,101 @@
-import {test,expect} from '@playwright/test';
-import {mockSession,basicSnapshot} from './session-fixture.js';
-const hebrew='\u05d6\u05d4\u05d5 \u05e7\u05d5\u05d1\u05e5 \u05d4\u05ea\u05d9\u05e2\u05d5\u05d3';
-const reply='@File 2 **Language Assistant** `README.md` '+hebrew+'\n\n'+hebrew+'\n\n- Codex '+hebrew+'\n- **Prepare instruction** '+hebrew+'\n\n> '+hebrew+'\n\n```js\nconst file = "README.md";\n```';
-for(const [width,height,language] of [[1280,900,'he'],[390,700,'Hebrew'],[900,450,'he-IL']] as const)test(`Hebrew replies keep RTL despite English opening at ${width}x${height}`,async({page})=>{
- await page.setViewportSize({width:width!,height:height!});const snapshot={...basicSnapshot(),language,discussion:[{role:'user',text:'Explain README.md'},{role:'assistant',text:reply}],codingMessages:[{sourceId:'rtl-source',revision:1,role:'assistant',text:'English original',translatedText:reply,translationStatus:'complete',complete:true}],currentDraft:{id:'rtl-review',revision:1,target:basicSnapshot().target,sourceRevision:1,language,localizedText:reply,englishText:'English instruction'}};
- await mockSession(page,()=>snapshot);await page.route('**/events',r=>r.fulfill({contentType:'text/event-stream',body:''}));await page.goto('/#capability=test');
- const assertRtl=async(container:import('@playwright/test').Locator)=>{const rich=container.locator('.rich-text').first();await expect(rich).toHaveCSS('direction','rtl');await expect(rich.locator('bdi').first()).toHaveText('@File 2');await expect(rich.locator('bdi').first()).toHaveCSS('direction','ltr');await expect(rich.locator('li').first()).toHaveCSS('direction','rtl');await expect(rich.locator('.code-block pre')).toHaveCSS('direction','ltr');await expect(rich.locator('p > code').first()).toHaveCSS('direction','ltr');const aligned=await rich.locator(':scope > p').nth(1).evaluate(p=>{const range=document.createRange();range.selectNodeContents(p);return Math.abs(range.getBoundingClientRect().right-p.getBoundingClientRect().right)<3;});expect(aligned).toBe(true);};
- await assertRtl(page.locator('.discussion'));await assertRtl(page.locator('.feed'));
- await page.getByRole('button',{name:'Expand Language Assistant',exact:true}).click();const expanded=page.getByRole('dialog',{name:'Language Assistant expanded'});await assertRtl(expanded);await expanded.getByRole('button',{name:'Restore',exact:true}).click();
- await page.getByRole('button',{name:'Add to answer',exact:true}).click();await page.getByRole('button',{name:'1 selected',exact:true}).click();const selection=page.getByRole('dialog',{name:'Selected messages'});await assertRtl(selection);await selection.getByRole('button',{name:'Close Selected messages'}).click();
- await page.getByRole('button',{name:'Resume review',exact:true}).click();const review=page.getByRole('dialog',{name:'Review instruction'});await assertRtl(review);await review.getByRole('button',{name:'Close review'}).click();await page.reload();await assertRtl(page.locator('.discussion'));
- await page.getByRole('button',{name:'History Language Assistant',exact:true}).click();await expect(page.locator('.discussion .message.user .rich-text')).toHaveCSS('direction','ltr');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-});
+import { test, expect } from '@playwright/test';
+import { mockSession, basicSnapshot } from './session-fixture.js';
+const hebrew = '\u05d6\u05d4\u05d5 \u05e7\u05d5\u05d1\u05e5 \u05d4\u05ea\u05d9\u05e2\u05d5\u05d3';
+const reply =
+  '@File 2 **Language Assistant** `README.md` ' +
+  hebrew +
+  '\n\n' +
+  hebrew +
+  '\n\n- Codex ' +
+  hebrew +
+  '\n- **Prepare instruction** ' +
+  hebrew +
+  '\n\n> ' +
+  hebrew +
+  '\n\n```js\nconst file = "README.md";\n```';
+for (const [width, height, language] of [
+  [1280, 900, 'he'],
+  [390, 700, 'Hebrew'],
+  [900, 450, 'he-IL'],
+] as const)
+  test(`Hebrew replies keep RTL despite English opening at ${width}x${height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: width!, height: height! });
+    const snapshot = {
+      ...basicSnapshot(),
+      language,
+      discussion: [
+        { role: 'user', text: 'Explain README.md' },
+        { role: 'assistant', text: reply },
+      ],
+      codingMessages: [
+        {
+          sourceId: 'rtl-source',
+          revision: 1,
+          role: 'assistant',
+          text: 'English original',
+          translatedText: reply,
+          translationStatus: 'complete',
+          complete: true,
+        },
+      ],
+      currentDraft: {
+        id: 'rtl-review',
+        revision: 1,
+        target: basicSnapshot().target,
+        sourceRevision: 1,
+        language,
+        localizedText: reply,
+        englishText: 'English instruction',
+      },
+    };
+    await mockSession(page, () => snapshot);
+    await page.route('**/events', (r) => r.fulfill({ contentType: 'text/event-stream', body: '' }));
+    await page.goto('/#capability=test');
+    const assertRtl = async (container: import('@playwright/test').Locator) => {
+      const rich = container.locator('.rich-text').first();
+      await expect(rich).toHaveCSS('direction', 'rtl');
+      await expect(rich.locator('bdi').first()).toHaveText('@File 2');
+      await expect(rich.locator('bdi').first()).toHaveCSS('direction', 'ltr');
+      await expect(rich.locator('li').first()).toHaveCSS('direction', 'rtl');
+      await expect(rich.locator('.code-block pre')).toHaveCSS('direction', 'ltr');
+      await expect(rich.locator('p > code').first()).toHaveCSS('direction', 'ltr');
+      const aligned = await rich
+        .locator(':scope > p')
+        .nth(1)
+        .evaluate((p) => {
+          const range = document.createRange();
+          range.selectNodeContents(p);
+          return (
+            Math.abs(range.getBoundingClientRect().right - p.getBoundingClientRect().right) < 3
+          );
+        });
+      expect(aligned).toBe(true);
+    };
+    await assertRtl(page.locator('.discussion'));
+    await assertRtl(page.locator('.feed'));
+    await page.getByRole('button', { name: 'Expand Language Assistant', exact: true }).click();
+    const expanded = page.getByRole('dialog', { name: 'Language Assistant expanded' });
+    await assertRtl(expanded);
+    await expanded.getByRole('button', { name: 'Restore', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to answer', exact: true }).click();
+    await page.getByRole('button', { name: '1 selected', exact: true }).click();
+    const selection = page.getByRole('dialog', { name: 'Selected messages' });
+    await assertRtl(selection);
+    await selection.getByRole('button', { name: 'Close Selected messages' }).click();
+    await page.getByRole('button', { name: 'Resume review', exact: true }).click();
+    const review = page.getByRole('dialog', { name: 'Review instruction' });
+    await assertRtl(review);
+    await review.getByRole('button', { name: 'Close review' }).click();
+    await page.reload();
+    await assertRtl(page.locator('.discussion'));
+    await page.getByRole('button', { name: 'History Language Assistant', exact: true }).click();
+    await expect(page.locator('.discussion .message.user .rich-text')).toHaveCSS(
+      'direction',
+      'ltr',
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  });

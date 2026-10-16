@@ -14,9 +14,58 @@ import { uuid } from '../shared.js';
 export const ATTACH_CLOCK_SKEW_MS = 2000;
 
 /** Native subcommands that are not an interactive terminal client of a thread. `resume` and `fork` are clients. */
-const NON_CLIENT_SUBCOMMANDS = new Set(['agents', 'exec', 'e', 'review', 'login', 'logout', 'mcp', 'plugin', 'app-server', 'remote-control', 'app', 'completion', 'update', 'doctor', 'sandbox', 'debug', 'apply', 'a', 'queue', 'archive', 'delete', 'migrate-rollouts', 'unarchive', 'cloud', 'exec-server', 'features', 'help']);
+const NON_CLIENT_SUBCOMMANDS = new Set([
+  'agents',
+  'exec',
+  'e',
+  'review',
+  'login',
+  'logout',
+  'mcp',
+  'plugin',
+  'app-server',
+  'remote-control',
+  'app',
+  'completion',
+  'update',
+  'doctor',
+  'sandbox',
+  'debug',
+  'apply',
+  'a',
+  'queue',
+  'archive',
+  'delete',
+  'migrate-rollouts',
+  'unarchive',
+  'cloud',
+  'exec-server',
+  'features',
+  'help',
+]);
 /** Top-level options that take a value, so the value is not mistaken for the prompt or a subcommand. */
-const VALUE_OPTIONS = new Set(['-c', '--config', '--enable', '--disable', '--remote', '--remote-auth-token-env', '-i', '--image', '-m', '--model', '--local-provider', '-p', '--profile', '-s', '--sandbox', '-C', '--cd', '--add-dir', '-a', '--ask-for-approval']);
+const VALUE_OPTIONS = new Set([
+  '-c',
+  '--config',
+  '--enable',
+  '--disable',
+  '--remote',
+  '--remote-auth-token-env',
+  '-i',
+  '--image',
+  '-m',
+  '--model',
+  '--local-provider',
+  '-p',
+  '--profile',
+  '-s',
+  '--sandbox',
+  '-C',
+  '--cd',
+  '--add-dir',
+  '-a',
+  '--ask-for-approval',
+]);
 
 export interface CodexProcess {
   pid: number;
@@ -34,7 +83,9 @@ export function parseElapsed(text: string): number | undefined {
   const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text.trim());
   if (!match) return undefined;
   const [, days = '0', hours = '0', minutes, seconds] = match;
-  return (((Number(days) * 24 + Number(hours)) * 60 + Number(minutes)) * 60 + Number(seconds!)) * 1000;
+  return (
+    (((Number(days) * 24 + Number(hours)) * 60 + Number(minutes)) * 60 + Number(seconds!)) * 1000
+  );
 }
 
 /** Classifies a `codex` command line (argv[0] included) as the app-server daemon, a terminal client, or other. */
@@ -42,13 +93,20 @@ export function classifyCodexCommand(args: string): Pick<CodexProcess, 'role' | 
   // ps joins argv with spaces, so locate the end of the executable path by its `codex` basename.
   const executable = /(?:^|\/)codex(?=\s|$)/.exec(args);
   if (!executable) return { role: 'other' };
-  const tokens = args.slice(executable.index + executable[0].length).trim().split(/\s+/).filter(Boolean);
+  const tokens = args
+    .slice(executable.index + executable[0].length)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   if (tokens.includes('app-server')) return { role: 'daemon' };
   let cd: string | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (token === '--') break;
-    const [name, inline] = token.startsWith('--') && token.includes('=') ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)] : [token, undefined];
+    const [name, inline] =
+      token.startsWith('--') && token.includes('=')
+        ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)]
+        : [token, undefined];
     if (VALUE_OPTIONS.has(name)) {
       const value = inline ?? tokens[++i];
       if ((name === '-C' || name === '--cd') && value) cd = value;
@@ -58,8 +116,12 @@ export function classifyCodexCommand(args: string): Pick<CodexProcess, 'role' | 
     // The first positional is a subcommand or the user prompt.
     if (NON_CLIENT_SUBCOMMANDS.has(token)) return { role: 'other' };
     if (token === 'resume') {
-      const next = tokens.slice(i + 1).find(t => !t.startsWith('-'));
-      return { role: 'client', ...(next && uuid.test(next) ? { resume: next } : {}), ...(cd ? { cd } : {}) };
+      const next = tokens.slice(i + 1).find((t) => !t.startsWith('-'));
+      return {
+        role: 'client',
+        ...(next && uuid.test(next) ? { resume: next } : {}),
+        ...(cd ? { cd } : {}),
+      };
     }
     break;
   }
@@ -67,9 +129,19 @@ export function classifyCodexCommand(args: string): Pick<CodexProcess, 'role' | 
 }
 
 /** One shell-free `ps` over the process table; only processes whose short name is `codex` are kept. */
-export async function codexProcesses(runner: ProcessRunner, signal: AbortSignal, now: number): Promise<Map<number, CodexProcess>> {
-  const result = await collectProcess(runner('/bin/ps', ['-axww', '-o', 'pid=,etime=,ucomm=,args='], '', signal, { timeoutMs: 3000, maxOutputBytes: 4 * 1024 * 1024 }));
-  if (result.outcome.reason !== 'exited' || result.outcome.code !== 0) throw new Error('Codex process probe failed');
+export async function codexProcesses(
+  runner: ProcessRunner,
+  signal: AbortSignal,
+  now: number,
+): Promise<Map<number, CodexProcess>> {
+  const result = await collectProcess(
+    runner('/bin/ps', ['-axww', '-o', 'pid=,etime=,ucomm=,args='], '', signal, {
+      timeoutMs: 3000,
+      maxOutputBytes: 4 * 1024 * 1024,
+    }),
+  );
+  if (result.outcome.reason !== 'exited' || result.outcome.code !== 0)
+    throw new Error('Codex process probe failed');
   const processes = new Map<number, CodexProcess>();
   for (const line of result.lines) {
     const match = /^\s*(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/.exec(line);
@@ -83,15 +155,26 @@ export async function codexProcesses(runner: ProcessRunner, signal: AbortSignal,
 }
 
 /** Working directories of the given processes, from one read-only `lsof`. Exited processes are simply missing. */
-export async function processDirectories(pids: number[], runner: ProcessRunner, signal: AbortSignal): Promise<Map<number, string>> {
+export async function processDirectories(
+  pids: number[],
+  runner: ProcessRunner,
+  signal: AbortSignal,
+): Promise<Map<number, string>> {
   const directories = new Map<number, string>();
   if (!pids.length) return directories;
-  const result = await collectProcess(runner('/usr/sbin/lsof', ['-a', '-d', 'cwd', '-Fpn', '-p', pids.join(',')], '', signal, { timeoutMs: 3000, maxOutputBytes: 256 * 1024 }));
-  if (result.outcome.reason !== 'exited' || ![0, 1].includes(result.outcome.code ?? -1)) throw new Error('Codex client directory probe failed');
+  const result = await collectProcess(
+    runner('/usr/sbin/lsof', ['-a', '-d', 'cwd', '-Fpn', '-p', pids.join(',')], '', signal, {
+      timeoutMs: 3000,
+      maxOutputBytes: 256 * 1024,
+    }),
+  );
+  if (result.outcome.reason !== 'exited' || ![0, 1].includes(result.outcome.code ?? -1))
+    throw new Error('Codex client directory probe failed');
   let pid = 0;
   for (const line of result.lines) {
     if (/^p\d+$/.test(line)) pid = Number(line.slice(1));
-    else if (line.startsWith('n') && pid && isAbsolute(line.slice(1)) && !directories.has(pid)) directories.set(pid, line.slice(1));
+    else if (line.startsWith('n') && pid && isAbsolute(line.slice(1)) && !directories.has(pid))
+      directories.set(pid, line.slice(1));
   }
   return directories;
 }
@@ -104,7 +187,10 @@ export interface LockedThread {
   cwd?: string;
   createdAt?: number;
 }
-export interface ThreadLiveness { open: boolean; reason: string }
+export interface ThreadLiveness {
+  open: boolean;
+  reason: string;
+}
 /** For threads Gloss launched: true while the launch's tmux session runs, false once it ended. */
 export type LaunchedLiveness = (sessionRef: string) => boolean | undefined;
 
@@ -117,20 +203,36 @@ export type LaunchedLiveness = (sessionRef: string) => boolean | undefined;
  *    or a client running in the thread's folder started before the thread was created. A client can show one thread
  *    at a time, so each client claims at most one thread (the newest it could have created). Anything else is closed.
  */
-export function decideLiveness(threads: LockedThread[], processes: ReadonlyMap<number, CodexProcess>, directories: ReadonlyMap<number, string>, launched?: LaunchedLiveness): Map<string, ThreadLiveness> {
+export function decideLiveness(
+  threads: LockedThread[],
+  processes: ReadonlyMap<number, CodexProcess>,
+  directories: ReadonlyMap<number, string>,
+  launched?: LaunchedLiveness,
+): Map<string, ThreadLiveness> {
   const result = new Map<string, ThreadLiveness>();
-  const lockOwners = new Set(threads.map(t => t.ownerPid));
+  const lockOwners = new Set(threads.map((t) => t.ownerPid));
   // Clients of the daemon: terminal clients that do not hold a writer lock of their own.
-  const clients = [...processes.values()].filter(p => p.role === 'client' && !lockOwners.has(p.pid));
-  const resumed = new Set(clients.flatMap(c => c.resume ? [c.resume] : []));
+  const clients = [...processes.values()].filter(
+    (p) => p.role === 'client' && !lockOwners.has(p.pid),
+  );
+  const resumed = new Set(clients.flatMap((c) => (c.resume ? [c.resume] : [])));
   const daemonHeld: LockedThread[] = [];
   for (const thread of threads) {
     const owner = processes.get(thread.ownerPid);
     const exact = owner?.role === 'client' || (owner?.role === 'daemon' && resumed.has(thread.id));
     const launch = launched?.(thread.id);
-    if (launch === true) result.set(thread.id, { open: true, reason: 'Launched session is running' });
-    else if (exact) result.set(thread.id, { open: true, reason: owner?.role === 'client' ? 'Terminal client holds the session' : 'Terminal client resumed the session' });
-    else if (launch === false) result.set(thread.id, { open: false, reason: 'Launched session has ended' });
+    if (launch === true)
+      result.set(thread.id, { open: true, reason: 'Launched session is running' });
+    else if (exact)
+      result.set(thread.id, {
+        open: true,
+        reason:
+          owner?.role === 'client'
+            ? 'Terminal client holds the session'
+            : 'Terminal client resumed the session',
+      });
+    else if (launch === false)
+      result.set(thread.id, { open: false, reason: 'Launched session has ended' });
     else if (owner?.role === 'daemon') daemonHeld.push(thread);
     else result.set(thread.id, { open: false, reason: 'No Codex process holds the session' });
   }
@@ -140,32 +242,62 @@ export function decideLiveness(threads: LockedThread[], processes: ReadonlyMap<n
     if (!cwd) return undefined;
     return client.cd ? resolve(cwd, client.cd) : cwd;
   };
-  const pool = daemonHeld.filter(t => t.cwd && t.createdAt !== undefined && !resumed.has(t.id)).sort((a, b) => b.createdAt! - a.createdAt! || a.id.localeCompare(b.id));
+  const pool = daemonHeld
+    .filter((t) => t.cwd && t.createdAt !== undefined && !resumed.has(t.id))
+    .sort((a, b) => b.createdAt! - a.createdAt! || a.id.localeCompare(b.id));
   const claimed = new Set<string>();
-  for (const client of clients.filter(c => !c.resume).sort((a, b) => b.startedAt - a.startedAt || a.pid - b.pid)) {
-    const where = folder(client); if (!where) continue;
-    const thread = pool.find(t => !claimed.has(t.id) && t.cwd === where && t.createdAt! >= client.startedAt - ATTACH_CLOCK_SKEW_MS);
+  for (const client of clients
+    .filter((c) => !c.resume)
+    .sort((a, b) => b.startedAt - a.startedAt || a.pid - b.pid)) {
+    const where = folder(client);
+    if (!where) continue;
+    const thread = pool.find(
+      (t) =>
+        !claimed.has(t.id) &&
+        t.cwd === where &&
+        t.createdAt! >= client.startedAt - ATTACH_CLOCK_SKEW_MS,
+    );
     if (thread) claimed.add(thread.id);
   }
   for (const thread of daemonHeld) {
-    result.set(thread.id, claimed.has(thread.id)
-      ? { open: true, reason: 'Terminal client attached in the session folder' }
-      : { open: false, reason: 'No Codex terminal is attached; the shared app-server only keeps it loaded' });
+    result.set(
+      thread.id,
+      claimed.has(thread.id)
+        ? { open: true, reason: 'Terminal client attached in the session folder' }
+        : {
+            open: false,
+            reason: 'No Codex terminal is attached; the shared app-server only keeps it loaded',
+          },
+    );
   }
   return result;
 }
 
 /** Probes processes (and, when the daemon holds locks, client folders) and decides liveness for the locked threads. */
-export async function resolveLiveness(threads: LockedThread[], options: { runner: ProcessRunner; signal: AbortSignal; now: number; launched?: LaunchedLiveness }): Promise<Map<string, ThreadLiveness>> {
+export async function resolveLiveness(
+  threads: LockedThread[],
+  options: { runner: ProcessRunner; signal: AbortSignal; now: number; launched?: LaunchedLiveness },
+): Promise<Map<string, ThreadLiveness>> {
   if (!threads.length) return new Map();
   // lsof reports real paths; compare thread folders the same way.
-  threads = await Promise.all(threads.map(async t => t.cwd ? { ...t, cwd: await realpath(t.cwd).catch(() => t.cwd!) } : t));
+  threads = await Promise.all(
+    threads.map(async (t) =>
+      t.cwd ? { ...t, cwd: await realpath(t.cwd).catch(() => t.cwd!) } : t,
+    ),
+  );
   const processes = await codexProcesses(options.runner, options.signal, options.now);
-  const needsFolders = threads.some(t => processes.get(t.ownerPid)?.role === 'daemon');
-  const lockOwners = new Set(threads.map(t => t.ownerPid));
+  const needsFolders = threads.some((t) => processes.get(t.ownerPid)?.role === 'daemon');
+  const lockOwners = new Set(threads.map((t) => t.ownerPid));
   const directories = needsFolders
-    ? await processDirectories([...processes.values()].filter(p => p.role === 'client' && !lockOwners.has(p.pid) && !p.resume).map(p => p.pid), options.runner, options.signal)
+    ? await processDirectories(
+        [...processes.values()]
+          .filter((p) => p.role === 'client' && !lockOwners.has(p.pid) && !p.resume)
+          .map((p) => p.pid),
+        options.runner,
+        options.signal,
+      )
     : new Map<number, string>();
-  for (const [pid, directory] of directories) directories.set(pid, await realpath(directory).catch(() => directory));
+  for (const [pid, directory] of directories)
+    directories.set(pid, await realpath(directory).catch(() => directory));
   return decideLiveness(threads, processes, directories, options.launched);
 }

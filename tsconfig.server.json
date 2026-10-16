@@ -7,6 +7,11 @@
     "declaration": true,
     "lib": ["ES2023"]
   },
-  "include": ["src/core/**/*.ts", "src/runtime/**/*.ts", "src/language/**/*.ts", "src/agents/**/*.ts"],
+  "include": [
+    "src/core/**/*.ts",
+    "src/runtime/**/*.ts",
+    "src/language/**/*.ts",
+    "src/agents/**/*.ts"
+  ],
   "exclude": ["src/ui"]
 }

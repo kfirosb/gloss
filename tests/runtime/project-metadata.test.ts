@@ -7,14 +7,31 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readProjectMetadata } from '../../src/runtime/project-metadata.js';
 
 const exec = promisify(execFile);
-const git = async (cwd: string, ...args: string[]) => (await exec('git', args, { cwd })).stdout.trim();
+const git = async (cwd: string, ...args: string[]) =>
+  (await exec('git', args, { cwd })).stdout.trim();
 let temporary: string;
-beforeEach(async () => { temporary = await realpath(await mkdtemp(join(tmpdir(), 'project-metadata-'))); });
-afterEach(async () => { await rm(temporary, { recursive: true, force: true }); });
+beforeEach(async () => {
+  temporary = await realpath(await mkdtemp(join(tmpdir(), 'project-metadata-')));
+});
+afterEach(async () => {
+  await rm(temporary, { recursive: true, force: true });
+});
 async function repository(path: string) {
   await mkdir(path, { recursive: true });
   await git(path, 'init', '-b', 'main');
-  await git(path, '-c', 'user.name=Metadata Test', '-c', 'user.email=metadata@example.test', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Initial');
+  await git(
+    path,
+    '-c',
+    'user.name=Metadata Test',
+    '-c',
+    'user.email=metadata@example.test',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--allow-empty',
+    '-m',
+    'Initial',
+  );
   return path;
 }
 

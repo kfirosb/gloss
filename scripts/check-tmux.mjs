@@ -6,6 +6,8 @@ try {
   if (!statSync(binary).isFile()) throw new Error('not a file');
   accessSync(binary, constants.X_OK);
 } catch {
-  console.error(`Bundled tmux is missing or not executable: ${binary}\nRun npm run build:tmux first.`);
+  console.error(
+    `Bundled tmux is missing or not executable: ${binary}\nRun npm run build:tmux first.`,
+  );
   process.exit(1);
 }

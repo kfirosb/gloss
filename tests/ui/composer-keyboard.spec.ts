@@ -5,7 +5,12 @@ for (const shortcut of ['Alt+Enter', 'Shift+Enter']) {
   test(`${shortcut} inserts a line without sending`, async ({ page }) => {
     await mockSession(page, basicSnapshot);
     const actions: any[] = [];
-    await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { sessionId: 'basic', sequence: 1, snapshot: basicSnapshot() } }); });
+    await page.route('**/api/sessions/*/actions', (route) => {
+      actions.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: { sessionId: 'basic', sequence: 1, snapshot: basicSnapshot() },
+      });
+    });
     await page.goto('/#capability=test');
     const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
     await input.fill('First');
@@ -19,11 +24,20 @@ for (const shortcut of ['Alt+Enter', 'Shift+Enter']) {
 test('Enter delivers to the agent and Discuss first opens discussion', async ({ page }) => {
   await mockSession(page, basicSnapshot);
   const actions: any[] = [];
-  await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { sessionId: 'basic', sequence: actions.length, snapshot: basicSnapshot() } }); });
+  await page.route('**/api/sessions/*/actions', (route) => {
+    actions.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: { sessionId: 'basic', sequence: actions.length, snapshot: basicSnapshot() },
+    });
+  });
   await page.goto('/#capability=test');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
-  const attach = await page.getByRole('button', { name: 'Attach files', exact: true }).boundingBox();
-  const discuss = await page.getByRole('button', { name: 'Discuss first', exact: true }).boundingBox();
+  const attach = await page
+    .getByRole('button', { name: 'Attach files', exact: true })
+    .boundingBox();
+  const discuss = await page
+    .getByRole('button', { name: 'Discuss first', exact: true })
+    .boundingBox();
   expect(attach).not.toBeNull();
   expect(discuss).not.toBeNull();
   expect(Math.abs(attach!.y - discuss!.y)).toBeLessThan(2);
@@ -41,7 +55,10 @@ test('Enter delivers to the agent and Discuss first opens discussion', async ({ 
 test('Enter respects the busy agent guard', async ({ page }) => {
   await mockSession(page, () => ({ ...basicSnapshot(), codingState: 'working' }));
   const actions: any[] = [];
-  await page.route('**/api/sessions/*/actions', route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: {} }); });
+  await page.route('**/api/sessions/*/actions', (route) => {
+    actions.push(route.request().postDataJSON());
+    return route.fulfill({ json: {} });
+  });
   await page.goto('/#capability=test');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
   await input.fill('Keep this');

@@ -1,44 +1,91 @@
 import { lstat, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { collectProcess, runProcess, type ProcessOutcome, type ProcessRunner } from './process-runner.js';
+import {
+  collectProcess,
+  runProcess,
+  type ProcessOutcome,
+  type ProcessRunner,
+} from './process-runner.js';
 
 export class TmuxUnavailable extends Error {
   readonly code = 'tmux-unavailable';
-  constructor() { super('tmux is not installed. Install it with Homebrew (brew install tmux) or update Gloss.'); }
+  constructor() {
+    super('tmux is not installed. Install it with Homebrew (brew install tmux) or update Gloss.');
+  }
 }
 export const sessionNameFor = (launchId: string) => 'la-' + launchId;
 /** Homebrew first, then the app's bundled tmux: the desktop shell passes its path in LANGUAGE_ASSISTANT_TMUX
  * because process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */
-export function tmuxCandidates(env: NodeJS.ProcessEnv = process.env, resourcesPath = (process as { resourcesPath?: string }).resourcesPath): string[] {
+export function tmuxCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  resourcesPath = (process as { resourcesPath?: string }).resourcesPath,
+): string[] {
   const bundled = env.LANGUAGE_ASSISTANT_TMUX;
-  return [...new Set(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', ...(bundled && isAbsolute(bundled) ? [bundled] : []), ...(resourcesPath ? [join(resourcesPath, 'bin', 'tmux')] : [])])];
+  return [
+    ...new Set([
+      '/opt/homebrew/bin/tmux',
+      '/usr/local/bin/tmux',
+      ...(bundled && isAbsolute(bundled) ? [bundled] : []),
+      ...(resourcesPath ? [join(resourcesPath, 'bin', 'tmux')] : []),
+    ]),
+  ];
 }
 // Never hand the panel capability, Electron's node mode or an enclosing tmux to the private server or its agents.
 const AGENT_SECRETS = ['LANGUAGE_PANEL_CAPABILITY', 'ELECTRON_RUN_AS_NODE'];
 const PRIVATE_ENV = [...AGENT_SECRETS, 'TMUX', 'TMUX_PANE'];
 export function tmuxEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const clean = { ...env }; for (const key of PRIVATE_ENV) delete clean[key]; return clean;
+  const clean = { ...env };
+  for (const key of PRIVATE_ENV) delete clean[key];
+  return clean;
 }
 
-export async function locateTmux(candidates = tmuxCandidates(), runner: ProcessRunner = runProcess): Promise<string> {
+export async function locateTmux(
+  candidates = tmuxCandidates(),
+  runner: ProcessRunner = runProcess,
+): Promise<string> {
   for (const candidate of candidates) {
-    const result = await collectProcess(runner(candidate, ['-V'], '', AbortSignal.timeout(3000), { timeoutMs: 2000, maxOutputBytes: 1024, env: tmuxEnvironment() })).catch(() => undefined);
-    if (result?.outcome.reason === 'exited' && result.outcome.code === 0 && result.lines.some(l => /^tmux \d/.test(l))) return candidate;
+    const result = await collectProcess(
+      runner(candidate, ['-V'], '', AbortSignal.timeout(3000), {
+        timeoutMs: 2000,
+        maxOutputBytes: 1024,
+        env: tmuxEnvironment(),
+      }),
+    ).catch(() => undefined);
+    if (
+      result?.outcome.reason === 'exited' &&
+      result.outcome.code === 0 &&
+      result.lines.some((l) => /^tmux \d/.test(l))
+    )
+      return candidate;
   }
   throw new TmuxUnavailable();
 }
 
 export async function ensureSocketDirectory(dir: string) {
   await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
-  await mkdir(dir, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+  await mkdir(dir, { mode: 0o700 }).catch((error) => {
+    if (error.code !== 'EEXIST') throw error;
+  });
   const info = await lstat(dir);
-  if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 || info.uid !== process.getuid?.()) throw new Error('Unsafe tmux directory');
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    (info.mode & 0o777) !== 0o700 ||
+    info.uid !== process.getuid?.()
+  )
+    throw new Error('Unsafe tmux directory');
 }
 
 export interface Tmux {
-  readonly executable: string; readonly socket: string;
-  newSession(name: string, cwd: string, argv: string[], env?: Record<string, string>): Promise<{ panePid: number }>;
+  readonly executable: string;
+  readonly socket: string;
+  newSession(
+    name: string,
+    cwd: string,
+    argv: string[],
+    env?: Record<string, string>,
+  ): Promise<{ panePid: number }>;
   listSessions(): Promise<{ name: string; panePid: number; currentCommand: string }[]>;
   hasSession(name: string): Promise<boolean>;
   capturePane(name: string): Promise<string>;
@@ -52,72 +99,164 @@ export interface Tmux {
 
 // "server exited unexpectedly": the server was shutting down as it answered, e.g. right after its last session was killed.
 /** Keeps tmux's own words (or the timeout) in the error so a failure can be diagnosed from the message the user sees. */
-const tmuxFailure = (outcome: ProcessOutcome) => new Error('tmux command failed: ' + (outcome.reason === 'exited' ? outcome.diagnostics.trim().split('\n')[0]!.slice(0, 200) || `exit code ${outcome.code}` : outcome.reason));
-const serverAbsent = (outcome: ProcessOutcome) => outcome.reason === 'exited' && outcome.code === 1 && /^(?:no server running on .+|error connecting to .+ \(No such file or directory\)|server exited unexpectedly)\s*$/.test(outcome.diagnostics);
-const sessionAbsent = (outcome: ProcessOutcome) => serverAbsent(outcome) || (outcome.reason === 'exited' && outcome.code === 1 && /^can't find session: .+\s*$/.test(outcome.diagnostics));
+const tmuxFailure = (outcome: ProcessOutcome) =>
+  new Error(
+    'tmux command failed: ' +
+      (outcome.reason === 'exited'
+        ? outcome.diagnostics.trim().split('\n')[0]!.slice(0, 200) || `exit code ${outcome.code}`
+        : outcome.reason),
+  );
+const serverAbsent = (outcome: ProcessOutcome) =>
+  outcome.reason === 'exited' &&
+  outcome.code === 1 &&
+  /^(?:no server running on .+|error connecting to .+ \(No such file or directory\)|server exited unexpectedly)\s*$/.test(
+    outcome.diagnostics,
+  );
+const sessionAbsent = (outcome: ProcessOutcome) =>
+  serverAbsent(outcome) ||
+  (outcome.reason === 'exited' &&
+    outcome.code === 1 &&
+    /^can't find session: .+\s*$/.test(outcome.diagnostics));
 
 const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
 
-export async function createTmux(options: { stateDir?: string; executable?: string; runner?: ProcessRunner } = {}): Promise<Tmux> {
+export async function createTmux(
+  options: { stateDir?: string; executable?: string; runner?: ProcessRunner } = {},
+): Promise<Tmux> {
   const runner = options.runner ?? runProcess;
-  const executable = options.executable ?? await locateTmux(undefined, runner);
+  const executable = options.executable ?? (await locateTmux(undefined, runner));
   const dir = join(options.stateDir ?? join(homedir(), '.language-assistant'), 'tmux');
   await ensureSocketDirectory(dir);
   const socket = join(dir, 'socket');
   const base = ['-S', socket, '-f', '/dev/null'];
-  const check = (name: string) => { if (!NAME.test(name)) throw new Error('Invalid tmux session name'); };
+  const check = (name: string) => {
+    if (!NAME.test(name)) throw new Error('Invalid tmux session name');
+  };
   async function run(args: string[], allowFailure = false) {
-    const result = await collectProcess(runner(executable, [...base, ...args], '', AbortSignal.timeout(10_000), { timeoutMs: 8000, maxOutputBytes: 1024 * 1024, env: tmuxEnvironment() }));
-    if (!allowFailure && (result.outcome.reason !== 'exited' || result.outcome.code !== 0)) throw tmuxFailure(result.outcome);
+    const result = await collectProcess(
+      runner(executable, [...base, ...args], '', AbortSignal.timeout(10_000), {
+        timeoutMs: 8000,
+        maxOutputBytes: 1024 * 1024,
+        env: tmuxEnvironment(),
+      }),
+    );
+    if (!allowFailure && (result.outcome.reason !== 'exited' || result.outcome.code !== 0))
+      throw tmuxFailure(result.outcome);
     return result;
   }
   return {
-    executable, socket,
+    executable,
+    socket,
     async newSession(name, cwd, argv, env = {}) {
-      check(name); if (!argv.length) throw new Error('Command required');
+      check(name);
+      if (!argv.length) throw new Error('Command required');
       const envArgs = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
       // tmux runs a one-item command through `sh -c`; env keeps argv shell-free and unsets private variables
       // that an already-running server may still hold in its global environment.
-      const command = ['/usr/bin/env', ...AGENT_SECRETS.flatMap(k => ['-u', k]), ...argv];
-      const result = await run(['new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', name, '-c', cwd, '-x', '200', '-y', '50', ...envArgs, '--', ...command]);
+      const command = ['/usr/bin/env', ...AGENT_SECRETS.flatMap((k) => ['-u', k]), ...argv];
+      const result = await run([
+        'new-session',
+        '-d',
+        '-P',
+        '-F',
+        '#{pane_pid}',
+        '-s',
+        name,
+        '-c',
+        cwd,
+        '-x',
+        '200',
+        '-y',
+        '50',
+        ...envArgs,
+        '--',
+        ...command,
+      ]);
       const panePid = Number(result.lines.at(-1));
-      if (!Number.isSafeInteger(panePid) || panePid <= 1) throw new Error('tmux did not report a pane process');
+      if (!Number.isSafeInteger(panePid) || panePid <= 1)
+        throw new Error('tmux did not report a pane process');
       // The server exists now: scrub its global environment and make the popup a plain terminal
       // (no prefix key, so Claude's Ctrl+B and Codex's Esc reach the agent; no status row).
       for (const key of AGENT_SECRETS) await run(['set-environment', '-g', '-u', key], true);
-      await run(['set-option', '-g', 'prefix', 'None', ';', 'set-option', '-g', 'prefix2', 'None', ';', 'set-option', '-g', 'status', 'off', ';', 'set-option', '-sg', 'escape-time', '0'], true);
+      await run(
+        [
+          'set-option',
+          '-g',
+          'prefix',
+          'None',
+          ';',
+          'set-option',
+          '-g',
+          'prefix2',
+          'None',
+          ';',
+          'set-option',
+          '-g',
+          'status',
+          'off',
+          ';',
+          'set-option',
+          '-sg',
+          'escape-time',
+          '0',
+        ],
+        true,
+      );
       return { panePid };
     },
     async listSessions() {
-      const result = await run(['list-sessions', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}'], true);
+      const result = await run(
+        ['list-sessions', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}'],
+        true,
+      );
       if (result.outcome.reason !== 'exited' || result.outcome.code !== 0) {
         if (serverAbsent(result.outcome)) return [];
         throw tmuxFailure(result.outcome);
       }
-      return result.lines.map(line => line.split('\t')).filter(([n, p]) => n && NAME.test(n) && Number(p) > 1).map(([name, pid, command]) => ({ name: name!, panePid: Number(pid), currentCommand: command ?? '' }));
+      return result.lines
+        .map((line) => line.split('\t'))
+        .filter(([n, p]) => n && NAME.test(n) && Number(p) > 1)
+        .map(([name, pid, command]) => ({
+          name: name!,
+          panePid: Number(pid),
+          currentCommand: command ?? '',
+        }));
     },
     async hasSession(name) {
-      check(name); const { outcome } = await run(['has-session', '-t', '=' + name], true);
+      check(name);
+      const { outcome } = await run(['has-session', '-t', '=' + name], true);
       if (outcome.reason === 'exited' && outcome.code === 0) return true;
       if (sessionAbsent(outcome)) return false;
       throw tmuxFailure(outcome);
     },
-    async capturePane(name) { check(name); return (await run(['capture-pane', '-p', '-t', '=' + name + ':'])).lines.join('\n'); },
-    async sendKeys(name, keys) { check(name); await run(['send-keys', '-t', '=' + name + ':', '--', ...keys]); },
+    async capturePane(name) {
+      check(name);
+      return (await run(['capture-pane', '-p', '-t', '=' + name + ':'])).lines.join('\n');
+    },
+    async sendKeys(name, keys) {
+      check(name);
+      await run(['send-keys', '-t', '=' + name + ':', '--', ...keys]);
+    },
     async typeText(name, text) {
       check(name);
       await run(['send-keys', '-t', '=' + name + ':', '-l', '--', text]);
       await run(['send-keys', '-t', '=' + name + ':', '--', 'Enter']);
     },
     async resizeWindow(name, cols, rows) {
-      check(name); if (![cols, rows].every(n => Number.isSafeInteger(n) && n >= 10 && n <= 1000)) throw new Error('Invalid size');
+      check(name);
+      if (![cols, rows].every((n) => Number.isSafeInteger(n) && n >= 10 && n <= 1000))
+        throw new Error('Invalid size');
       await run(['resize-window', '-t', '=' + name + ':', '-x', String(cols), '-y', String(rows)]);
     },
     async killSession(name) {
-      check(name); const { outcome } = await run(['kill-session', '-t', '=' + name], true);
+      check(name);
+      const { outcome } = await run(['kill-session', '-t', '=' + name], true);
       if ((outcome.reason === 'exited' && outcome.code === 0) || sessionAbsent(outcome)) return;
       throw tmuxFailure(outcome);
     },
-    attachArgv(name) { check(name); return [executable, ...base, 'attach-session', '-t', '=' + name]; },
+    attachArgv(name) {
+      check(name);
+      return [executable, ...base, 'attach-session', '-t', '=' + name];
+    },
   };
 }

@@ -5,13 +5,25 @@ export const PCM_PROCESSOR_NAME = 'pcm-capture';
 /** Linear-interpolation resampler; good enough for speech going into whisper. */
 export function resample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (fromRate === toRate) return input;
-  const ratio = fromRate / toRate; const length = Math.floor(input.length / ratio); const out = new Float32Array(length);
-  for (let i = 0; i < length; i++) { const pos = i * ratio; const j = Math.floor(pos); const frac = pos - j; const a = input[j] ?? 0; const b = input[j + 1] ?? a; out[i] = a + (b - a) * frac; }
+  const ratio = fromRate / toRate;
+  const length = Math.floor(input.length / ratio);
+  const out = new Float32Array(length);
+  for (let i = 0; i < length; i++) {
+    const pos = i * ratio;
+    const j = Math.floor(pos);
+    const frac = pos - j;
+    const a = input[j] ?? 0;
+    const b = input[j + 1] ?? a;
+    out[i] = a + (b - a) * frac;
+  }
   return out;
 }
 export function floatToInt16(input: Float32Array): Int16Array {
   const out = new Int16Array(input.length);
-  for (let i = 0; i < input.length; i++) { const v = Math.max(-1, Math.min(1, input[i]!)); out[i] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767); }
+  for (let i = 0; i < input.length; i++) {
+    const v = Math.max(-1, Math.min(1, input[i]!));
+    out[i] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767);
+  }
   return out;
 }
 /** Runs inside the AudioWorklet global scope: resamples to SAMPLE_RATE, accumulates FRAME_SAMPLES frames and posts them with a level reading.
@@ -42,4 +54,6 @@ class PcmCapture extends AudioWorkletProcessor {
 registerProcessor('${PCM_PROCESSOR_NAME}', PcmCapture);
 `;
 let url: string | undefined;
-export function workletUrl(): string { return url ??= URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: 'text/javascript' })); }
+export function workletUrl(): string {
+  return (url ??= URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: 'text/javascript' })));
+}

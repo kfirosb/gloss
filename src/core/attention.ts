@@ -7,14 +7,26 @@ export type Attention = 'none' | 'response' | 'approval';
 export function latestResponseSequence(messages: readonly AgentMessage[]): number | undefined {
   let latest: number | undefined;
   for (const message of messages) {
-    if (message.role !== 'assistant' || message.complete !== true || message.sourceId.startsWith('channel:')) continue;
+    if (
+      message.role !== 'assistant' ||
+      message.complete !== true ||
+      message.sourceId.startsWith('channel:')
+    )
+      continue;
     if (latest === undefined || message.revision > latest) latest = message.revision;
   }
   return latest;
 }
 
 /** Approval wins because the terminal is blocked. A response counts until the user has seen that sequence. A closed or disconnected session is never waiting for a response. */
-export function attentionFor(entry: { open: boolean; activity: CodingState | 'connecting' | 'unknown'; latestResponseSequence?: number | undefined }, seen: number | undefined): Attention {
+export function attentionFor(
+  entry: {
+    open: boolean;
+    activity: CodingState | 'connecting' | 'unknown';
+    latestResponseSequence?: number | undefined;
+  },
+  seen: number | undefined,
+): Attention {
   if (entry.activity === 'approval-required') return 'approval';
   if (!entry.open || entry.activity === 'disconnected') return 'none';
   const latest = entry.latestResponseSequence;

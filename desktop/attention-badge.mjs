@@ -3,8 +3,16 @@ export function createBadgeController({ setBadge, isFocused }) {
   let count = 0;
   const apply = () => setBadge(count > 0 && !isFocused() ? String(count) : '');
   return {
-    setCount(value) { count = Number.isSafeInteger(value) && value > 0 ? value : 0; apply(); },
-    refresh() { apply(); },
-    clear() { count = 0; apply(); },
+    setCount(value) {
+      count = Number.isSafeInteger(value) && value > 0 ? value : 0;
+      apply();
+    },
+    refresh() {
+      apply();
+    },
+    clear() {
+      count = 0;
+      apply();
+    },
   };
 }

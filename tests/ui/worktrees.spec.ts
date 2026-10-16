@@ -2,72 +2,249 @@ import { test, expect } from '@playwright/test';
 import { sessionFixture } from './multi-session-fixture.js';
 import { expectSelected, selectSession } from './session-fixture.js';
 async function serve(context: any) {
-  const key = encodeURIComponent('/repo/.git'); let worktrees: any[] = [{ path: '/repo', branch: 'main', main: true, detached: false, locked: false, prunable: false }, { path: '/repo/.worktrees/dirty', branch: 'dirty', main: false, detached: false, locked: false, prunable: false }];
+  const key = encodeURIComponent('/repo/.git');
+  let worktrees: any[] = [
+    { path: '/repo', branch: 'main', main: true, detached: false, locked: false, prunable: false },
+    {
+      path: '/repo/.worktrees/dirty',
+      branch: 'dirty',
+      main: false,
+      detached: false,
+      locked: false,
+      prunable: false,
+    },
+  ];
   const calls: any[] = [];
-  await context.route('**/api/folders', (r: any) => r.fulfill({ json: [{ path: '/repo', projectKey: '/repo/.git', kind: 'main', createdByApp: false, connectedAt: 1, projectName: 'repo', branch: 'main', missing: false }] }));
-  await context.route(`**/api/projects/${key}/worktrees`, (r: any) => { if (r.request().method() === 'POST') { const b = r.request().postDataJSON(); calls.push(['create', b]); worktrees = [...worktrees, { path: '/repo/.worktrees/' + b.name, branch: b.name, main: false, detached: false, locked: false, prunable: false }]; return r.fulfill({ json: { path: '/repo/.worktrees/' + b.name, branch: b.name, ignore: { added: true, line: '/.worktrees/' } } }); } return r.fulfill({ json: { hasCommits: true, worktrees } }); });
-  await context.route(`**/api/projects/${key}/worktrees?*`, (r: any) => { if (r.request().method() === 'DELETE') { const q = new URL(r.request().url()).searchParams; calls.push(['delete', q.get('path')]); worktrees = worktrees.filter(w => !w.path.endsWith('/dirty')); return r.fulfill({ json: { removed: true, conversationsRemoved: 0, skipped: q.get('removeConversations') === 'true' ? 1 : 0 } }); } return r.fulfill({ json: { hasCommits: true, worktrees } }); });
-  await context.route(`**/api/projects/${key}/worktrees/inspect?*`, (r: any) => r.fulfill({ json: { path: '/repo/.worktrees/dirty', branch: 'dirty', modified: 2, untracked: 1, oldestChange: 1700000000000, newestChange: 1790000000000, unmergedCommits: 3, changedFiles: [], launchedSessions: 2, launchedTerminals: 0, otherOpenSessions: 1 } }));
-  await context.route(`**/api/projects/${key}/worktrees/summary`, (r: any) => r.fulfill({ json: { text: 'Two edited files look recent; one untracked file is old.' } }));
+  await context.route('**/api/folders', (r: any) =>
+    r.fulfill({
+      json: [
+        {
+          path: '/repo',
+          projectKey: '/repo/.git',
+          kind: 'main',
+          createdByApp: false,
+          connectedAt: 1,
+          projectName: 'repo',
+          branch: 'main',
+          missing: false,
+        },
+      ],
+    }),
+  );
+  await context.route(`**/api/projects/${key}/worktrees`, (r: any) => {
+    if (r.request().method() === 'POST') {
+      const b = r.request().postDataJSON();
+      calls.push(['create', b]);
+      worktrees = [
+        ...worktrees,
+        {
+          path: '/repo/.worktrees/' + b.name,
+          branch: b.name,
+          main: false,
+          detached: false,
+          locked: false,
+          prunable: false,
+        },
+      ];
+      return r.fulfill({
+        json: {
+          path: '/repo/.worktrees/' + b.name,
+          branch: b.name,
+          ignore: { added: true, line: '/.worktrees/' },
+        },
+      });
+    }
+    return r.fulfill({ json: { hasCommits: true, worktrees } });
+  });
+  await context.route(`**/api/projects/${key}/worktrees?*`, (r: any) => {
+    if (r.request().method() === 'DELETE') {
+      const q = new URL(r.request().url()).searchParams;
+      calls.push(['delete', q.get('path')]);
+      worktrees = worktrees.filter((w) => !w.path.endsWith('/dirty'));
+      return r.fulfill({
+        json: {
+          removed: true,
+          conversationsRemoved: 0,
+          skipped: q.get('removeConversations') === 'true' ? 1 : 0,
+        },
+      });
+    }
+    return r.fulfill({ json: { hasCommits: true, worktrees } });
+  });
+  await context.route(`**/api/projects/${key}/worktrees/inspect?*`, (r: any) =>
+    r.fulfill({
+      json: {
+        path: '/repo/.worktrees/dirty',
+        branch: 'dirty',
+        modified: 2,
+        untracked: 1,
+        oldestChange: 1700000000000,
+        newestChange: 1790000000000,
+        unmergedCommits: 3,
+        changedFiles: [],
+        launchedSessions: 2,
+        launchedTerminals: 0,
+        otherOpenSessions: 1,
+      },
+    }),
+  );
+  await context.route(`**/api/projects/${key}/worktrees/summary`, (r: any) =>
+    r.fulfill({ json: { text: 'Two edited files look recent; one untracked file is old.' } }),
+  );
   return calls;
 }
-test('create shows destination and ignore note, then selects the new folder', async ({ page, context }) => {
-  await sessionFixture(context); const calls = await serve(context); await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'repo actions' }).click(); await page.getByRole('menuitem', { name: 'Create worktree…' }).click();
+test('create shows destination and ignore note, then selects the new folder', async ({
+  page,
+  context,
+}) => {
+  await sessionFixture(context);
+  const calls = await serve(context);
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'repo actions' })
+    .click();
+  await page.getByRole('menuitem', { name: 'Create worktree…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create a worktree' });
-  await dialog.getByLabel('Worktree & branch name').fill('improve search'); await dialog.getByRole('button', { name: 'Create & open' }).click();
+  await dialog.getByLabel('Worktree & branch name').fill('improve search');
+  await dialog.getByRole('button', { name: 'Create & open' }).click();
   await expect(dialog).toContainText('Use letters, numbers, hyphens or underscores');
   await dialog.getByLabel('Worktree & branch name').fill('improve-search');
-  await expect(dialog).toContainText('/repo/.worktrees/improve-search'); await expect(dialog).toContainText('Adds /.worktrees/');
+  await expect(dialog).toContainText('/repo/.worktrees/improve-search');
+  await expect(dialog).toContainText('Adds /.worktrees/');
   await dialog.getByRole('button', { name: 'Create & open' }).click();
-  await expect.poll(() => calls).toContainEqual(['create', { name: 'improve-search', location: '/repo/.worktrees' }]);
+  await expect
+    .poll(() => calls)
+    .toContainEqual(['create', { name: 'improve-search', location: '/repo/.worktrees' }]);
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
-  await expect(sidebar.getByRole('button', { name: /improve-search, 0 open/ })).toHaveAttribute('aria-current', 'true');
-  await expect(sidebar.getByRole('status').filter({ hasText: 'Created improve-search · Added /.worktrees/ to .gitignore' })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: /improve-search, 0 open/ })).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+  await expect(
+    sidebar
+      .getByRole('status')
+      .filter({ hasText: 'Created improve-search · Added /.worktrees/ to .gitignore' }),
+  ).toBeVisible();
   await sidebar.getByRole('button', { name: 'Dismiss notice' }).click();
   await expect(sidebar.getByText('Created improve-search')).toHaveCount(0);
 });
-test('delete warns with counts, offers the agent summary, and deletes on confirm', async ({ page, context }) => {
-  await sessionFixture(context); const calls = await serve(context); await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'Delete dirty worktree' }).click();
+test('delete warns with counts, offers the agent summary, and deletes on confirm', async ({
+  page,
+  context,
+}) => {
+  await sessionFixture(context);
+  const calls = await serve(context);
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'Delete dirty worktree' })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Delete worktree?' });
-  await expect(dialog).toContainText('2 modified'); await expect(dialog).toContainText('1 untracked'); await expect(dialog).toContainText('3 commits only on this branch');
+  await expect(dialog).toContainText('2 modified');
+  await expect(dialog).toContainText('1 untracked');
+  await expect(dialog).toContainText('3 commits only on this branch');
   await expect(dialog).toContainText('2 sessions started from Gloss will be ended.');
-  await expect(dialog).toContainText('1 other open session in this folder was not started here and keeps running; its folder will be removed from under it.');
-  await dialog.getByRole('button', { name: 'Ask the agent about these changes' }).click(); await expect(dialog).toContainText('Two edited files look recent');
+  await expect(dialog).toContainText(
+    '1 other open session in this folder was not started here and keeps running; its folder will be removed from under it.',
+  );
+  await dialog.getByRole('button', { name: 'Ask the agent about these changes' }).click();
+  await expect(dialog).toContainText('Two edited files look recent');
   await expect(dialog.getByRole('button', { name: 'Delete worktree', exact: true })).toBeEnabled();
   await dialog.getByLabel('Also remove its conversations from history').check();
   await dialog.getByRole('button', { name: 'Delete worktree', exact: true }).click();
   await expect.poll(() => calls).toContainEqual(['delete', '/repo/.worktrees/dirty']);
-  await expect(page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: /dirty/ })).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: 'Sessions' }).getByRole('status').filter({ hasText: 'Deleted dirty · 1 conversation kept because its session is open' })).toBeVisible();
+  await expect(
+    page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: /dirty/ }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Sessions' })
+      .getByRole('status')
+      .filter({ hasText: 'Deleted dirty · 1 conversation kept because its session is open' }),
+  ).toBeVisible();
 });
 test('plain folder offers Initialize Git', async ({ page, context }) => {
   await sessionFixture(context);
-  await context.route('**/api/folders', (r: any) => r.fulfill({ json: [{ path: '/notes', projectKey: '/notes', kind: 'plain', createdByApp: false, connectedAt: 1, projectName: 'notes', missing: false }] }));
-  let inited = false; await context.route('**/api/projects/' + encodeURIComponent('/notes') + '/git-init', (r: any) => { inited = true; return r.fulfill({ json: {} }); });
+  await context.route('**/api/folders', (r: any) =>
+    r.fulfill({
+      json: [
+        {
+          path: '/notes',
+          projectKey: '/notes',
+          kind: 'plain',
+          createdByApp: false,
+          connectedAt: 1,
+          projectName: 'notes',
+          missing: false,
+        },
+      ],
+    }),
+  );
+  let inited = false;
+  await context.route('**/api/projects/' + encodeURIComponent('/notes') + '/git-init', (r: any) => {
+    inited = true;
+    return r.fulfill({ json: {} });
+  });
   await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'notes actions' }).click(); await page.getByRole('menuitem', { name: 'Initialize Git…' }).click();
-  await page.getByRole('dialog', { name: 'Initialize Git repository?' }).getByRole('button', { name: 'Initialize Git', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'notes actions' })
+    .click();
+  await page.getByRole('menuitem', { name: 'Initialize Git…' }).click();
+  await page
+    .getByRole('dialog', { name: 'Initialize Git repository?' })
+    .getByRole('button', { name: 'Initialize Git', exact: true })
+    .click();
   await expect.poll(() => inited).toBe(true);
 });
-test('the shown location is always sent; the server remembers it and the dialog shows it next time', async ({ page, context }) => {
-  await sessionFixture(context); const calls = await serve(context);
+test('the shown location is always sent; the server remembers it and the dialog shows it next time', async ({
+  page,
+  context,
+}) => {
+  await sessionFixture(context);
+  const calls = await serve(context);
   // Mirrors the server: a create remembers a non-default location and forgets the default one; PUTs cannot change it.
   let settings: any = { order: [], hidden: [], collapsed: [], worktreeLocation: {} };
-  await context.route('**/api/settings/sidebar', (r: any) => r.fulfill({ json: r.request().method() === 'PUT' ? { ...r.request().postDataJSON(), worktreeLocation: settings.worktreeLocation } : settings }));
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees`, (r: any) => { if (r.request().method() === 'POST') { const { location } = r.request().postDataJSON(); settings = { ...settings, worktreeLocation: location === '/repo/.worktrees' ? {} : { '/repo/.git': location } }; } return r.fallback(); });
+  await context.route('**/api/settings/sidebar', (r: any) =>
+    r.fulfill({
+      json:
+        r.request().method() === 'PUT'
+          ? { ...r.request().postDataJSON(), worktreeLocation: settings.worktreeLocation }
+          : settings,
+    }),
+  );
+  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees`, (r: any) => {
+    if (r.request().method() === 'POST') {
+      const { location } = r.request().postDataJSON();
+      settings = {
+        ...settings,
+        worktreeLocation: location === '/repo/.worktrees' ? {} : { '/repo/.git': location },
+      };
+    }
+    return r.fallback();
+  });
   await page.goto('/#capability=test');
-  const openCreate = async () => { await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'repo actions' }).click(); await page.getByRole('menuitem', { name: 'Create worktree…' }).click(); return page.getByRole('dialog', { name: 'Create a worktree' }); };
+  const openCreate = async () => {
+    await page
+      .getByRole('navigation', { name: 'Sessions' })
+      .getByRole('button', { name: 'repo actions' })
+      .click();
+    await page.getByRole('menuitem', { name: 'Create worktree…' }).click();
+    return page.getByRole('dialog', { name: 'Create a worktree' });
+  };
   let dialog = await openCreate();
   await dialog.getByLabel('Worktree & branch name').fill('fix-bug');
   await dialog.getByRole('button', { name: 'Change location' }).click();
   await dialog.getByLabel('Worktrees directory').fill('/tmp/trees/');
-  await expect(dialog).toContainText('/tmp/trees/fix-bug'); await expect(dialog).toContainText('outside the project');
+  await expect(dialog).toContainText('/tmp/trees/fix-bug');
+  await expect(dialog).toContainText('outside the project');
   await dialog.getByLabel('Worktrees directory').fill('/repo/wt');
   await expect(dialog).toContainText('Its relative path will be added');
   await dialog.getByRole('button', { name: 'Create & open' }).click();
-  await expect.poll(() => calls).toContainEqual(['create', { name: 'fix-bug', location: '/repo/wt' }]);
+  await expect
+    .poll(() => calls)
+    .toContainEqual(['create', { name: 'fix-bug', location: '/repo/wt' }]);
   await expect(dialog).toBeHidden();
   dialog = await openCreate();
   await expect(dialog).toContainText('/repo/wt/worktree-name');
@@ -76,22 +253,64 @@ test('the shown location is always sent; the server remembers it and the dialog 
   await dialog.getByRole('button', { name: 'Change location' }).click();
   await dialog.getByLabel('Worktrees directory').fill('/repo/.worktrees');
   await dialog.getByRole('button', { name: 'Create & open' }).click();
-  await expect.poll(() => calls).toContainEqual(['create', { name: 'second', location: '/repo/.worktrees' }]);
+  await expect
+    .poll(() => calls)
+    .toContainEqual(['create', { name: 'second', location: '/repo/.worktrees' }]);
 });
 test('a project without commits cannot create a worktree yet', async ({ page, context }) => {
-  await sessionFixture(context); await serve(context);
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees`, (r: any) => r.fulfill({ json: { hasCommits: false, worktrees: [{ path: '/repo', branch: 'main', main: true, detached: false, locked: false, prunable: false }] } }));
+  await sessionFixture(context);
+  await serve(context);
+  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees`, (r: any) =>
+    r.fulfill({
+      json: {
+        hasCommits: false,
+        worktrees: [
+          {
+            path: '/repo',
+            branch: 'main',
+            main: true,
+            detached: false,
+            locked: false,
+            prunable: false,
+          },
+        ],
+      },
+    }),
+  );
   await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'repo actions' }).click(); await page.getByRole('menuitem', { name: 'Create worktree…' }).click();
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'repo actions' })
+    .click();
+  await page.getByRole('menuitem', { name: 'Create worktree…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create a worktree' });
   await expect(dialog).toContainText('Make a first commit in this project, then create a worktree');
   await expect(dialog.getByRole('button', { name: 'Create & open' })).toBeDisabled();
 });
-test('a refused delete shows the reason inline and keeps the dialog open', async ({ page, context }) => {
-  await sessionFixture(context); await serve(context);
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`, (r: any) => r.request().method() === 'DELETE' ? r.fulfill({ status: 409, json: { error: 'This worktree is open in the current session; switch to another session first.' } }) : r.fallback());
+test('a refused delete shows the reason inline and keeps the dialog open', async ({
+  page,
+  context,
+}) => {
+  await sessionFixture(context);
+  await serve(context);
+  await context.route(
+    `**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`,
+    (r: any) =>
+      r.request().method() === 'DELETE'
+        ? r.fulfill({
+            status: 409,
+            json: {
+              error:
+                'This worktree is open in the current session; switch to another session first.',
+            },
+          })
+        : r.fallback(),
+  );
   await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'Delete dirty worktree' }).click();
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'Delete dirty worktree' })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Delete worktree?' });
   await expect(dialog).toContainText('2 modified');
   await dialog.getByRole('button', { name: 'Delete worktree', exact: true }).click();
@@ -99,11 +318,33 @@ test('a refused delete shows the reason inline and keeps the dialog open', async
   await expect(dialog.getByRole('button', { name: 'Delete worktree', exact: true })).toBeEnabled();
 });
 test('delete waits for the inspection before it can be confirmed', async ({ page, context }) => {
-  await sessionFixture(context); await serve(context);
-  let release!: () => void; const held = new Promise<void>(r => { release = r; });
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees/inspect?*`, async (r: any) => { await held; return r.fulfill({ json: { path: '/repo/.worktrees/dirty', branch: 'dirty', modified: 0, untracked: 0, unmergedCommits: 2, changedFiles: [] } }); });
+  await sessionFixture(context);
+  await serve(context);
+  let release!: () => void;
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  await context.route(
+    `**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees/inspect?*`,
+    async (r: any) => {
+      await held;
+      return r.fulfill({
+        json: {
+          path: '/repo/.worktrees/dirty',
+          branch: 'dirty',
+          modified: 0,
+          untracked: 0,
+          unmergedCommits: 2,
+          changedFiles: [],
+        },
+      });
+    },
+  );
   await page.goto('/#capability=test');
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'Delete dirty worktree' }).click();
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'Delete dirty worktree' })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Delete worktree?' });
   await expect(dialog).toContainText('Checking for unsaved changes');
   await expect(dialog.getByRole('button', { name: 'Delete worktree', exact: true })).toBeDisabled();
@@ -111,39 +352,129 @@ test('delete waits for the inspection before it can be confirmed', async ({ page
   await expect(dialog).toContainText('2 commits only on this branch');
   await expect(dialog.getByRole('button', { name: 'Delete worktree', exact: true })).toBeEnabled();
   // Commits alone are still worth describing.
-  await expect(dialog.getByRole('button', { name: 'Ask the agent about these changes' })).toBeVisible();
+  await expect(
+    dialog.getByRole('button', { name: 'Ask the agent about these changes' }),
+  ).toBeVisible();
 });
-test('delete names the shown session so the server can refuse its folder', async ({ page, context }) => {
-  await sessionFixture(context); await serve(context);
+test('delete names the shown session so the server can refuse its folder', async ({
+  page,
+  context,
+}) => {
+  await sessionFixture(context);
+  await serve(context);
   let current: string | null | undefined;
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`, (r: any) => { if (r.request().method() !== 'DELETE') return r.fallback(); current = new URL(r.request().url()).searchParams.get('current'); return r.fallback(); });
+  await context.route(
+    `**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`,
+    (r: any) => {
+      if (r.request().method() !== 'DELETE') return r.fallback();
+      current = new URL(r.request().url()).searchParams.get('current');
+      return r.fallback();
+    },
+  );
   await page.goto('/#capability=test');
   await expect(page.getByText('Discussion A').first()).toBeVisible();
-  await page.getByRole('navigation', { name: 'Sessions' }).getByRole('button', { name: 'Delete dirty worktree' }).click();
+  await page
+    .getByRole('navigation', { name: 'Sessions' })
+    .getByRole('button', { name: 'Delete dirty worktree' })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Delete worktree?' });
   await expect(dialog).toContainText('2 modified');
   await dialog.getByRole('button', { name: 'Delete worktree', exact: true }).click();
   await expect.poll(() => current).toBe('A');
 });
 test('trash appears only on folders Git lists as worktrees', async ({ page, context }) => {
-  await sessionFixture(context); await serve(context);
-  await context.route('**/api/folders', (r: any) => r.fulfill({ json: [{ path: '/repo', projectKey: '/repo/.git', kind: 'main', createdByApp: false, connectedAt: 1, projectName: 'repo', branch: 'main', missing: false }, { path: '/repo/sub', projectKey: '/repo/.git', kind: 'worktree', createdByApp: false, connectedAt: 2, projectName: 'repo', missing: false }] }));
+  await sessionFixture(context);
+  await serve(context);
+  await context.route('**/api/folders', (r: any) =>
+    r.fulfill({
+      json: [
+        {
+          path: '/repo',
+          projectKey: '/repo/.git',
+          kind: 'main',
+          createdByApp: false,
+          connectedAt: 1,
+          projectName: 'repo',
+          branch: 'main',
+          missing: false,
+        },
+        {
+          path: '/repo/sub',
+          projectKey: '/repo/.git',
+          kind: 'worktree',
+          createdByApp: false,
+          connectedAt: 2,
+          projectName: 'repo',
+          missing: false,
+        },
+      ],
+    }),
+  );
   await page.goto('/#capability=test');
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
   await expect(sidebar.getByRole('button', { name: /^sub, 0 open/ })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Delete dirty worktree' })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Delete sub worktree' })).toHaveCount(0);
 });
-test('a deleted worktree with kept conversations is listed under Missing folders, and Show sessions opens one', async ({ page, context }) => {
-  const f = await sessionFixture(context); await serve(context);
+test('a deleted worktree with kept conversations is listed under Missing folders, and Show sessions opens one', async ({
+  page,
+  context,
+}) => {
+  const f = await sessionFixture(context);
+  await serve(context);
   const dirty = '/repo/.worktrees/dirty';
-  f.records.push({ id: 'W', target: { agent: 'codex', sessionRef: 'W', projectId: dirty }, canonicalRoot: dirty, worktreePath: dirty, projectKey: '/repo/.git', projectName: 'repo', enabled: true } as any);
-  f.snapshots.W = { ...f.snapshots.A, id: 'W', target: f.records.at(-1)!.target, discussion: [{ role: 'assistant', text: 'Discussion W' }] };
+  f.records.push({
+    id: 'W',
+    target: { agent: 'codex', sessionRef: 'W', projectId: dirty },
+    canonicalRoot: dirty,
+    worktreePath: dirty,
+    projectKey: '/repo/.git',
+    projectName: 'repo',
+    enabled: true,
+  } as any);
+  f.snapshots.W = {
+    ...f.snapshots.A,
+    id: 'W',
+    target: f.records.at(-1)!.target,
+    discussion: [{ role: 'assistant', text: 'Discussion W' }],
+  };
   f.workspaces.W = { ...f.workspaces.A!, sessionId: 'W' };
   let deleted = false;
-  const main = { path: '/repo', projectKey: '/repo/.git', kind: 'main', createdByApp: false, connectedAt: 1, projectName: 'repo', branch: 'main', missing: false };
-  await context.route('**/api/folders', (r: any) => r.fulfill({ json: deleted ? [main, { path: dirty, projectKey: '/repo/.git', kind: 'worktree', createdByApp: true, connectedAt: 2, projectName: 'repo', missing: true }] : [main] }));
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`, (r: any) => { if (r.request().method() === 'DELETE') deleted = true; return r.fallback(); });
+  const main = {
+    path: '/repo',
+    projectKey: '/repo/.git',
+    kind: 'main',
+    createdByApp: false,
+    connectedAt: 1,
+    projectName: 'repo',
+    branch: 'main',
+    missing: false,
+  };
+  await context.route('**/api/folders', (r: any) =>
+    r.fulfill({
+      json: deleted
+        ? [
+            main,
+            {
+              path: dirty,
+              projectKey: '/repo/.git',
+              kind: 'worktree',
+              createdByApp: true,
+              connectedAt: 2,
+              projectName: 'repo',
+              missing: true,
+            },
+          ]
+        : [main],
+    }),
+  );
+  await context.route(
+    `**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`,
+    (r: any) => {
+      if (r.request().method() === 'DELETE') deleted = true;
+      return r.fallback();
+    },
+  );
   await page.goto('/#capability=test');
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
   await expect(page.getByText('Discussion A').first()).toBeVisible();
@@ -154,20 +485,77 @@ test('a deleted worktree with kept conversations is listed under Missing folders
   await expect(sidebar.getByRole('button', { name: /^dirty/ })).toHaveCount(0);
   await sidebar.getByRole('button', { name: 'Hidden projects' }).click();
   const hidden = page.getByRole('dialog', { name: 'Hidden projects' });
-  await expect(hidden).toContainText('Missing folders'); await expect(hidden).toContainText(dirty);
+  await expect(hidden).toContainText('Missing folders');
+  await expect(hidden).toContainText(dirty);
   await hidden.getByRole('button', { name: `Show sessions of ${dirty}` }).click();
   await expect(hidden).toBeHidden();
   await expectSelected(page, 'W');
-  await expect(sidebar.locator(`.project-folder[data-folder-key="${dirty}"]`)).toHaveAttribute('aria-current', 'true');
+  await expect(sidebar.locator(`.project-folder[data-folder-key="${dirty}"]`)).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
 });
-test('a discovered Git project that was never connected lists its worktrees', async ({ page, context }) => {
+test('a discovered Git project that was never connected lists its worktrees', async ({
+  page,
+  context,
+}) => {
   await sessionFixture(context);
-  const catalog = { epoch: 'wt', sequence: 1, discovery: { state: 'healthy' }, entries: [{ key: 'A', sessionId: 'A', target: { agent: 'codex', sessionRef: 'A', projectId: '/cat' }, projectKey: '/cat/.git', projectName: 'cat', worktreePath: '/cat', open: true, activity: 'idle', availability: 'available' }] };
-  let sequence = 1; let events = 0; let listings = 0;
+  const catalog = {
+    epoch: 'wt',
+    sequence: 1,
+    discovery: { state: 'healthy' },
+    entries: [
+      {
+        key: 'A',
+        sessionId: 'A',
+        target: { agent: 'codex', sessionRef: 'A', projectId: '/cat' },
+        projectKey: '/cat/.git',
+        projectName: 'cat',
+        worktreePath: '/cat',
+        open: true,
+        activity: 'idle',
+        availability: 'available',
+      },
+    ],
+  };
+  let sequence = 1;
+  let events = 0;
+  let listings = 0;
   await context.route('**/api/session-catalog', (r: any) => r.fulfill({ json: catalog }));
   // Every reconnect brings a new frame with the same projects.
-  await context.route('**/api/session-catalog/events', (r: any) => { events += 1; return r.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ ...catalog, sequence: ++sequence }) + '\n\n' }); });
-  await context.route(`**/api/projects/${encodeURIComponent('/cat/.git')}/worktrees`, (r: any) => { listings += 1; return r.fulfill({ json: { hasCommits: true, worktrees: [{ path: '/cat', branch: 'main', main: true, detached: false, locked: false, prunable: false }, { path: '/elsewhere/cat-fix', branch: 'fix', main: false, detached: false, locked: false, prunable: false }] } }); });
+  await context.route('**/api/session-catalog/events', (r: any) => {
+    events += 1;
+    return r.fulfill({
+      contentType: 'text/event-stream',
+      body: 'data: ' + JSON.stringify({ ...catalog, sequence: ++sequence }) + '\n\n',
+    });
+  });
+  await context.route(`**/api/projects/${encodeURIComponent('/cat/.git')}/worktrees`, (r: any) => {
+    listings += 1;
+    return r.fulfill({
+      json: {
+        hasCommits: true,
+        worktrees: [
+          {
+            path: '/cat',
+            branch: 'main',
+            main: true,
+            detached: false,
+            locked: false,
+            prunable: false,
+          },
+          {
+            path: '/elsewhere/cat-fix',
+            branch: 'fix',
+            main: false,
+            detached: false,
+            locked: false,
+            prunable: false,
+          },
+        ],
+      },
+    });
+  });
   await page.goto('/#capability=test');
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
   await expect(sidebar.getByRole('button', { name: /^cat-fix, 0 open/ })).toBeVisible();
@@ -176,14 +564,38 @@ test('a discovered Git project that was never connected lists its worktrees', as
   await expect.poll(() => events, { timeout: 8000 }).toBeGreaterThanOrEqual(4);
   expect(listings).toBe(settled);
 });
-test('deleting the worktree whose session is shown moves to the main checkout instead of refusing', async ({ page, context }) => {
-  const f = await sessionFixture(context); await serve(context);
+test('deleting the worktree whose session is shown moves to the main checkout instead of refusing', async ({
+  page,
+  context,
+}) => {
+  const f = await sessionFixture(context);
+  await serve(context);
   const dirty = '/repo/.worktrees/dirty';
-  f.records.push({ id: 'W', target: { agent: 'codex', sessionRef: 'W', projectId: dirty }, canonicalRoot: dirty, worktreePath: dirty, projectKey: '/repo/.git', projectName: 'repo', enabled: true } as any);
-  f.snapshots.W = { ...f.snapshots.A, id: 'W', target: f.records.at(-1)!.target, discussion: [{ role: 'assistant', text: 'Discussion W' }] };
+  f.records.push({
+    id: 'W',
+    target: { agent: 'codex', sessionRef: 'W', projectId: dirty },
+    canonicalRoot: dirty,
+    worktreePath: dirty,
+    projectKey: '/repo/.git',
+    projectName: 'repo',
+    enabled: true,
+  } as any);
+  f.snapshots.W = {
+    ...f.snapshots.A,
+    id: 'W',
+    target: f.records.at(-1)!.target,
+    discussion: [{ role: 'assistant', text: 'Discussion W' }],
+  };
   f.workspaces.W = { ...f.workspaces.A!, sessionId: 'W' };
   let current: string | null | undefined = 'unset';
-  await context.route(`**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`, (r: any) => { if (r.request().method() !== 'DELETE') return r.fallback(); current = new URL(r.request().url()).searchParams.get('current'); return r.fallback(); });
+  await context.route(
+    `**/api/projects/${encodeURIComponent('/repo/.git')}/worktrees?*`,
+    (r: any) => {
+      if (r.request().method() !== 'DELETE') return r.fallback();
+      current = new URL(r.request().url()).searchParams.get('current');
+      return r.fallback();
+    },
+  );
   await page.goto('/#capability=test');
   const sidebar = page.getByRole('navigation', { name: 'Sessions' });
   await expect(page.getByText('Discussion A').first()).toBeVisible();
@@ -197,5 +609,8 @@ test('deleting the worktree whose session is shown moves to the main checkout in
   expect(current).toBeNull();
   // The main checkout's folder is now current; W's conversation is no longer the one shown.
   await expect(page.getByText('Discussion W')).toHaveCount(0);
-  await expect(sidebar.locator('.project-folder[data-folder-key="/repo"]')).toHaveAttribute('aria-current', 'true');
+  await expect(sidebar.locator('.project-folder[data-folder-key="/repo"]')).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
 });

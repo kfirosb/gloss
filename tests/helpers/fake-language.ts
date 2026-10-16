@@ -3,7 +3,10 @@ import type { LanguageInput, LanguageSession } from '../../src/core/contracts.js
 export class FakeLanguageSession implements LanguageSession {
   readonly translatedLanguages: string[] = [];
   readonly summarizedLanguages: string[] = [];
-  async summarize(_text:string,language:string,_signal:AbortSignal){this.summarizedLanguages.push(language);return 'תקציר';}
+  async summarize(_text: string, language: string, _signal: AbortSignal) {
+    this.summarizedLanguages.push(language);
+    return 'תקציר';
+  }
   readonly id = 'language-session-1';
   prepareResult = { localizedText: 'בצע את השינוי', englishText: 'Make the change' };
   discussionReply = 'הנה הסבר';
@@ -47,7 +50,8 @@ export class FakeLanguageSession implements LanguageSession {
     return { ...this.prepareResult };
   }
   async translate(text: string, language = '') {
-    this.translated.push(text); this.translatedLanguages.push(language);
+    this.translated.push(text);
+    this.translatedLanguages.push(language);
     if (this.translationError) throw this.translationError;
     return this.translateTransform?.(text) ?? this.translationReply;
   }

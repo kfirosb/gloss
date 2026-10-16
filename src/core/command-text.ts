@@ -4,3 +4,4 @@
  * Shared by the Run button (hidden for such blocks) and the server (`Invalid command`).
  */
 export const UNSAFE_COMMAND_CHARACTER = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁠⁦-⁩﻿]/;
+export const MAX_RUN_COMMAND_LENGTH = 8192;
