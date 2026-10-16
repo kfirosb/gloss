@@ -80,6 +80,15 @@ export interface Tmux {
   listSessions(): Promise<{ name: string; panePid: number; currentCommand: string }[]>;
   hasSession(name: string): Promise<boolean>;
   capturePane(name: string): Promise<string>;
+  /** The pane as drawn, with SGR colour and attribute escapes (capture-pane -e). */
+  capturePaneStyled(name: string): Promise<string>;
+  /** The active pane's cursor cell, and whether the pane is in copy or another tmux mode. */
+  paneCursor(name: string): Promise<{ x: number; y: number; inMode: boolean }>;
+  /** Fills a named paste buffer from stdin, so the text never travels as a tmux command argument. */
+  loadBuffer(buffer: string, text: string): Promise<void>;
+  /** Pastes and deletes a named buffer: bracketed when the program asked for it (-p), line feeds kept (-r). */
+  pasteBuffer(name: string, buffer: string): Promise<void>;
+  deleteBuffer(buffer: string): Promise<void>;
   sendKeys(name: string, keys: string[]): Promise<void>;
   /** Types text literally (no key-name parsing), then presses Enter. */
   typeText(name: string, text: string): Promise<void>;
@@ -110,6 +119,8 @@ const sessionAbsent = (outcome: ProcessOutcome) =>
     /^can't find session: .+\s*$/.test(outcome.diagnostics));
 
 const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
+const BUFFER = /^gloss-[A-Za-z0-9-]{1,100}$/;
+const CURSOR = /^(\d+) (\d+) ([01])$/;
 
 export async function createTmux(
   options: { stateDir?: string; executable?: string; runner?: ProcessRunner } = {},
@@ -125,9 +136,12 @@ export async function createTmux(
   const check = (name: string) => {
     if (!NAME.test(name)) throw new Error('Invalid tmux session name');
   };
-  async function run(args: string[], allowFailure = false) {
+  const checkBuffer = (buffer: string) => {
+    if (!BUFFER.test(buffer)) throw new Error('Invalid tmux buffer name');
+  };
+  async function run(args: string[], allowFailure = false, input = '') {
     const result = await collectProcess(
-      runner(executable, [...base, ...args], '', AbortSignal.timeout(10_000), {
+      runner(executable, [...base, ...args], input, AbortSignal.timeout(10_000), {
         timeoutMs: 8000,
         maxOutputBytes: 1024 * 1024,
         env: tmuxEnvironment(),
@@ -225,6 +239,44 @@ export async function createTmux(
     async capturePane(name) {
       check(name);
       return (await run(['capture-pane', '-p', '-t', '=' + name + ':'])).lines.join('\n');
+    },
+    async capturePaneStyled(name) {
+      check(name);
+      return (await run(['capture-pane', '-e', '-p', '-t', '=' + name + ':'])).lines.join('\n');
+    },
+    async paneCursor(name) {
+      check(name);
+      const { lines } = await run([
+        'display-message',
+        '-p',
+        '-t',
+        '=' + name + ':',
+        '#{cursor_x} #{cursor_y} #{pane_in_mode}',
+      ]);
+      const match = CURSOR.exec(lines.join('').trim());
+      if (!match) throw new Error('tmux did not report the cursor');
+      return { x: Number(match[1]), y: Number(match[2]), inMode: match[3] === '1' };
+    },
+    async loadBuffer(buffer, text) {
+      checkBuffer(buffer);
+      await run(['load-buffer', '-b', buffer, '-'], false, text);
+    },
+    async pasteBuffer(name, buffer) {
+      check(name);
+      checkBuffer(buffer);
+      await run(['paste-buffer', '-p', '-r', '-d', '-b', buffer, '-t', '=' + name + ':']);
+    },
+    async deleteBuffer(buffer) {
+      checkBuffer(buffer);
+      const { outcome } = await run(['delete-buffer', '-b', buffer], true);
+      if (outcome.reason === 'exited' && outcome.code === 0) return;
+      if (serverAbsent(outcome)) return;
+      if (
+        outcome.reason === 'exited' &&
+        /^(?:no buffer|unknown buffer):? /.test(outcome.diagnostics)
+      )
+        return;
+      throw tmuxFailure(outcome);
     },
     async sendKeys(name, keys) {
       check(name);

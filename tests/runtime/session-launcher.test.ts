@@ -77,6 +77,15 @@ function fakeTmux() {
       if (k.includes('C-c')) live.delete(n);
     },
     async resizeWindow() {},
+    async capturePaneStyled() {
+      return view.screen;
+    },
+    async paneCursor() {
+      return { x: 0, y: 0, inMode: false };
+    },
+    async loadBuffer() {},
+    async pasteBuffer() {},
+    async deleteBuffer() {},
     async killSession(n) {
       live.delete(n);
     },

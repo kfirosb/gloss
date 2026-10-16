@@ -1,9 +1,19 @@
 // tests/runtime/tmux.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, symlink, chmod, realpath, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  rm,
+  symlink,
+  chmod,
+  realpath,
+  writeFile,
+  readFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   createTmux,
   ensureSocketDirectory,
@@ -367,4 +377,93 @@ it('types text literally and then presses Enter as two commands', async () => {
     ['send-keys', '-t', '=la-one:', '-l', '--', '-n "C-c" && echo done'],
     ['send-keys', '-t', '=la-one:', '--', 'Enter'],
   ]);
+});
+
+const ok = { code: 0, signal: null, reason: 'exited' as const, diagnostics: '' };
+it('captures with styles, reads the cursor, and passes paste text on stdin only', async () => {
+  const calls: { args: string[]; input: string }[] = [];
+  const tmux = await createTmux({
+    stateDir: await temp(),
+    executable: '/stub/tmux',
+    runner: async function* (_exe, args, input) {
+      calls.push({ args, input });
+      if (args.includes('display-message')) yield { type: 'line', line: '2 7 0' };
+      yield { type: 'exit', outcome: ok };
+    },
+  });
+  await tmux.capturePaneStyled('la-one');
+  expect(await tmux.paneCursor('la-one')).toEqual({ x: 2, y: 7, inMode: false });
+  await tmux.loadBuffer('gloss-delivery-1', '-x "$(rm -rf /)"\nline');
+  await tmux.pasteBuffer('la-one', 'gloss-delivery-1');
+  await tmux.deleteBuffer('gloss-delivery-1');
+  expect(calls.map((c) => c.args.slice(5))).toEqual([
+    ['capture-pane', '-e', '-p', '-t', '=la-one:'],
+    ['display-message', '-p', '-t', '=la-one:', '#{cursor_x} #{cursor_y} #{pane_in_mode}'],
+    ['load-buffer', '-b', 'gloss-delivery-1', '-'],
+    ['paste-buffer', '-p', '-r', '-d', '-b', 'gloss-delivery-1', '-t', '=la-one:'],
+    ['delete-buffer', '-b', 'gloss-delivery-1'],
+  ]);
+  expect(calls.map((c) => c.input)).toEqual(['', '', '-x "$(rm -rf /)"\nline', '', '']);
+  await expect(tmux.loadBuffer('other', 'x')).rejects.toThrow('Invalid tmux buffer name');
+  await expect(tmux.pasteBuffer('la-one', 'gloss-a b')).rejects.toThrow('Invalid tmux buffer name');
+  await expect(tmux.paneCursor('evil')).rejects.toThrow('Invalid tmux session name');
+});
+it('rejects an unreadable cursor report and treats an absent buffer as deleted', async () => {
+  const replies = [
+    { line: 'garbage', outcome: ok },
+    {
+      outcome: {
+        code: 1,
+        signal: null,
+        reason: 'exited' as const,
+        diagnostics: 'no buffer gloss-x\n',
+      },
+    },
+  ];
+  const tmux = await createTmux({
+    stateDir: await temp(),
+    executable: '/stub/tmux',
+    runner: async function* () {
+      const reply = replies.shift();
+      if (reply && 'line' in reply) yield { type: 'line', line: reply.line };
+      yield { type: 'exit', outcome: reply?.outcome ?? ok };
+    },
+  });
+  await expect(tmux.paneCursor('la-one')).rejects.toThrow('tmux did not report the cursor');
+  await expect(tmux.deleteBuffer('gloss-x')).resolves.toBeUndefined();
+});
+describe.skipIf(!available)('pasting into a real pane', () => {
+  const tui = fileURLToPath(new URL('../fixtures/fake-claude-tui.mjs', import.meta.url));
+  async function pane() {
+    const state = await stateTemp();
+    const log = join(state, 'input.log');
+    const tmux = await createTmux({ stateDir: state });
+    await tmux.newSession('la-paste', state, [process.execPath, tui, log]);
+    await expect.poll(() => tmux.capturePane('la-paste'), { timeout: 5000 }).toContain('❯');
+    return { tmux, read: () => readFile(log, 'utf8').catch(() => '') };
+  }
+  it('pastes a multi-line message as one bracketed block, then presses Enter', async () => {
+    const { tmux, read } = await pane();
+    await tmux.loadBuffer('gloss-multi', 'line one\nline two');
+    await tmux.pasteBuffer('la-paste', 'gloss-multi');
+    await tmux.sendKeys('la-paste', ['Enter']);
+    await expect.poll(read, { timeout: 5000 }).toBe('\u001b[200~line one\nline two\u001b[201~\r');
+    // -d removed the buffer already; deleting it again is not an error.
+    await expect(tmux.deleteBuffer('gloss-multi')).resolves.toBeUndefined();
+  });
+  it('pastes a message far larger than one tmux command can carry', async () => {
+    const { tmux, read } = await pane();
+    const text = 'a'.repeat(50_000) + '\n' + 'b';
+    await tmux.loadBuffer('gloss-large', text);
+    await tmux.pasteBuffer('la-paste', 'gloss-large');
+    await expect
+      .poll(async () => (await read()).length, { timeout: 10_000 })
+      .toBe(text.length + 12);
+    expect(await read()).toBe('\u001b[200~' + text + '\u001b[201~');
+  });
+  it('reads the cursor and the styled screen of the pane', async () => {
+    const { tmux } = await pane();
+    expect(await tmux.paneCursor('la-paste')).toEqual({ x: 2, y: 2, inMode: false });
+    expect(await tmux.capturePaneStyled('la-paste')).toContain('─'.repeat(60));
+  });
 });
