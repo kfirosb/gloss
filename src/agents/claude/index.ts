@@ -130,7 +130,10 @@ async function registries(config: string): Promise<Registry[]> {
         typeof r.pid === 'number' &&
         Number.isInteger(r.pid) &&
         r.pid > 0 &&
-        typeof r.version === 'string'
+        typeof r.version === 'string' &&
+        // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
+        (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
+        (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
       )
         records.push({
           sessionId: r.sessionId,

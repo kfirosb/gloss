@@ -22,6 +22,103 @@ const ids = {
   npm: '00000000-0000-4000-8000-000000000006',
 };
 
+it.runIf(process.platform === 'darwin').each([
+  { label: 'missing', metadata: {}, accepted: true },
+  { label: 'CLI', metadata: { entrypoint: 'cli' }, accepted: true },
+  { label: 'SDK', metadata: { entrypoint: 'sdk-cli' }, accepted: false },
+  { label: 'null', metadata: { entrypoint: null }, accepted: false },
+  { label: 'number', metadata: { entrypoint: 42 }, accepted: false },
+  { label: 'boolean', metadata: { entrypoint: false }, accepted: false },
+  { label: 'object', metadata: { entrypoint: { kind: 'cli' } }, accepted: false },
+  { label: 'array', metadata: { entrypoint: ['cli'] }, accepted: false },
+])('filters $label entrypoint metadata', async ({ metadata, accepted }) => {
+  const config = await realpath(await mkdtemp(join(tmpdir(), 'claude-entrypoint-')));
+  roots.push(config);
+  await mkdir(join(config, 'sessions'));
+  await writeFile(
+    join(config, 'sessions', '102.json'),
+    JSON.stringify({
+      pid: 102,
+      sessionId: ids.current,
+      cwd: config,
+      version: '2.1.284',
+      messagingSocketPath: '/tmp/s102.sock',
+      ...metadata,
+    }),
+  );
+  const runner: ProcessRunner = async function* (executable, args) {
+    if (executable === '/usr/sbin/lsof' && args.at(-1) === '/tmp/s102.sock') {
+      yield { type: 'line', line: 'p102' };
+      yield { type: 'line', line: 'cclaude' };
+    }
+    yield exit;
+  };
+  const scan = await discoverOpenClaude(
+    { configDir: config, runner },
+    new AbortController().signal,
+  );
+  expect(scan.complete).toBe(true);
+  expect(scan.candidates.map(({ target }) => target.sessionRef)).toEqual(
+    accepted ? [ids.current] : [],
+  );
+});
+
+it.runIf(process.platform === 'darwin').each([
+  { label: 'missing', metadata: {}, accepted: true },
+  { label: 'empty', metadata: { messagingSocketPath: '' }, accepted: true },
+  { label: 'owned socket', metadata: { messagingSocketPath: '/tmp/s102.sock' }, accepted: true },
+  {
+    label: 'unowned socket',
+    metadata: { messagingSocketPath: '/tmp/unowned.sock' },
+    accepted: false,
+  },
+  { label: 'null', metadata: { messagingSocketPath: null }, accepted: false },
+  { label: 'number', metadata: { messagingSocketPath: 42 }, accepted: false },
+  { label: 'boolean', metadata: { messagingSocketPath: false }, accepted: false },
+  {
+    label: 'object',
+    metadata: { messagingSocketPath: { path: '/tmp/s102.sock' } },
+    accepted: false,
+  },
+  { label: 'array', metadata: { messagingSocketPath: ['/tmp/s102.sock'] }, accepted: false },
+])(
+  'filters $label socket metadata even with a live Claude process',
+  async ({ metadata, accepted }) => {
+    const config = await realpath(await mkdtemp(join(tmpdir(), 'claude-socket-')));
+    roots.push(config);
+    await mkdir(join(config, 'sessions'));
+    await writeFile(
+      join(config, 'sessions', '102.json'),
+      JSON.stringify({
+        pid: 102,
+        sessionId: ids.current,
+        cwd: config,
+        version: '2.1.284',
+        entrypoint: 'cli',
+        ...metadata,
+      }),
+    );
+    const runner: ProcessRunner = async function* (executable, args) {
+      if (executable === '/usr/sbin/lsof' && args.at(-1) === '/tmp/s102.sock') {
+        yield { type: 'line', line: 'p102' };
+        yield { type: 'line', line: 'cclaude' };
+      }
+      // A malformed path must be rejected even when the legacy process check would pass.
+      if (executable === '/bin/ps' && args.at(-1) === '102')
+        yield { type: 'line', line: '/usr/local/bin/claude' };
+      yield exit;
+    };
+    const scan = await discoverOpenClaude(
+      { configDir: config, runner },
+      new AbortController().signal,
+    );
+    expect(scan.complete).toBe(true);
+    expect(scan.candidates.map(({ target }) => target.sessionRef)).toEqual(
+      accepted ? [ids.current] : [],
+    );
+  },
+);
+
 it.runIf(process.platform === 'darwin')(
   'lists every live interactive Claude terminal with its status and skips language workers',
   async () => {
