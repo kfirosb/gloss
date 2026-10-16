@@ -118,9 +118,9 @@ function Message({
     >
       <small>
         {message.role === 'assistant'
-          ? original
-            ? 'Coding agent · original'
-            : 'Coding agent · translated'
+          ? !original && status === 'complete'
+            ? 'Coding agent · translated'
+            : 'Coding agent · original'
           : 'Coding agent · original user message'}
       </small>
       <SummarizableResponse
