@@ -57,6 +57,37 @@ describe('Claude input box (synthetic)', () => {
     expect(readInputBox(parsed(box('! ls')))).toEqual({ state: 'not-empty' });
     expect(readInputBox(parsed(box('❯ ', '  -- INSERT --')))).toEqual({ state: 'not-empty' });
   });
+  it('counts typed text drawn dim, coloured or bold, and text after or apart from the placeholder, as not empty', () => {
+    expect(readInputBox(parsed(box('❯ x')))).toEqual({ state: 'not-empty' });
+    expect(readInputBox(parsed(box('❯ ')))).toEqual({ state: 'empty', row: 3, column: 2 });
+    for (const prompt of [
+      '❯ \u001b[38;5;141multrathink',
+      '❯ \u001b[2m\u001b[1mX',
+      '❯ \u001b[2mTry "fix lint"\u001b[22m visible',
+      '❯ \u001b[38;5;246mTry "fix lint"\u001b[39m',
+      '❯  \u001b[2mTry "fix lint"\u001b[22m',
+      '❯ \u001b[7ma\u001b[27m\u001b[2m\u001b[1mbc',
+      '❯ \u001b[2mTry\u001b[0m \u001b[2mthis\u001b[0m  x',
+      '❯ \u001b[2mTry\u001b[0m  \u001b[2mthis\u001b[0m',
+    ])
+      expect(readInputBox(parsed(box(prompt))), prompt).toEqual({ state: 'not-empty' });
+  });
+  it('reads dim typed text at the caret as empty: by style alone it is the placeholder', () => {
+    // Claude draws typed text in the default colour in every capture (the `typed` fixtures), and when text sits in
+    // the box the terminal cursor is after it, not at the caret: the caller's cursor check (Task 6) is the guard here.
+    expect(readInputBox(parsed(box('❯ \u001b[2mhello')))).toEqual({
+      state: 'empty',
+      row: 3,
+      column: 2,
+    });
+  });
+  it('reads a placeholder drawn word by word, with single plain spaces between, as empty', () => {
+    expect(
+      readInputBox(
+        parsed(box('❯ \u001b[2mTry\u001b[0m \u001b[2m"fix\u001b[0m \u001b[2mlint"\u001b[0m')),
+      ),
+    ).toEqual({ state: 'empty', row: 3, column: 2 });
+  });
   it('reports a missing box when the rules are absent', () => {
     expect(readInputBox(parsed('Do you want to proceed?\n ❯ 1. Yes\n'))).toEqual({
       state: 'missing',

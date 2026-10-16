@@ -5,6 +5,8 @@ export interface ScreenCell {
   faint: boolean;
   /** Reverse video: Claude draws its own cursor this way. */
   inverse: boolean;
+  /** Drawn with a foreground or background colour, or an attribute other than dim and reverse (bold, underline, …). */
+  decorated: boolean;
 }
 export type ScreenLine = ScreenCell[];
 
@@ -14,31 +16,66 @@ const OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/y;
 interface Style {
   dim: boolean;
   defaultForeground: boolean;
+  defaultBackground: boolean;
   inverse: boolean;
+  /** Other SGR attributes still switched on (bold, italic, underline, …); unknown codes stay on until a full reset. */
+  attributes: ReadonlySet<number>;
 }
-const PLAIN: Style = { dim: false, defaultForeground: true, inverse: false };
+const PLAIN: Style = {
+  dim: false,
+  defaultForeground: true,
+  defaultBackground: true,
+  inverse: false,
+  attributes: new Set(),
+};
+/** SGR codes that switch attributes off, and the attributes each one ends. */
+const ATTRIBUTE_RESETS = new Map<number, readonly number[]>([
+  [22, [1]],
+  [23, [3]],
+  [24, [4, 21]],
+  [25, [5, 6]],
+  [28, [8]],
+  [29, [9]],
+  [55, [53]],
+  [59, [58]],
+]);
+const isForeground = (n: number) => (n >= 30 && n <= 37) || (n >= 90 && n <= 97);
+const isBackground = (n: number) => (n >= 40 && n <= 47) || (n >= 100 && n <= 107);
 
 function applySgr(style: Style, params: string): Style {
   const codes = params === '' ? ['0'] : params.split(';');
   let next = { ...style };
+  const attributes = new Set(style.attributes);
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i] ?? '';
     const head = code.split(':')[0] ?? '';
     const n = Number(head);
-    if (head === '' || n === 0) next = { ...PLAIN };
-    else if (n === 2) next.dim = true;
-    else if (n === 22) next.dim = false;
-    else if (n === 7) next.inverse = true;
+    if (head === '' || n === 0) {
+      next = { ...PLAIN };
+      attributes.clear();
+    } else if (n === 2) next.dim = true;
+    else if (n === 22) {
+      next.dim = false;
+      attributes.delete(1);
+    } else if (n === 7) next.inverse = true;
     else if (n === 27) next.inverse = false;
-    else if ((n >= 30 && n <= 37) || (n >= 90 && n <= 97)) next.defaultForeground = false;
+    else if (isForeground(n)) next.defaultForeground = false;
     else if (n === 39) next.defaultForeground = true;
-    else if (n === 38 || n === 48) {
+    else if (isBackground(n)) next.defaultBackground = false;
+    else if (n === 49) next.defaultBackground = true;
+    else if (n === 38 || n === 48 || n === 58) {
       if (n === 38) next.defaultForeground = false;
+      else if (n === 48) next.defaultBackground = false;
+      else attributes.add(n);
       // 38;5;n and 38;2;r;g;b carry their colour in the following parameters; 38:5:n carries it in this one.
       if (!code.includes(':')) i += codes[i + 1] === '5' ? 2 : codes[i + 1] === '2' ? 4 : 0;
+    } else {
+      const ends = ATTRIBUTE_RESETS.get(n);
+      if (ends) for (const ended of ends) attributes.delete(ended);
+      else attributes.add(n);
     }
   }
-  return next;
+  return { ...next, attributes };
 }
 /** Lines of cells from a styled capture; undefined when it holds an escape other than SGR or OSC (unrecognised). */
 export function parseStyledScreen(screen: string): ScreenLine[] | undefined {
@@ -69,7 +106,12 @@ export function parseStyledScreen(screen: string): ScreenLine[] | undefined {
       lines.push(current);
       continue;
     }
-    current.push({ char, faint: style.dim || !style.defaultForeground, inverse: style.inverse });
+    current.push({
+      char,
+      faint: style.dim || !style.defaultForeground,
+      inverse: style.inverse,
+      decorated: !style.defaultForeground || !style.defaultBackground || style.attributes.size > 0,
+    });
   }
   return lines;
 }
@@ -93,13 +135,40 @@ const isRule = (line: readonly ScreenCell[]) => {
   return text.length >= MIN_RULE_CELLS && /^─+$/.test(text);
 };
 const visible = (cell: ScreenCell) => cell.char.trim() !== '';
+/** Claude's placeholder style: dimmed, in the default colours, with no other attribute. */
+const inPlaceholderStyle = (cell: ScreenCell) => cell.faint && !cell.decorated && !cell.inverse;
+const isPlaceholder = (cell: ScreenCell) => visible(cell) && inPlaceholderStyle(cell);
+/** Claude's own cursor on an empty box: a reversed space, or the reversed first letter of the placeholder. */
+const isCursorCell = (cell: ScreenCell, next: ScreenCell | undefined) =>
+  cell.inverse &&
+  (cell.char === ' ' || (/^\p{L}$/u.test(cell.char) && next !== undefined && isPlaceholder(next)));
+const isPlainBlank = (cell: ScreenCell) => !visible(cell) && !cell.decorated && !cell.inverse;
+/** A fresh Claude draws each placeholder word as its own dim run, with one plain space between the words. */
+const continuesPlaceholder = (cells: readonly ScreenCell[], at: number) => {
+  const cell = cells[at];
+  const next = cells[at + 1];
+  if (!cell) return false;
+  return (
+    inPlaceholderStyle(cell) || (isPlainBlank(cell) && next !== undefined && isPlaceholder(next))
+  );
+};
+/**
+ * Empty input: nothing, or one placeholder run that starts at the caret (after Claude's reversed cursor, if any),
+ * with single plain spaces allowed between its words, then only blanks. Blank typed input (spaces) also reads as
+ * empty here; the caller's cursor check catches it.
+ */
 function isEmptyInput(cells: readonly ScreenCell[]): boolean {
-  const [first, ...rest] = cells;
-  if (!first) return true;
-  if (rest.some((cell) => visible(cell) && !cell.faint)) return false;
-  if (!visible(first) || first.faint) return true;
-  // Claude's inverted cursor sits on the first letter of the placeholder when the input is empty.
-  return first.inverse && rest.some((cell) => visible(cell) && cell.faint);
+  let at = 0;
+  const first = cells[0];
+  if (first?.inverse) {
+    if (!isCursorCell(first, cells[1])) return false;
+    at = 1;
+  }
+  const input = cells.slice(at);
+  let runEnd = 0;
+  if (input[0] && isPlaceholder(input[0]))
+    while (runEnd < input.length && continuesPlaceholder(input, runEnd)) runEnd++;
+  return input.slice(runEnd).every((cell) => !visible(cell));
 }
 /** Claude's input box: the `❯` line between the last two rules on the screen. Anything unrecognised is not empty. */
 export function readInputBox(lines: readonly ScreenLine[]): InputBox {
