@@ -237,7 +237,7 @@ test('auto mode switches on approval, but not while typing', async ({ page }) =>
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true', { timeout: 4000 });
   await expect(box).toBeFocused();
 });
-test('⌘` toggles the terminal, also while the terminal has focus', async ({ page }) => {
+test('⌘` and Ctrl+` toggle the terminal, also while the terminal has focus', async ({ page }) => {
   const { received } = await withLaunch(page);
   await page.goto('/#capability=test');
   await view(page, 'Original').click();
@@ -248,6 +248,12 @@ test('⌘` toggles the terminal, also while the terminal has focus', async ({ pa
   await page.keyboard.press('Meta+Backquote');
   await expect(view(page, 'Original')).toHaveAttribute('aria-checked', 'true');
   await expect(terminal(page)).toHaveCount(0);
+  // Ctrl+` too, since macOS may keep ⌘` for itself.
+  await page.keyboard.press('Control+Backquote');
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await terminal(page).locator('.xterm-helper-textarea').focus();
+  await page.keyboard.press('Control+Backquote');
+  await expect(view(page, 'Original')).toHaveAttribute('aria-checked', 'true');
   expect(typed(received)).toBe('');
 });
 test('History in Terminal view switches to Split with history on', async ({ page }) => {
@@ -347,7 +353,13 @@ test('the Hebrew line translates and types the result into the terminal', async 
     const action = r.request().postDataJSON() as { type: string };
     if (action.type !== 'translate-composer') return r.fallback();
     return r.fulfill({
-      json: { sessionId: 'L-panel', sequence: 1, snapshot: snapshot(), translation: 'yes please' },
+      // A trailing line break must not press Enter twice.
+      json: {
+        sessionId: 'L-panel',
+        sequence: 1,
+        snapshot: snapshot(),
+        translation: 'yes please\n',
+      },
     });
   });
   await page.goto('/#capability=test');
@@ -374,4 +386,70 @@ test('a failed translation keeps the Hebrew line text and sends nothing', async 
   await expect(terminal(page).getByRole('alert')).toBeVisible();
   await expect(line).toHaveValue('כן בבקשה');
   expect(typed(received)).toBe('');
+});
+test('a translation of only control characters is not typed and keeps the text', async ({
+  page,
+}) => {
+  const { received } = await withLaunch(page);
+  await page.route('**/api/sessions/*/actions', (r) =>
+    r.fulfill({
+      json: { sessionId: 'L-panel', sequence: 1, snapshot: snapshot(), translation: '\r\n\u0007' },
+    }),
+  );
+  await page.goto('/#capability=test');
+  await view(page, 'Terminal').click();
+  await expect.poll(() => received.some((m) => m.type === 'resize')).toBe(true);
+  const line = page.getByRole('textbox', { name: 'Write to the terminal' });
+  await line.fill('כן');
+  await line.press('Enter');
+  await expect(terminal(page).getByRole('alert')).toBeVisible();
+  await expect(line).toHaveValue('כן');
+  expect(typed(received)).toBe('');
+});
+test('the approval restore waits until the user leaves the terminal and stops typing', async ({
+  page,
+}) => {
+  const { setActivity, received } = await withLaunch(page, 'approval-required', 'auto');
+  await page.goto('/#capability=test');
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => received.some((m) => m.type === 'resize')).toBe(true);
+  await terminal(page).locator('.xterm-helper-textarea').focus();
+  await page.keyboard.type('n');
+  setActivity('idle');
+  await expect(view(page, 'Terminal').locator('.live-view-dot')).toHaveCount(0, {
+    timeout: 6000,
+  });
+  await page.waitForTimeout(2500);
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  // Unsent text in the Hebrew line holds the terminal too, even with the focus elsewhere.
+  const line = page.getByRole('textbox', { name: 'Write to the terminal' });
+  await line.fill('לא');
+  await feed(page).click();
+  await page.waitForTimeout(2500);
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await line.fill('');
+  await feed(page).click();
+  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true', {
+    timeout: 4000,
+  });
+});
+test('changing the conversation side during an approval keeps the restore', async ({ page }) => {
+  const { setActivity } = await withLaunch(page, 'approval-required', 'auto');
+  await page.goto('/#capability=test');
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await page
+    .getByRole('radiogroup', { name: 'Conversation side' })
+    .getByRole('radio', { name: 'Original' })
+    .click();
+  expect(await storedView(page)).toBe('translated');
+  setActivity('idle');
+  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true', {
+    timeout: 6000,
+  });
+  await view(page, 'Split').click();
+  await expect(
+    page.getByRole('radiogroup', { name: 'Conversation side' }).getByRole('radio', {
+      name: 'Original',
+    }),
+  ).toHaveAttribute('aria-checked', 'true');
 });

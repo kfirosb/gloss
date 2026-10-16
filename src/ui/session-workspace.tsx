@@ -71,6 +71,8 @@ import {
   useAutoOpenTerminal,
   lastKeystrokeAt,
   noteKeystroke,
+  typedRecently,
+  AUTO_OPEN_POLL_MS,
 } from './launch-controls.js';
 
 import { RunCommandContext } from './run-command.js';
@@ -329,8 +331,8 @@ export function SessionWorkspace({
     setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
   };
   const chooseConversation = (conversation: ConversationView) => {
-    setApprovalView(null);
-    setLiveLayout({ view: liveView, conversation });
+    // During an approval only the side is saved; the approval's Split stays temporary and still restores.
+    setLiveLayout(approvalView ? { conversation } : { view: liveView, conversation });
   };
   // The approval poll keeps its first callback, so it reads the current view through a ref.
   const liveViewNow = useRef(liveView);
@@ -341,18 +343,26 @@ export function SessionWorkspace({
     setTerminalFocus(false);
     setApprovalView(view);
   });
+  const terminalDraft = useRef(false);
+  // Restore once the approval is over and the user has left the terminal: not while typing, focused there or
+  // holding unsent Hebrew-line text. An approval that comes back first simply keeps the terminal.
   useEffect(() => {
-    if (!approval) setApprovalView(null);
-  }, [approval]);
+    if (approval || !approvalView) return;
+    const tick = () => {
+      if (typedRecently(lastKeystrokeAt(), Date.now()) || terminalDraft.current) return;
+      if (document.activeElement?.closest('.live-terminal')) return;
+      setApprovalView(null);
+    };
+    tick();
+    const timer = setInterval(tick, AUTO_OPEN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [approval, approvalView]);
   useEffect(() => {
     if (!launchId) return;
     // Capture phase: the terminal's own textarea would otherwise take the key first.
     const toggle = (event: KeyboardEvent) => {
-      if (
-        event.key !== '`' ||
-        !(event.metaKey || (event.ctrlKey && !/Mac/.test(navigator.platform)))
-      )
-        return;
+      // Ctrl+` too on the Mac, where the system may keep ⌘` for switching windows.
+      if (event.key !== '`' || !(event.metaKey || event.ctrlKey)) return;
       event.preventDefault();
       event.stopPropagation();
       chooseLiveView(toggleTerminal(liveViewNow.current, liveLayout.conversation));
@@ -1156,6 +1166,9 @@ export function SessionWorkspace({
             client={client}
             attention={approval}
             autoFocus={terminalFocus}
+            onDraft={(hasDraft) => {
+              terminalDraft.current = hasDraft;
+            }}
           />
         )}
         {liveView === 'split' && (

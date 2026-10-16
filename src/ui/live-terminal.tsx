@@ -1,7 +1,14 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { TerminalView } from './terminal-view.js';
 import { errorMessage } from './error-message.js';
 import type { SessionClient } from './session-client.js';
+
+/** One terminal line: line breaks become spaces and other control characters go, so nothing extra is pressed. */
+export const terminalLine = (text: string) =>
+  text
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim();
 
 /** The session's terminal with a Hebrew line under it: the text is translated, then typed into the terminal. */
 export function LiveTerminal({
@@ -9,16 +16,23 @@ export function LiveTerminal({
   client,
   attention,
   autoFocus,
+  onDraft,
 }: {
   launchId: string;
   client: SessionClient;
   attention: boolean;
   autoFocus: boolean;
+  /** Told whether the line holds unsent text, so the panel does not hide it. */
+  onDraft?(hasDraft: boolean): void;
 }) {
   const inputRef = useRef<((text: string) => boolean) | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    onDraft?.(text.trim() !== '');
+    return () => onDraft?.(false);
+  }, [text]);
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -27,9 +41,9 @@ export function LiveTerminal({
     setBusy(true);
     setError('');
     try {
-      const translation = await client.translateComposer(value);
-      if (!inputRef.current?.(translation + '\r'))
-        throw new Error('The terminal is not connected.');
+      const line = terminalLine(await client.translateComposer(value));
+      if (!line) throw new Error('The translation came back empty.');
+      if (!inputRef.current?.(line + '\r')) throw new Error('The terminal is not connected.');
       setText('');
     } catch (cause) {
       // Keep the text so nothing the user wrote is lost.
