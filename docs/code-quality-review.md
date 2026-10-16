@@ -123,8 +123,10 @@ reviewer also checked the subsequent type cleanup and reported no material findi
 - Profile large-history persistence and registry restoration before adding more
   caching; ownership checks and durable delivery behavior must remain intact.
 
-No live subscription-consuming agent probes, app installation, DMG build, release,
-push or merge was performed. The installed app and user data were not modified.
+During the original refactor review, no live subscription-consuming agent probes,
+app installation, DMG build, release, push or merge was performed. The later local
+main integration is recorded above; it also left the installed app and user data
+untouched and did not push or publish anything.
 
 ## Historical verification before main integration
 
