@@ -4,7 +4,7 @@ Captured from the user's request on 2026-09-28. These are separate workstreams, 
 
 ## 16. lsof storm in Claude session liveness checks
 
-Status: fixed on branch `lsof`, built as Gloss 0.10.5 (not yet installed).
+Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
 
 Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh and status poll: 155 runs in 5 s with 9 sessions, load average 7.7, and the full browser suite took 22 minutes.
 
@@ -13,7 +13,7 @@ Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh
 - [x] `kill(pid, 0)` pre-check; checks in the same tick and the recent working set share one call.
 - [x] A failed probe keeps discovery incomplete; one bad record cannot fail the others; every send re-checks without the cache.
 - [x] Measured: built backend 2–3 Claude `lsof` runs per 10 s; packaged 0.10.5 1 Claude run per 6 s. Browser suite 279/279 in about 5 minutes.
-- [ ] Measure in the installed app after installing 0.10.5.
+- [x] Installed 0.10.5 (9 Claude records, 93 catalog entries): all `lsof` runs fell from 143 per 5 s to 42–52 per 10 s; Claude's share is 6 per 10 s. Load average fell from 12–14 to about 4. Unit 1102/1102; browser 279/279 in 4.7 min.
 - [ ] Follow-up: Codex probes (`lsof -Fpcfn` on writer locks and `lsof -a -d cwd`) now account for most remaining `lsof` runs, about 3/s in the packaged test copy.
 
 ## 15. Claude discovery accepts invalid `entrypoint` values
