@@ -12,6 +12,7 @@ import {
   CLAUDE_PROTOCOL,
   supportsClaudeProtocol,
   parseClaudeRecord,
+  peerTag,
 } from '../../src/agents/claude/index.js';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 import { harness, watch } from './agent-harness.js';
@@ -537,6 +538,51 @@ async function setup(authenticated = true) {
   return { h, credentials, connection, frames, adapter };
 }
 describe('Claude native peer inbox', () => {
+  const peerRecord = (content: string) => ({
+    type: 'user',
+    uuid: 'native',
+    sessionId: 'session',
+    isMeta: true,
+    origin: { kind: 'peer', from: 'unknown' },
+    message: { content },
+  });
+  const suffix =
+    '\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf.';
+  it('reads the short gloss marker inside every 2.1.301 peer wrapper', () => {
+    const tag = peerTag('delivery-f236682e-6b08-413d-8f64-1a1945ab8cbb');
+    expect(tag).toMatch(/^[0-9a-f]{8}$/);
+    for (const content of [
+      `Another Claude session sent a message:\n[gloss:${tag}]\nHello${suffix}`,
+      `Another Claude session sent a message while you were working:\n[gloss:${tag}]\nHello${suffix}`,
+      `A peer session sent a message while you were working:\n[gloss:${tag}]\nHello${suffix}`,
+      `Another Claude session sent a message while you were working:\n<cross-session-message from="unknown">\n[gloss:${tag}]\nHello\n</cross-session-message>${suffix}`,
+    ])
+      expect(parseClaudeRecord(peerRecord(content), 0, 'session')).toMatchObject({
+        delivery: tag,
+        message: { clientId: tag, text: 'Hello' },
+      });
+  });
+  it('keeps reading the legacy marker, accepts a msg_id naming the same delivery, hides unknown wrappers', () => {
+    expect(
+      parseClaudeRecord(
+        peerRecord(
+          `Another Claude session sent a message:\n[Language Assistant delivery: request-9]\nHi${suffix}`,
+        ),
+        0,
+        'session',
+      ),
+    ).toMatchObject({ delivery: 'request-9', message: { text: 'Hi' } });
+    const tag = peerTag('request-10');
+    const withId = (msgId: string) => ({
+      ...peerRecord(`Another Claude session sent a message:\n[gloss:${tag}]\nHi${suffix}`),
+      origin: { kind: 'peer', from: 'unknown', msg_id: msgId },
+    });
+    expect(parseClaudeRecord(withId('request-10'), 0, 'session')).toMatchObject({ delivery: tag });
+    expect(parseClaudeRecord(withId('request-11'), 0, 'session')).toEqual({});
+    expect(
+      parseClaudeRecord(peerRecord('Some future wrapper:\n[gloss:abcdef12]\nHi'), 0, 'session'),
+    ).toEqual({});
+  });
   it('correlates current Claude peer records without msg_id while ignoring human lookalikes', () => {
     const record = {
       type: 'user',
@@ -612,7 +658,10 @@ describe('Claude native peer inbox', () => {
       panelSessionId: 'panel',
       transport: 'peer',
     });
-    expect(result).toMatchObject({ state: 'unconfirmed', nativeMessageId: 'fixture-delivery' });
+    expect(result).toMatchObject({
+      state: 'unconfirmed',
+      nativeMessageId: peerTag('fixture-delivery'),
+    });
     await expect.poll(() => frames.length).toBe(1);
     expect(frames[0]).toEqual({
       msgV: 1,
@@ -620,7 +669,7 @@ describe('Claude native peer inbox', () => {
       type: 'user',
       message: {
         role: 'user',
-        content: '[Language Assistant delivery: fixture-delivery]\nExact message',
+        content: `[gloss:${peerTag('fixture-delivery')}]\nExact message`,
       },
       priority: 'next',
       session_id: h.sessionRef,
@@ -642,7 +691,11 @@ describe('Claude native peer inbox', () => {
     await appendFile(h.transcript, native);
     expect(await connection.reconcileDelivery!(delivery)).toBe(true);
     expect(
-      await connection.reconcileDelivery!({ ...delivery, nativeMessageId: 'different-request' }),
+      await connection.reconcileDelivery!({
+        ...delivery,
+        id: 'different-request',
+        nativeMessageId: peerTag('different-request'),
+      }),
     ).toBe(false);
   });
   it('accepts Claude versions outside the known-version list', () => {
@@ -833,7 +886,7 @@ describe('Claude native peer inbox', () => {
         type: 'user',
         message: {
           role: 'user',
-          content: '[Language Assistant delivery: fixture-delivery]\n' + text,
+          content: `[gloss:${peerTag('fixture-delivery')}]\n` + text,
         },
         priority: 'next',
         session_id: h.sessionRef,

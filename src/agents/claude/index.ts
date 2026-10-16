@@ -25,7 +25,7 @@ import {
 } from '../shared.js';
 import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { ChannelStore } from './channel-store.js';
@@ -237,7 +237,30 @@ function channelRequest(value: unknown, text: unknown): string | undefined {
 const CHANNEL_REQUEST_MARKER = new RegExp(
   `^<channel source="([^"]+)" request_id="(${REQUEST_ID_SOURCE})"`,
 );
-const DELIVERY_MARKER = new RegExp(`^\\[Language Assistant delivery: (${REQUEST_ID_SOURCE})\\]\\n`);
+const PEER_PREFIXES = [
+  'Another Claude session sent a message while you were working:',
+  'A peer session sent a message while you were working:',
+  'Another Claude session sent a message:',
+];
+const PEER_SUFFIX = '\n\nThis came from another Claude session ';
+const CROSS_SESSION_TAG = /^<cross-session-message\b[^>]*>\n([\s\S]*)\n<\/cross-session-message>$/;
+/** The text Gloss sent, from inside Claude's peer wrapper; undefined for a wrapper this version doesn't know. */
+export function peerBody(text: string): string | undefined {
+  const prefix = PEER_PREFIXES.find((candidate) => text.startsWith(candidate));
+  const end = text.lastIndexOf(PEER_SUFFIX);
+  if (!prefix || end < prefix.length) return undefined;
+  const body = text.slice(prefix.length, end).replace(/^\n/, '');
+  return CROSS_SESSION_TAG.exec(body)?.[1] ?? body;
+}
+/** Hex characters of the request id's SHA-256 that name one delivery inside a peer message. */
+const PEER_TAG_HEX_CHARS = 8;
+/** Names one delivery inside a peer message; newer Claude versions no longer record our msg_id. */
+export function peerTag(requestId: string): string {
+  return createHash('sha256').update(requestId).digest('hex').slice(0, PEER_TAG_HEX_CHARS);
+}
+const PEER_MARKER = new RegExp(
+  `^\\[(?:gloss:([0-9a-f]{${PEER_TAG_HEX_CHARS}})|Language Assistant delivery: (${REQUEST_ID_SOURCE}))\\]\\n`,
+);
 export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {
   if (record.sessionId !== undefined && record.sessionId !== sessionRef)
     throw new Error('Transcript identity mismatch');
@@ -265,17 +288,15 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
   const body = message.content;
   let text = typeof body === 'string' ? body : textBlocks(body).join('\n');
   if (peer) {
-    const prefix = 'Another Claude session sent a message:\n';
-    const suffix = '\n\nThis came from another Claude session ';
-    if (text.startsWith(prefix) && text.lastIndexOf(suffix) >= prefix.length)
-      text = text.slice(prefix.length, text.lastIndexOf(suffix));
-    else text = ''; // Unknown wrappers are context, never rendered as reviewed work.
-    // Newer Claude versions omit origin.msg_id. Keep a per-request marker in
-    // the peer payload so confirmation survives that transcript format change.
-    const marker = DELIVERY_MARKER.exec(text);
-    if (marker) {
-      if (deliveryId && deliveryId !== marker[1]) return {};
-      deliveryId = marker[1];
+    const inner = peerBody(text);
+    // Unknown wrappers are context, never rendered as reviewed work.
+    text = inner ?? '';
+    const marker = PEER_MARKER.exec(text);
+    const markerId = marker?.[1] ?? marker?.[2];
+    if (marker && markerId) {
+      // Older Claude versions also record our msg_id (the full request id); it must name the same delivery.
+      if (deliveryId && deliveryId !== markerId && peerTag(deliveryId) !== markerId) return {};
+      deliveryId = markerId;
       text = text.slice(marker[0].length);
     }
   }
@@ -329,7 +350,7 @@ async function socketWrite(
         type: 'user',
         message: {
           role: 'user',
-          content: `[Language Assistant delivery: ${requestId}]\n${claudeMessage(text, attachments)}`,
+          content: `[gloss:${peerTag(requestId)}]\n${claudeMessage(text, attachments)}`,
         },
         priority: 'next',
         session_id: credentials.sessionRef,
@@ -578,6 +599,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           fileReferences: true,
           sendWhileBusy: false,
           channelSendWhileBusy: true,
+          peerSendWhileBusy: true,
           acknowledgement: 'accepted',
         },
         async dispatch(requestId, text, attachments = [], sendContext) {
@@ -677,13 +699,13 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
             return {
               state: 'unconfirmed',
               reason: 'Inbox delivery outcome is unknown; do not retry automatically',
-              nativeMessageId: requestId,
+              nativeMessageId: peerTag(requestId),
             };
           }
           return {
             state: 'unconfirmed',
             reason: 'Socket written; awaiting correlated native consumption',
-            nativeMessageId: requestId,
+            nativeMessageId: peerTag(requestId),
           };
         },
       });
@@ -717,12 +739,17 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         }
         if (!delivery.nativeMessageId || delivery.target.sessionRef !== target.sessionRef)
           return false;
+        // Older Claude records our msg_id (the request id); newer Claude only the in-text tag.
+        const ids = new Set([delivery.id, delivery.nativeMessageId]);
         let cursor: string | undefined;
         let matches = 0;
         do {
           const page = await transcript.history(cursor);
           matches += page.messages.filter(
-            (message) => message.role === 'user' && message.clientId === delivery.nativeMessageId,
+            (message) =>
+              message.role === 'user' &&
+              message.clientId !== undefined &&
+              ids.has(message.clientId),
           ).length;
           cursor = page.next;
         } while (cursor && matches < 2);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentCapabilities } from '../../src/core/contracts.js';
 import { createWorkflow } from '../../src/core/workflow.js';
 import { createTestWorkflow } from '../helpers/create-test-workflow.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
@@ -177,10 +178,14 @@ describe('portable workflow', () => {
     await workflow.close();
   });
   describe('Claude channel send while working', () => {
-    async function claudeApp(state: 'working' | 'approval-required' | 'disconnected') {
+    async function claudeApp(
+      state: 'working' | 'approval-required' | 'disconnected',
+      capabilities: Partial<AgentCapabilities> = {},
+    ) {
       const agent = new FakeAgent('claude');
       agent.result = { state: 'queued' };
       agent.capabilities.channelSendWhileBusy = true;
+      Object.assign(agent.capabilities, capabilities);
       const language = new FakeLanguageSession();
       language.translationReply = 'Ask Claude';
       const workflow = createWorkflow({
@@ -216,6 +221,14 @@ describe('portable workflow', () => {
         'Blocked',
       );
       expect(agent.sent).toEqual([]);
+      await workflow.close();
+    });
+    it('allows peer composer send while working when the agent queues peer messages', async () => {
+      const { agent, workflow } = await claudeApp('working', { peerSendWhileBusy: true });
+      expect((await workflow.sendComposer('busy-peer-ok', 'Ask Claude', [], 'peer')).state).toBe(
+        'queued',
+      );
+      expect(agent.sent).toHaveLength(1);
       await workflow.close();
     });
     it('blocks channel send for approval-required and disconnected', async () => {

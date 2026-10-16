@@ -82,11 +82,15 @@ export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind):
   });
 }
 export function canSendWhileWorking(
-  capabilities: Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy'> | undefined,
+  capabilities:
+    | Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy' | 'peerSendWhileBusy'>
+    | undefined,
   transport?: 'channel' | 'peer',
 ): boolean {
   return Boolean(
-    capabilities?.sendWhileBusy || (transport === 'channel' && capabilities?.channelSendWhileBusy),
+    capabilities?.sendWhileBusy ||
+    (transport === 'channel' && capabilities?.channelSendWhileBusy) ||
+    (transport === 'peer' && capabilities?.peerSendWhileBusy),
   );
 }
 export interface AgentCapabilities {
@@ -98,6 +102,8 @@ export interface AgentCapabilities {
   sendWhileBusy: boolean;
   /** Verified channel transport queues messages until the agent is free, so it may send while 'working'. */
   channelSendWhileBusy?: boolean;
+  /** Claude queues peer messages that arrive during a turn, so a peer send may go out while 'working'. */
+  peerSendWhileBusy?: boolean;
   acknowledgement: 'none' | 'queued' | 'accepted';
 }
 export type AgentEvent =
