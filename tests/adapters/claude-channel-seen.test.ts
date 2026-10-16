@@ -63,3 +63,29 @@ it('ignores other channel servers, other origins and text without a request id',
     ),
   ).toEqual({});
 });
+
+it('reports channel messages from the renamed gloss server and the legacy name alike', () => {
+  const user = (server: string, id: string) => ({
+    type: 'user',
+    uuid: 'u',
+    sessionId: 's',
+    isMeta: true,
+    origin: { kind: 'channel', server },
+    message: { content: `<channel source="${server}" request_id="${id}">\nQuestion\n</channel>` },
+  });
+  expect(parseClaudeRecord(user('gloss', 'delivery-new'), 0, 's')).toEqual({
+    channelSeen: 'delivery-new',
+  });
+  expect(parseClaudeRecord(user('language-assistant', 'delivery-old'), 0, 's')).toEqual({
+    channelSeen: 'delivery-old',
+  });
+  expect(parseClaudeRecord(user('glossary', 'delivery-x'), 0, 's')).toEqual({});
+  // The source attribute must name the same server as the record's origin.
+  expect(
+    parseClaudeRecord(
+      { ...user('gloss', 'delivery-y'), origin: { kind: 'channel', server: 'language-assistant' } },
+      0,
+      's',
+    ),
+  ).toEqual({});
+});

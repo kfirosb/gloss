@@ -32,6 +32,7 @@ async function fixture() {
     mcpServers: {
       github: { command: 'gh-mcp', env: { TOKEN: 'secret' } },
       'language-assistant': { command: 'node' },
+      gloss: { command: 'node' },
     },
     projects: {
       [project]: { mcpServers: { db: { command: 'pg-mcp' } } },

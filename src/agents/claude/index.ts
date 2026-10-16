@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { ChannelStore } from './channel-store.js';
+import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
@@ -228,13 +229,13 @@ export async function discoverOpenClaude(
 /** The Gloss delivery id of a channel message, when this record is Claude reading one into its context. */
 function channelRequest(value: unknown, text: unknown): string | undefined {
   const origin = recordOf(value);
-  if (origin?.kind !== 'channel' || origin.server !== CHANNEL_SERVER || typeof text !== 'string')
+  if (origin?.kind !== 'channel' || !isChannelServer(origin.server) || typeof text !== 'string')
     return undefined;
-  return CHANNEL_REQUEST_MARKER.exec(text)?.[1];
+  const match = CHANNEL_REQUEST_MARKER.exec(text);
+  return match && match[1] === origin.server ? match[2] : undefined;
 }
-const CHANNEL_SERVER = 'language-assistant';
 const CHANNEL_REQUEST_MARKER = new RegExp(
-  `^<channel source="${CHANNEL_SERVER}" request_id="(${REQUEST_ID_SOURCE})"`,
+  `^<channel source="([^"]+)" request_id="(${REQUEST_ID_SOURCE})"`,
 );
 const DELIVERY_MARKER = new RegExp(`^\\[Language Assistant delivery: (${REQUEST_ID_SOURCE})\\]\\n`);
 export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {

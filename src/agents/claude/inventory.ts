@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { isChannelServer } from './channel-names.js';
 import { isWithin } from '../../runtime/path-containment.js';
 import {
   mcpEntries,
@@ -11,7 +12,6 @@ import {
   type InventoryEntry,
 } from '../inventory.js';
 
-const CHANNEL_SERVER = 'language-assistant';
 const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -114,7 +114,7 @@ export async function readClaudeInventory(options: {
     entries.push(...(await pluginEntries(plugin, ctx)));
   return {
     agent: 'claude',
-    entries: mergeEntries(entries).filter((e) => !(e.kind === 'mcp' && e.name === CHANNEL_SERVER)),
+    entries: mergeEntries(entries).filter((e) => !(e.kind === 'mcp' && isChannelServer(e.name))),
     problems: ctx.problems,
   };
 }

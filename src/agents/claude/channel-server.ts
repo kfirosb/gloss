@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { uuid } from '../shared.js';
 import { createChannelRegistry } from './channel-registry.js';
+import { GLOSS_SERVER } from './channel-names.js';
 import { ChannelStore } from './channel-store.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelKey, type ChannelRecord } from './channel-types.js';
 import { ensurePrivateDirectory } from '../../runtime/private-directory.js';
@@ -118,7 +119,7 @@ export async function startClaudeChannel(
   });
   const ready = () => !closed && initialized && !!record && !!store;
   const mcp = new Server(
-    { name: 'language-assistant', version: '0.0.0' },
+    { name: GLOSS_SERVER, version: '0.0.0' },
     {
       capabilities: { experimental: { 'claude/channel': {} }, tools: {} },
       instructions:
