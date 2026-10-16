@@ -2,6 +2,17 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 15. Claude discovery accepts invalid `entrypoint` values
+
+Status: complete (urgent); fixed in e3cfd90 and released in Gloss 0.10.4.
+
+Regression from commit a061535 (refactor co-authored with Claude). `registries()` in `src/agents/claude/index.ts` now normalizes `entrypoint: optional(r.entrypoint, 'string')`, which turns `null`, numbers, booleans, objects, and arrays into `undefined`. The filter in `discoverOpenClaude` then sees them as a missing field and lets them through as terminal sessions. Before a061535 the original value reached the filter unchanged. A missing field has a special meaning here, so this field alone needs stricter validation.
+
+- [x] Reject invalid `entrypoint` values before normalization: if the field exists, it must be a string.
+- [x] Preserve compatibility: a missing field is allowed, `"cli"` is allowed, and unsupported strings (e.g. `"sdk-cli"`) are rejected.
+- [x] Add regression tests for a missing field, `"cli"`, `"sdk-cli"`, `null`, numbers, booleans, objects, and arrays.
+- [x] Keep the broader cleanup and the shared `optional` helper; do not revert a061535.
+
 ## 1. Improve file browsing and display
 
 Status: complete. Independent review and live-panel acceptance passed; see [verification](superpowers/reports/2026-09-28-file-browser-interactions-verification.md).
