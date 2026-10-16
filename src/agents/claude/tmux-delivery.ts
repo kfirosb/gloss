@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../core/contracts.js';
 import { classifyScreen, markersFor } from '../../runtime/attention-markers.js';
 import { claudeActivity } from './activity.js';
@@ -33,6 +34,13 @@ export interface TerminalSession {
 export const TMUX_CONFIRM_TIMEOUT_MS = 30_000;
 /** How often the transcript is read for it meanwhile, in milliseconds. */
 export const TMUX_CONFIRM_POLL_MS = 500;
+/**
+ * How long Gloss waits after the paste for Claude's input to show the pasted text before pressing Enter, in
+ * milliseconds. Past it Enter is pressed anyway: on an empty input it does nothing.
+ */
+export const PASTE_SETTLE_MS = 2_000;
+/** How often the screen is read meanwhile, in milliseconds. */
+export const PASTE_SETTLE_POLL_MS = 50;
 
 export const UNSENT_TEXT_REASON = 'There is unsent text in the terminal';
 export const NO_INPUT_BOX_REASON = 'The terminal isn’t showing Claude’s input box';
@@ -51,6 +59,8 @@ export const TERMINAL_GONE_REASON =
   'The terminal closed before the message was typed; nothing was sent';
 export const NO_TYPING_RECORD_REASON =
   'Gloss could not record that typing started; nothing was sent';
+export const SESSION_SWITCHED_REASON =
+  'The terminal no longer runs this Claude session; nothing was sent';
 /** C0 controls except tab and line feed, DEL and C1 controls: a terminal acts on them (ESC [201~ ends a bracketed paste). */
 const TERMINAL_CONTROL_CHARACTER = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
 /** Claude reads a leading ! as a shell command, / as a slash command and # as a memory note. */
@@ -84,6 +94,32 @@ export async function checkTerminal(
   return { ready: true };
 }
 
+/** Time for the wait after the paste; tests inject their own. */
+export interface TypingClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+const realTime: TypingClock = { now: () => Date.now(), sleep: (ms) => delay(ms) };
+/** Claude's input box shows something: the pasted text, or the chip for a long paste. A failed read shows nothing. */
+async function pasteShown(terminal: GlossTerminal): Promise<boolean> {
+  try {
+    const lines = parseStyledScreen(await terminal.capture());
+    return !!lines && readInputBox(lines).state === 'not-empty';
+  } catch {
+    return false;
+  }
+}
+/** Waits, bounded by PASTE_SETTLE_MS, for the paste to show; Enter before that could be lost while Claude reads it. */
+async function waitForPaste(terminal: GlossTerminal, clock: TypingClock): Promise<void> {
+  const deadline = clock.now() + PASTE_SETTLE_MS;
+  // A clock that stops advancing still ends the wait.
+  const maxPolls = Math.ceil(PASTE_SETTLE_MS / PASTE_SETTLE_POLL_MS);
+  for (let polls = 0; !(await pasteShown(terminal)); polls += 1) {
+    if (clock.now() >= deadline || polls >= maxPolls) return;
+    await clock.sleep(PASTE_SETTLE_POLL_MS);
+  }
+}
+
 export type TerminalSend =
   | { state: 'held'; reason: string }
   | { state: 'failed'; reason: string }
@@ -91,17 +127,21 @@ export type TerminalSend =
   | { state: 'unconfirmed'; reason: string; nativeAfterRevision: number };
 /**
  * Types one message into Claude's input once the terminal is clear. `held` and `failed` mean nothing was typed.
- * `onTyping` runs after the buffer is ready and before the paste; if it throws, nothing is typed. Windows line
- * endings are typed as line feeds; any other carriage return is refused like the other control characters.
+ * `paneRunsSession` is asked again right before the buffer is loaded. `onTyping` runs after the buffer is ready and
+ * before the paste; if it throws, nothing is typed. Enter follows once the paste shows. Windows line endings are
+ * typed as line feeds; any other carriage return is refused like the other control characters.
  */
 export async function typeIntoTerminal(input: {
   terminal: GlossTerminal;
   requestId: string;
   body: string;
   session: TerminalSession;
+  /** The pane still runs the session this message is for. */
+  paneRunsSession(): Promise<boolean>;
   transcriptSize(): Promise<number>;
   /** Synchronous on purpose: a returned promise would let its rejection escape after the paste. */
   onTyping: (evidence: { nativeAfterRevision: number }) => undefined;
+  clock?: TypingClock;
 }): Promise<TerminalSend> {
   const body = input.body.replace(/\r\n/g, '\n');
   if (TERMINAL_CONTROL_CHARACTER.test(body)) return { state: 'failed', reason: UNSAFE_TEXT_REASON };
@@ -113,6 +153,9 @@ export async function typeIntoTerminal(input: {
     return { state: 'held', reason: TERMINAL_READ_REASON };
   }
   if (!check.ready) return { state: 'held', reason: check.reason };
+  // `/resume` or `/clear` may have switched the pane to another session while the screen was read.
+  if (!(await input.paneRunsSession().catch(() => false)))
+    return { state: 'failed', reason: SESSION_SWITCHED_REASON };
   const buffer = pasteBufferName(input.requestId);
   // Best effort: the buffer holds only this message's text, and a leftover is never pasted by anything else.
   const discard = () => input.terminal.deleteBuffer(buffer).catch(() => undefined);
@@ -132,6 +175,7 @@ export async function typeIntoTerminal(input: {
   }
   try {
     await input.terminal.pasteBuffer(buffer);
+    await waitForPaste(input.terminal, input.clock ?? realTime);
     await input.terminal.pressEnter();
   } catch {
     await discard();

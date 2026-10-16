@@ -8,6 +8,7 @@ import type { ChannelRecord } from '../../src/agents/claude/channel-types.js';
 import { NO_ROUTE_REASON, SESSION_GONE_REASON } from '../../src/agents/claude/route.js';
 import {
   NO_TYPING_RECORD_REASON,
+  SESSION_SWITCHED_REASON,
   TERMINAL_GONE_REASON,
   TMUX_UNCONFIRMED_REASON,
   TYPING_UNCERTAIN_REASON,
@@ -22,11 +23,11 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) await fn();
 });
-async function claudeSession(record: Record<string, unknown> = {}) {
-  const h = await harness('claude');
-  cleanups.push(h.cleanup);
-  await writeFile(
-    join(h.dir, 'sessions', 'own.json'),
+/** Claude's record for this process, named after its pid as Claude names it. */
+const ownRecord = (h: Harness) => join(h.dir, 'sessions', `${process.pid}.json`);
+const writeRecord = (h: Harness, path: string, record: Record<string, unknown> = {}) =>
+  writeFile(
+    path,
     JSON.stringify({
       sessionId: h.sessionRef,
       cwd: h.project,
@@ -36,6 +37,12 @@ async function claudeSession(record: Record<string, unknown> = {}) {
       ...record,
     }),
   );
+async function claudeSession(record: Record<string, unknown> = {}) {
+  const h = await harness('claude');
+  cleanups.push(h.cleanup);
+  // Replaces the harness's record, so this process has exactly the one Claude would write.
+  await rm(join(h.dir, 'sessions', 'own.json'));
+  await writeRecord(h, ownRecord(h), record);
   return h;
 }
 /** Stands in for Claude writing the typed message to its transcript. */
@@ -111,21 +118,58 @@ const tmux = { panelSessionId: 'panel', transport: 'tmux' as const, onTyping: ()
 
 it('routes to Gloss’s own terminal first, and away from it when the pane no longer runs this session', async () => {
   const h = await claudeSession();
-  const own = fixtureTerminal('2.1.301', 'empty').terminal;
-  expect(await (await connect(h, own, true)).deliveryRoute?.()).toEqual({ transport: 'tmux' });
-  // `/resume` inside the pane: its process is no longer this session's Claude.
-  const resumed = fixtureTerminal('2.1.301', 'empty', { panePid: process.pid + 1 });
-  const moved = await connect(h, resumed.terminal, true);
-  expect(await moved.deliveryRoute?.()).toEqual({ transport: 'channel' });
-  expect(await moved.send('delivery-1', 'Hi', [], tmux)).toEqual({
+  const { terminal, log } = fixtureTerminal('2.1.301', 'empty');
+  const connection = await connect(h, terminal, true);
+  expect(await connection.deliveryRoute?.()).toEqual({ transport: 'tmux' });
+  // `/resume` inside the pane keeps the process: its pid stays and Claude's record for it names the resumed
+  // session. A leftover record that still names this session with the same pid must not keep the route.
+  await writeRecord(h, ownRecord(h), { sessionId: randomUUID() });
+  await writeRecord(h, join(h.dir, 'sessions', 'leftover.json'));
+  expect(await connection.deliveryRoute?.()).toEqual({ transport: 'channel' });
+  expect(await connection.send('delivery-1', 'Hi', [], tmux)).toEqual({
     state: 'failed',
-    reason: TERMINAL_GONE_REASON,
+    reason: SESSION_SWITCHED_REASON,
   });
-  expect(resumed.log.calls).toEqual([]);
+  expect(log.calls).toEqual([]);
   expect(await (await connect(h, undefined)).deliveryRoute?.()).toEqual({
     transport: null,
     reason: NO_ROUTE_REASON,
   });
+});
+it('offers no terminal route when Claude’s record for the pane’s process is missing or unreadable', async () => {
+  const h = await claudeSession();
+  const { terminal } = fixtureTerminal('2.1.301', 'empty');
+  await rm(ownRecord(h));
+  await writeRecord(h, join(h.dir, 'sessions', 'leftover.json'));
+  const connection = await connect(h, terminal, true);
+  expect(await connection.deliveryRoute?.()).toEqual({ transport: 'channel' });
+  await writeFile(ownRecord(h), '{"sessionId":');
+  expect(await connection.deliveryRoute?.()).toEqual({ transport: 'channel' });
+});
+it('types nothing when `/resume` switches the pane to another session while the screen is read', async () => {
+  const h = await claudeSession();
+  const fixture = fixtureTerminal('2.1.301', 'empty');
+  const resumedDuringRead: GlossTerminal = {
+    ...fixture.terminal,
+    capture: async () => {
+      await writeRecord(h, ownRecord(h), { sessionId: randomUUID() });
+      // A leftover record keeps this session findable, so only the re-check before the paste can stop it.
+      await writeRecord(h, join(h.dir, 'sessions', 'leftover.json'));
+      return fixture.terminal.capture();
+    },
+  };
+  const connection = await connect(h, resumedDuringRead);
+  let typing = false;
+  expect(
+    await connection.send('delivery-1', 'Hi', [], {
+      ...tmux,
+      onTyping: () => {
+        typing = true;
+      },
+    }),
+  ).toEqual({ state: 'failed', reason: SESSION_SWITCHED_REASON });
+  expect(typing).toBe(false);
+  expect(fixture.log.calls).toEqual(['capture', 'cursor']);
 });
 it('offers peer for an outside session with a messaging socket', async () => {
   const h = await claudeSession({ messagingSocketPath: '/tmp/gloss-test-inbox.sock' });
@@ -147,10 +191,11 @@ it('types into the terminal, reports typing-started first, and confirms by the t
   expect(result).toMatchObject({ state: 'sent', nativeAfterRevision: before });
   expect(result.nativeMessageId).toMatch(/^transcript:/);
   expect(typing).toEqual([before]);
-  expect(log.calls.slice(-4)).toEqual([
+  expect(log.calls.slice(-5)).toEqual([
     'load:gloss-delivery-1',
     'typing',
     'paste:gloss-delivery-1',
+    'capture',
     'enter',
   ]);
 });
@@ -198,12 +243,14 @@ it('types one message at a time into the same terminal, checking it again before
     'load:gloss-delivery-1',
     'typing',
     'paste:gloss-delivery-1',
+    'capture',
     'enter',
     'capture',
     'cursor',
     'load:gloss-delivery-2',
     'typing',
     'paste:gloss-delivery-2',
+    'capture',
     'enter',
   ]);
 });
@@ -375,7 +422,7 @@ it('ends the confirmation wait as unconfirmed when the connection detaches', asy
 it('offers no route, without failing, once the session record is gone', async () => {
   const h = await claudeSession();
   const connection = await connect(h, fixtureTerminal('2.1.301', 'empty').terminal);
-  await rm(join(h.dir, 'sessions', 'own.json'));
+  await rm(ownRecord(h));
   expect(await connection.deliveryRoute?.()).toEqual({
     transport: null,
     reason: SESSION_GONE_REASON,

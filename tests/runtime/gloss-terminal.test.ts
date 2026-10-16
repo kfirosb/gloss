@@ -44,6 +44,7 @@ describe.skipIf(!available)('typing into a real tmux pane', () => {
         requestId: 'delivery-1',
         body: 'line one\nline two',
         session: { status: 'idle', version: '2.1.301' },
+        paneRunsSession: async () => true,
         transcriptSize: async () => 0,
         onTyping: ({ nativeAfterRevision }) => {
           typingStarted.push(nativeAfterRevision);

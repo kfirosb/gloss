@@ -41,6 +41,7 @@ import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 import { SESSION_GONE_REASON, selectClaudeRoute } from './route.js';
 import {
   NO_TYPING_RECORD_REASON,
+  SESSION_SWITCHED_REASON,
   TERMINAL_GONE_REASON,
   TMUX_CONFIRM_POLL_MS,
   TMUX_CONFIRM_TIMEOUT_MS,
@@ -181,6 +182,41 @@ function optional(value: unknown, type: 'number'): number | undefined;
 function optional(value: unknown, type: 'string' | 'number') {
   return typeof value === type ? value : undefined;
 }
+/** One `sessions/*.json` record; undefined when it is missing, too large or malformed. */
+async function readRegistry(path: string): Promise<Registry | undefined> {
+  try {
+    if ((await stat(path)).size > 65_536) return undefined;
+    const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
+    if (
+      typeof r?.sessionId === 'string' &&
+      typeof r.cwd === 'string' &&
+      typeof r.pid === 'number' &&
+      Number.isInteger(r.pid) &&
+      r.pid > 0 &&
+      typeof r.version === 'string' &&
+      // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
+      (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
+      (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
+    )
+      return {
+        sessionId: r.sessionId,
+        cwd: r.cwd,
+        pid: r.pid,
+        version: r.version,
+        messagingSocketPath: optional(r.messagingSocketPath, 'string'),
+        status: optional(r.status, 'string'),
+        waitingFor: r.waitingFor,
+        peerProtocol: optional(r.peerProtocol, 'number'),
+        entrypoint: optional(r.entrypoint, 'string'),
+        startedAt: optional(r.startedAt, 'number'),
+        updatedAt: optional(r.updatedAt, 'number'),
+        name: r.name,
+      };
+  } catch {
+    /* Unreadable metadata does not establish a target. */
+  }
+  return undefined;
+}
 async function registries(config: string): Promise<Registry[]> {
   let names: string[];
   try {
@@ -191,40 +227,18 @@ async function registries(config: string): Promise<Registry[]> {
   if (names.length > 10_000) throw new Error('Session metadata enumeration exceeds bound');
   const records: Registry[] = [];
   for (const name of names.filter((n) => n.endsWith('.json'))) {
-    try {
-      const path = join(config, 'sessions', name);
-      if ((await stat(path)).size > 65_536) continue;
-      const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
-      if (
-        typeof r?.sessionId === 'string' &&
-        typeof r.cwd === 'string' &&
-        typeof r.pid === 'number' &&
-        Number.isInteger(r.pid) &&
-        r.pid > 0 &&
-        typeof r.version === 'string' &&
-        // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
-        (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
-        (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
-      )
-        records.push({
-          sessionId: r.sessionId,
-          cwd: r.cwd,
-          pid: r.pid,
-          version: r.version,
-          messagingSocketPath: optional(r.messagingSocketPath, 'string'),
-          status: optional(r.status, 'string'),
-          waitingFor: r.waitingFor,
-          peerProtocol: optional(r.peerProtocol, 'number'),
-          entrypoint: optional(r.entrypoint, 'string'),
-          startedAt: optional(r.startedAt, 'number'),
-          updatedAt: optional(r.updatedAt, 'number'),
-          name: r.name,
-        });
-    } catch {
-      /* Unreadable metadata does not establish a target. */
-    }
+    const record = await readRegistry(join(config, 'sessions', name));
+    if (record) records.push(record);
   }
   return records;
+}
+/**
+ * Whether the process `pid` runs session `sessionRef` now, by Claude's own record for it, `sessions/<pid>.json`.
+ * `/resume` and `/clear` switch sessions inside the same process: the pid stays and the record names the new session.
+ */
+async function pidRunsSession(config: string, pid: number, sessionRef: string): Promise<boolean> {
+  const record = await readRegistry(join(config, 'sessions', `${pid}.json`));
+  return record?.pid === pid && record.sessionId === sessionRef;
 }
 async function locateTranscript(config: string, id: string): Promise<string> {
   const root = join(config, 'projects');
@@ -672,10 +686,17 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       };
-      /** Gloss's own pane for this session, only while it still runs this session (a /resume inside it changes the pid). */
-      const terminalFor = async (current: Registry) => {
+      /** Claude's record for the pane's process still names this session; `/resume` and `/clear` keep the pid. */
+      const paneRunsSession = (terminal: GlossTerminal) =>
+        pidRunsSession(config, terminal.panePid, target.sessionRef);
+      /** Gloss's own pane for this session, and whether the process in it still runs this session. */
+      const glossPane = async (current: Registry) => {
         const terminal = await options.glossTerminal?.(target.sessionRef).catch(() => undefined);
-        return terminal && terminal.panePid === current.pid ? terminal : undefined;
+        if (!terminal) return undefined;
+        return {
+          terminal,
+          runsSession: terminal.panePid === current.pid && (await paneRunsSession(terminal)),
+        };
       };
       const typedSend = (delivery: Delivery): TypedSend | undefined =>
         delivery.transport === 'tmux' && delivery.nativeAfterRevision !== undefined
@@ -798,15 +819,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       ) => {
         const typed = await typeInTurn(target.sessionRef, async () => {
           const current = await exact(target);
-          const terminal = await terminalFor(current);
-          if (!terminal) return { state: 'failed' as const, reason: TERMINAL_GONE_REASON };
+          const pane = await glossPane(current);
+          if (!pane) return { state: 'failed' as const, reason: TERMINAL_GONE_REASON };
+          if (!pane.runsSession)
+            return { state: 'failed' as const, reason: SESSION_SWITCHED_REASON };
+          const { terminal } = pane;
           const result = await typeIntoTerminal({
             terminal,
             requestId,
             body,
             session: current,
+            paneRunsSession: () => paneRunsSession(terminal),
             transcriptSize: async () => (await stat(path)).size,
             onTyping,
+            clock: { now, sleep: pause },
           });
           // Registered inside the turn, so the next send's confirmation already sees this one. An uncertain paste may
           // still reach Claude, so it keeps its place in typing order and can take its record from a later send.
@@ -1045,7 +1071,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         );
         return selectClaudeRoute({
           entrypoint: current.entrypoint,
-          glossTerminal: !!(await terminalFor(current)),
+          glossTerminal: !!(await glossPane(current))?.runsSession,
           channel: channel && !!context?.panelSessionId,
           peer: !!current.messagingSocketPath && canWritePeerSocket(!!options.credentials),
         });

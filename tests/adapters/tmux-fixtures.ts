@@ -50,6 +50,13 @@ export interface FixtureTerminalOptions {
   panePid?: number;
   fail?: 'capture' | 'load' | 'paste' | 'enter';
   onEnter?: (text: string) => Promise<void>;
+  /**
+   * The captured screen shown from the paste until Enter, as Claude shows pasted text; `null` keeps the screen as it
+   * was, as when Claude has not drawn the paste. Defaults to the captured `typed` screen.
+   */
+  pastedState?: string | null;
+  /** Screen reads after the paste that still show the old screen, as while Claude is still drawing it. */
+  pasteDrawnAfter?: number;
 }
 /** A Gloss terminal that shows a captured screen and records what the adapter does to it. */
 export function fixtureTerminal(
@@ -58,6 +65,9 @@ export function fixtureTerminal(
   options: FixtureTerminalOptions = {},
 ): { terminal: GlossTerminal; log: TerminalLog } {
   const log: TerminalLog = { calls: [], loaded: [] };
+  const pastedState = options.pastedState === undefined ? 'typed' : options.pastedState;
+  /** Screen reads since the paste, while it is in the input; undefined when nothing is pasted. */
+  let readsSincePaste: number | undefined;
   const fail = (step: FixtureTerminalOptions['fail']) => {
     if (options.fail === step) throw new Error(`fixture ${step} failure`);
   };
@@ -67,7 +77,11 @@ export function fixtureTerminal(
     async capture() {
       log.calls.push('capture');
       fail('capture');
-      return readScreen(version, state);
+      if (readsSincePaste === undefined || pastedState === null) return readScreen(version, state);
+      readsSincePaste += 1;
+      return readsSincePaste > (options.pasteDrawnAfter ?? 0)
+        ? readScreen(version, pastedState)
+        : readScreen(version, state);
     },
     async cursor() {
       log.calls.push('cursor');
@@ -86,12 +100,14 @@ export function fixtureTerminal(
     async pasteBuffer(buffer) {
       log.calls.push('paste:' + buffer);
       fail('paste');
+      readsSincePaste = 0;
     },
     async deleteBuffer(buffer) {
       log.calls.push('delete:' + buffer);
     },
     async pressEnter() {
       log.calls.push('enter');
+      readsSincePaste = undefined;
       fail('enter');
       await options.onEnter?.(log.loaded.at(-1) ?? '');
     },

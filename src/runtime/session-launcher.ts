@@ -254,8 +254,8 @@ export function createSessionLauncher(options: {
     }
     if (!active(id, controller)) return;
     const { reason: _reason, ...current } = get(id);
-    // Running once the panel is registered: from here the tab is a normal session row whose own
-    // activity shows whether the channel is still connecting.
+    // Running once the panel is registered: from here the tab is a normal session row, and its
+    // route line shows how Gloss reaches it (its own terminal while this pane runs the session).
     put({ ...current, sessionRef: target.sessionRef, panelSessionId: panel.id, state: 'running' });
   }
   function identify(id: string, firstAttempt?: () => void): Promise<void> {

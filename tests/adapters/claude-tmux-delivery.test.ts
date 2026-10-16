@@ -10,7 +10,10 @@ import { createTmux } from '../../src/runtime/tmux.js';
 import {
   COMMAND_PREFIX_REASON,
   PASTE_PREPARE_REASON,
+  PASTE_SETTLE_MS,
+  PASTE_SETTLE_POLL_MS,
   SCROLLED_REASON,
+  SESSION_SWITCHED_REASON,
   TERMINAL_READ_REASON,
   TYPING_UNCERTAIN_REASON,
   UNKNOWN_VERSION_REASON,
@@ -24,6 +27,7 @@ import {
   typeIntoTerminal,
   typedMessagesAfter,
   type GlossTerminal,
+  type TypingClock,
 } from '../../src/agents/claude/tmux-delivery.js';
 import {
   CAPTURED,
@@ -34,6 +38,19 @@ import {
 } from './tmux-fixtures.js';
 
 const idle = (version: string) => ({ status: 'idle', version });
+/** Test time: each sleep moves the clock forward by its length. */
+function stepClock() {
+  let time = 0;
+  const sleeps: number[] = [];
+  const clock: TypingClock = {
+    now: () => time,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      time += ms;
+    },
+  };
+  return { clock, sleeps };
+}
 
 describe.each(FIXTURE_VERSIONS)('terminal checks on captured Claude %s screens', (version) => {
   it('is ready on an empty input', async () => {
@@ -112,16 +129,22 @@ describe('typing into the terminal', () => {
     body: string,
     onTyping: (evidence: { nativeAfterRevision: number }) => undefined = () => undefined,
     requestId = 'delivery-1',
+    {
+      paneRunsSession = async () => true,
+      clock = stepClock().clock,
+    }: { paneRunsSession?: () => Promise<boolean>; clock?: TypingClock } = {},
   ) =>
     typeIntoTerminal({
       terminal,
       requestId,
       body,
       session: idle('2.1.301'),
+      paneRunsSession,
       transcriptSize: async () => 1234,
       onTyping,
+      clock,
     });
-  it('checks, loads the buffer, records typing-started, pastes and presses Enter, in that order', async () => {
+  it('checks, loads the buffer, records typing-started, pastes, sees the paste and presses Enter, in that order', async () => {
     const { terminal, log } = fixtureTerminal('2.1.301', 'empty');
     const typing: number[] = [];
     const result = await send(terminal, 'line one\nline two', (evidence) => {
@@ -135,10 +158,70 @@ describe('typing into the terminal', () => {
       'load:gloss-delivery-1',
       'typing',
       'paste:gloss-delivery-1',
+      'capture',
       'enter',
     ]);
     expect(log.loaded).toEqual(['line one\nline two']);
     expect(typing).toEqual([1234]);
+  });
+  it('presses Enter only once the pasted text shows in the input', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.301', 'empty', { pasteDrawnAfter: 3 });
+    const { clock, sleeps } = stepClock();
+    expect(await send(terminal, 'hello', undefined, undefined, { clock })).toEqual({
+      state: 'typed',
+      nativeAfterRevision: 1234,
+    });
+    expect(log.calls.slice(log.calls.indexOf('paste:gloss-delivery-1'))).toEqual([
+      'paste:gloss-delivery-1',
+      'capture',
+      'capture',
+      'capture',
+      'capture',
+      'enter',
+    ]);
+    expect(sleeps).toEqual([PASTE_SETTLE_POLL_MS, PASTE_SETTLE_POLL_MS, PASTE_SETTLE_POLL_MS]);
+  });
+  it('presses Enter once anyway when the paste never shows within the bound', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.301', 'empty', { pastedState: null });
+    const { clock, sleeps } = stepClock();
+    expect(await send(terminal, 'hello', undefined, undefined, { clock })).toEqual({
+      state: 'typed',
+      nativeAfterRevision: 1234,
+    });
+    expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(PASTE_SETTLE_MS);
+    expect(log.calls.filter((call) => call === 'enter')).toHaveLength(1);
+    expect(log.calls.at(-1)).toBe('enter');
+  });
+  it('ends the wait for the paste even when the clock stops', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.301', 'empty', { pastedState: null });
+    const stopped: TypingClock = { now: () => 0, sleep: async () => undefined };
+    expect((await send(terminal, 'hello', undefined, undefined, { clock: stopped })).state).toBe(
+      'typed',
+    );
+    expect(log.calls.at(-1)).toBe('enter');
+  });
+  it('types nothing when the pane switched to another session while the screen was read', async () => {
+    for (const paneRunsSession of [
+      async () => false,
+      async () => {
+        throw new Error('record unreadable');
+      },
+    ]) {
+      const { terminal, log } = fixtureTerminal('2.1.301', 'empty');
+      let typed = false;
+      const result = await send(
+        terminal,
+        'hello',
+        () => {
+          typed = true;
+        },
+        undefined,
+        { paneRunsSession },
+      );
+      expect(result).toEqual({ state: 'failed', reason: SESSION_SWITCHED_REASON });
+      expect(typed).toBe(false);
+      expect(log.calls).toEqual(['capture', 'cursor']);
+    }
   });
   it('types nothing when the terminal is not clear', async () => {
     const { terminal, log } = fixtureTerminal('2.1.301', 'typed');
@@ -210,6 +293,7 @@ describe('typing into the terminal', () => {
       requestId: 'delivery-1',
       body: 'hello',
       session: idle('2.1.301'),
+      paneRunsSession: async () => true,
       transcriptSize: async () => {
         throw new Error('transcript gone');
       },
