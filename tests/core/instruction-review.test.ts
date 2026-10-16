@@ -139,8 +139,8 @@ it('persists the Claude route before transport and never reroutes historical req
     const second = await workflow.sendComposer('second', 'Second', [], 'peer');
     expect(second.transport).toBe('peer');
     expect(observed).toEqual([
-      { panelSessionId: 'panel', transport: 'channel' },
-      { panelSessionId: 'panel', transport: 'peer' },
+      { panelSessionId: 'panel', transport: 'channel', earlier: [] },
+      { panelSessionId: 'panel', transport: 'peer', earlier: [first] },
     ]);
   } finally {
     await workflow.close();

@@ -754,6 +754,7 @@ describe('portable workflow', () => {
       });
       if (outcome === 'throw') app.agent.sendError = new Error('late transport error');
       const pending = app.workflow.send(draft.id, draft.revision);
+      await expect.poll(() => app.agent.sent.length).toBe(1);
       const requestId = app.agent.sent[0]!.requestId;
       app.agent.emit({ type: 'delivery', requestId, state: 'sent' });
       await expect.poll(() => app.workflow.snapshot().deliveries[0]?.state).toBe('sent');

@@ -259,6 +259,7 @@ it('reopens two sessions, replays sources twice and reconciles without resending
   expect(second.agents.B.sent).toEqual([]);
   expect(second.reconcile).toHaveBeenCalledWith(
     expect.objectContaining({ nativeMessageId: 'native-pending' }),
+    [],
   );
   expect((await second.app.files!.upload('A', { name: 'next.txt', data: 'YQ==' })).index).toBe(3);
   expect((await second.app.files!.upload('B', { name: 'next.txt', data: 'YQ==' })).index).toBe(2);

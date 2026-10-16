@@ -6,9 +6,15 @@ import type {
   AgentEvent,
   AgentKind,
   CodingConnection,
+  Delivery,
+  DeliveryEvidence,
+  DeliveryRoute,
   DeliveryState,
+  SendContext,
   Target,
 } from '../../src/core/contracts.js';
+
+type SendResult = Awaited<ReturnType<CodingConnection['send']>>;
 
 const DEFAULT_CAPABILITIES: AgentCapabilities = {
   history: true,
@@ -25,6 +31,12 @@ export class FakeAgent implements AgentAdapter {
   result: { state: DeliveryState; reason?: string } = { state: 'sent' };
   sendError?: Error;
   sendGate?: Promise<void>;
+  readonly contexts: (SendContext | undefined)[] = [];
+  /** Returned in order before `result`. */
+  results: SendResult[] = [];
+  route: DeliveryRoute | undefined = undefined;
+  reconcile?: (delivery: Delivery, earlier: readonly Delivery[]) => boolean | DeliveryEvidence;
+  onSend?: (context: SendContext | undefined) => void | Promise<void>;
   readonly attachGates = new Map<string, Promise<void>>();
   readonly historyGates = new Map<string, Promise<void>>();
   readonly historyMessages = new Map<string, AgentMessage[]>();
@@ -59,12 +71,24 @@ export class FakeAgent implements AgentAdapter {
           else await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       },
-      async send(requestId, englishText, attachments) {
+      async send(requestId, englishText, attachments, context) {
         agent.sent.push({ requestId, englishText, ...(attachments ? { attachments } : {}) });
+        agent.contexts.push(context);
+        await agent.onSend?.(context);
         if (agent.sendGate) await agent.sendGate;
         if (agent.sendError) throw agent.sendError;
-        return agent.result;
+        return agent.results.shift() ?? agent.result;
       },
+      async deliveryRoute() {
+        return agent.route ?? { transport: 'channel' };
+      },
+      ...(agent.reconcile
+        ? {
+            async reconcileDelivery(delivery: Delivery, earlier?: readonly Delivery[]) {
+              return agent.reconcile?.(delivery, earlier ?? []) ?? false;
+            },
+          }
+        : {}),
       async detach() {
         agent.detachedTargets.push(target.sessionRef);
       },
