@@ -2,6 +2,21 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 19. lsof storm in Claude session liveness checks
+
+Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
+
+Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh and status poll: 155 runs in 5 s with 9 sessions, load average 7.7, and the full browser suite took 22 minutes.
+
+- [x] One batched `lsof -Fpcfn +c 0 -- <sockets…>` call per refresh, with strict output parsing and bounded batches.
+- [x] 3 s cache per PID/socket/version with alive / not-alive / failed states; identity changes are rechecked at once; failures fail closed.
+- [x] `kill(pid, 0)` pre-check; checks in the same tick and the recent working set share one call.
+- [x] A failed probe keeps discovery incomplete; one bad record cannot fail the others; every send re-checks without the cache.
+- [x] Measured: built backend 2–3 Claude `lsof` runs per 10 s; packaged 0.10.5 1 Claude run per 6 s. Browser suite 279/279 in about 5 minutes.
+- [x] Installed 0.10.5 (9 Claude records, 93 catalog entries): all `lsof` runs fell from 143 per 5 s to 42–52 per 10 s; Claude's share is 6 per 10 s. Load average fell from 12–14 to about 4. Unit 1102/1102; browser 279/279 in 4.7 min.
+- [x] Codex probes (`ps`, `lsof -Fpcfn` on writer locks, `lsof -a -d cwd`) share one round across discovery, status and sends for 3 s (Gloss 0.10.6). Installed 2026-10-16: per 15 s, Codex fell from 16 writer `lsof` + 15 `cwd` `lsof` + 16 `ps` to 4 + 1 + 4; all `lsof` together about 1/s (30 in 30 s).
+- [ ] Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in.
+
 ## 15. Claude discovery accepts invalid `entrypoint` values
 
 Status: complete (urgent); fixed in e3cfd90 and released in Gloss 0.10.4.
@@ -127,6 +142,30 @@ Status: captured.
 Status: idea captured; brainstorm separately.
 
 - [ ] Show the CLIs installed on the computer (AWS, Docker, GitHub, and others), let the user connect to them, and show what permissions each one has.
+
+## 16. Terminal inside the Live Conversation
+
+Status: design task captured on 2026-10-16; needs a design pass.
+
+- [ ] Show the session's terminal as part of the Live Conversation panel, so the user can view the terminal instead of the conversation in the same place.
+- [ ] Replace the terminal pop-up there with a switch between "Coding agent · translated", the regular (original) conversation, and the terminal.
+- [ ] Decide how the switch fits next to the existing Expand, History, Summarize in Hebrew, and Original controls.
+
+## 17. Files panel and file preview
+
+Status: design task captured on 2026-10-16; needs a design pass.
+
+- [ ] Let the user move the Files panel to another place in the window (not only the current side panel).
+- [ ] Add an option to expand an open file preview from the pop-up to full screen.
+- [ ] Remember Translate / TL;DR results per file: closing the preview and reopening the same file shows the result without clicking again.
+- [ ] Show the file list beside the preview pop-up, so the user can pick other files and move between them without closing the preview.
+
+## 18. Editing and creating files
+
+Status: discussion needed; not urgent.
+
+- [ ] Talk through letting the user edit existing files and create new ones from Gloss, for cases such as `.env`.
+- [ ] Decide scope, safety (secrets, unsaved changes, files the agent is also editing), and whether the agent is told about the change.
 
 ## Shared constraints
 
