@@ -348,6 +348,16 @@ describe('identifies a Codex launch whose writer is the shared app-server daemon
       s.close();
     }
   });
+  it('identifies a launch from a fresh discovery, not a cached one', async () => {
+    const launches = [launchAt('L', 10_000)];
+    const s = await services([thread('mine', 11_000)], launches);
+    try {
+      await s.launcher.identify('L');
+      expect(s.discoverOpen).toHaveBeenCalledWith(expect.anything(), { fresh: true });
+    } finally {
+      s.close();
+    }
+  });
   it('does not claim a thread created before the launch', async () => {
     const launches = [launchAt('L', 10_000)];
     const s = await services([thread('older', 5_000)], launches);

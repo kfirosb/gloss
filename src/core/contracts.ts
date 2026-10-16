@@ -135,7 +135,8 @@ export interface SendContext {
 export interface AgentAdapter {
   kind: AgentKind;
   discover(projectPath: string): Promise<Target[]>;
-  discoverOpen?(signal: AbortSignal): Promise<OpenSessionScan>;
+  /** `fresh` asks for a scan that does not reuse a recent cached probe, e.g. to identify a new launch. */
+  discoverOpen?(signal: AbortSignal, options?: { fresh?: boolean }): Promise<OpenSessionScan>;
   attach(target: Target, context?: { panelSessionId: string }): Promise<CodingConnection>;
 }
 export interface LanguageTurn {

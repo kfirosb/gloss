@@ -236,7 +236,8 @@ export function createLaunchServices(options: {
     sessions: { register: (...args) => live().sessions!.register(...args) },
     prepareClaude: (folder) => channel.prepareNewSessionConfig(folder),
     async findCodex(launch, signal): Promise<Target | undefined> {
-      const scan = await options.codex.discoverOpen?.(signal);
+      // A cached probe from before the launch cannot contain its thread.
+      const scan = await options.codex.discoverOpen?.(signal, { fresh: true });
       const launches = launcher.list();
       const claimed = claimedCodexRefs(launch, launches, options.store.listSessions());
       const candidates = (scan?.candidates ?? []).filter(

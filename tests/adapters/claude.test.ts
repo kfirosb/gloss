@@ -15,6 +15,7 @@ import {
 } from '../../src/agents/claude/index.js';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 import { harness, watch } from './agent-harness.js';
+import { lsofPaths, lsofRunner, ownerLines, type LsofOwner } from './lsof-fixture.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) await fn();
@@ -664,9 +665,12 @@ describe('Claude native peer inbox', () => {
     await writeFile(registryPath, JSON.stringify(registry));
     const runner: ProcessRunner = async function* (executable, args) {
       expect(executable).toBe('/usr/sbin/lsof');
-      expect(args).toEqual(['-Fpc', '+c', '0', '--', registry.messagingSocketPath]);
-      yield { type: 'line', line: `p${registry.pid}` };
-      yield { type: 'line', line: 'cclaude' };
+      expect(args).toEqual(['-Fpcfn', '+c', '0', '--', registry.messagingSocketPath]);
+      for (const line of ownerLines(
+        { [registry.messagingSocketPath]: [{ pid: registry.pid, command: 'claude' }] },
+        lsofPaths(args),
+      ))
+        yield { type: 'line', line };
       yield { type: 'exit', outcome: { reason: 'exited', code: 0, signal: null, diagnostics: '' } };
     };
     const adapter = createClaudeAdapter({ configDir: h.dir, runner });
@@ -696,20 +700,21 @@ describe('Claude native peer inbox', () => {
     );
     const runner: ProcessRunner = async function* (executable, args) {
       expect(executable).toBe('/usr/sbin/lsof');
-      const socketPath = args[3];
-      if (socketPath === current.messagingSocketPath) {
-        yield { type: 'line', line: `p${process.pid}` };
-        yield { type: 'line', line: 'cclaude' };
-        yield {
-          type: 'exit',
-          outcome: { reason: 'exited', code: 0, signal: null, diagnostics: '' },
-        };
-      } else {
-        yield {
-          type: 'exit',
-          outcome: { reason: 'exited', code: 1, signal: null, diagnostics: '' },
-        };
-      }
+      const paths = lsofPaths(args);
+      for (const line of ownerLines(
+        { [current.messagingSocketPath]: [{ pid: process.pid, command: 'claude' }] },
+        paths,
+      ))
+        yield { type: 'line', line };
+      yield {
+        type: 'exit',
+        outcome: {
+          reason: 'exited',
+          code: paths.every((path) => path === current.messagingSocketPath) ? 0 : 1,
+          signal: null,
+          diagnostics: '',
+        },
+      };
     };
     const adapter = createClaudeAdapter({
       configDir: h.dir,
@@ -747,11 +752,14 @@ describe('Claude native peer inbox', () => {
         if (
           executable !== '/usr/sbin/lsof' ||
           JSON.stringify(args) !==
-            JSON.stringify(['-Fpc', '+c', '0', '--', join(h.dir, 'inbox.sock')])
+            JSON.stringify(['-Fpcfn', '+c', '0', '--', join(h.dir, 'inbox.sock')])
         )
           throw new Error('Wrong liveness query');
-        yield { type: 'line', line: `p${process.pid + pidOffset}` };
-        yield { type: 'line', line: `c${command}` };
+        for (const line of ownerLines(
+          { [join(h.dir, 'inbox.sock')]: [{ pid: process.pid + pidOffset, command }] },
+          lsofPaths(args),
+        ))
+          yield { type: 'line', line };
         yield {
           type: 'exit',
           outcome: { reason: 'exited', code: 0, signal: null, diagnostics: '' },
@@ -773,6 +781,66 @@ describe('Claude native peer inbox', () => {
           type: 'status',
           state: process.platform === 'darwin' ? expectedState : 'disconnected',
         });
+    },
+  );
+  it.runIf(process.platform === 'darwin')(
+    'shares one cached liveness check across status polls',
+    async () => {
+      const h = await harness('claude');
+      cleanups.push(h.cleanup);
+      const { runner, calls } = lsofRunner({
+        [join(h.dir, 'inbox.sock')]: [{ pid: process.pid, command: 'claude' }],
+      });
+      const adapter = createClaudeAdapter({
+        configDir: h.dir,
+        transcriptPath: async () => h.transcript,
+        runner,
+        pollMs: 5,
+        clock: {
+          sleep: async (ms) => {
+            polls++;
+            await new Promise((resolve) => setTimeout(resolve, ms));
+          },
+        },
+      });
+      let polls = 0;
+      const c = await adapter.attach(h.target);
+      cleanups.push(() => c.detach());
+      const w = watch(c);
+      cleanups.push(w.stop);
+      await expect.poll(() => polls, { timeout: 2000 }).toBeGreaterThanOrEqual(10);
+      expect(w.events).toContainEqual({ type: 'status', state: 'idle' });
+      expect(calls.length).toBeLessThanOrEqual(2);
+    },
+  );
+  it.runIf(process.platform === 'darwin')(
+    'refuses a send cleanly when the session closed inside the cache window',
+    async () => {
+      const h = await harness('claude');
+      cleanups.push(h.cleanup);
+      const owners: Record<string, LsofOwner[]> = {
+        [join(h.dir, 'inbox.sock')]: [{ pid: process.pid, command: 'claude' }],
+      };
+      const { runner } = lsofRunner(owners);
+      const c = await createClaudeAdapter({
+        configDir: h.dir,
+        transcriptPath: async () => h.transcript,
+        runner,
+        pollMs: 5,
+      }).attach(h.target);
+      cleanups.push(() => c.detach());
+      const w = watch(c);
+      cleanups.push(w.stop);
+      await expect.poll(() => w.events).toContainEqual({ type: 'status', state: 'idle' });
+      delete owners[join(h.dir, 'inbox.sock')];
+      const receipt = await c.send('request', 'Send this', [], {
+        panelSessionId: 'panel',
+        transport: 'peer',
+      });
+      expect(receipt).toEqual({
+        state: 'failed',
+        reason: 'Agent is disconnected, busy, or requires native approval',
+      });
     },
   );
   it('publishes an appended message and exact delivery receipt when the subsequent status lookup fails once', async () => {

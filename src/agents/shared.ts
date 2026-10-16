@@ -54,29 +54,120 @@ export function validateTarget(target: Target, kind: Target['agent']) {
   if (target.agent !== kind || !uuid.test(target.sessionRef))
     throw new Error('Invalid target identity');
 }
-/** `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, which would clip `claude.exe`. */
-export async function observedOwner(
-  path: string,
-  command: string | readonly string[],
+export interface SocketOwner {
+  pid: number;
+  command: string;
+}
+export type OwnerResult = { ok: true; owners: SocketOwner[] } | { ok: false };
+const OWNER_PROBE_TIMEOUT_MS = 3000;
+const OWNER_OUTPUT_BYTES_PER_PATH = 32_768;
+const OWNER_OUTPUT_MAX_BYTES = 1024 * 1024;
+const OWNER_BATCH_PATHS = 128;
+const OWNER_BATCH_ARGV_BYTES = 65_536;
+// A stale record whose socket file is gone must not fail every other path in its batch.
+const MISSING_PATH_DIAGNOSTIC = /^lsof: status error on .+: No such file or directory$/;
+
+/**
+ * Holders of each exact path, from as few read-only `lsof` walks of the process
+ * table as the argv bounds allow. A failed walk fails only its own paths.
+ */
+export async function observedOwners(
+  paths: readonly string[],
   runner: ProcessRunner = runProcess,
-  pid?: number,
-): Promise<boolean> {
-  if (process.platform !== 'darwin') return false;
+  signal: AbortSignal = new AbortController().signal,
+): Promise<Map<string, OwnerResult>> {
+  const results = new Map<string, OwnerResult>();
+  const unique = [...new Set(paths)];
+  if (process.platform !== 'darwin') {
+    for (const path of unique) results.set(path, { ok: true, owners: [] });
+    return results;
+  }
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let bytes = 0;
+  for (const path of unique) {
+    const size = Buffer.byteLength(path) + 1;
+    if (size > OWNER_BATCH_ARGV_BYTES) {
+      results.set(path, { ok: false });
+      continue;
+    }
+    if (batch.length === OWNER_BATCH_PATHS || bytes + size > OWNER_BATCH_ARGV_BYTES) {
+      batches.push(batch);
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(path);
+    bytes += size;
+  }
+  if (batch.length) batches.push(batch);
+  for (const paths of batches) {
+    const owners = await ownersOfBatch(paths, runner, signal).catch(() => undefined);
+    for (const path of paths)
+      results.set(path, owners ? { ok: true, owners: owners.get(path) ?? [] } : { ok: false });
+  }
+  return results;
+}
+
+async function ownersOfBatch(
+  paths: string[],
+  runner: ProcessRunner,
+  signal: AbortSignal,
+): Promise<Map<string, SocketOwner[]>> {
+  // `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, clipping `claude.exe`.
   const result = await collectProcess(
-    runner('/usr/sbin/lsof', ['-Fpc', '+c', '0', '--', path], '', new AbortController().signal, {
-      timeoutMs: 3000,
-      maxOutputBytes: 32_768,
+    runner('/usr/sbin/lsof', ['-Fpcfn', '+c', '0', '--', ...paths], '', signal, {
+      timeoutMs: OWNER_PROBE_TIMEOUT_MS,
+      maxOutputBytes: Math.min(OWNER_OUTPUT_BYTES_PER_PATH * paths.length, OWNER_OUTPUT_MAX_BYTES),
     }),
   );
-  if (result.outcome.code !== 0 || result.outcome.reason !== 'exited') return false;
-  let currentPid = 0;
-  return result.lines.some((line) => {
-    if (/^p\d+$/.test(line)) currentPid = Number(line.slice(1));
-    const commands = typeof command === 'string' ? [command] : command;
-    return (
-      commands.some((name) => line === `c${name}`) && (pid === undefined || currentPid === pid)
-    );
-  });
+  const { outcome } = result;
+  if (
+    outcome.reason !== 'exited' ||
+    (outcome.code !== 0 && outcome.code !== 1) ||
+    outcome.diagnostics
+      .split('\n')
+      .some((line) => line.trim() && !MISSING_PATH_DIAGNOSTIC.test(line.trim()))
+  )
+    throw new Error('Socket owner probe failed');
+  const expected = new Set(paths);
+  const owners = new Map<string, SocketOwner[]>();
+  const malformed = () => {
+    throw new Error('Socket owner output is malformed');
+  };
+  // Strict p -> c -> (f -> n)+ records; ownership is never inherited across processes.
+  let pid = 0;
+  let command: string | undefined;
+  let processSeen = false;
+  let fileSeen = false;
+  let awaitingName = false;
+  const finishProcess = () => {
+    if (processSeen && (command === undefined || !fileSeen || awaitingName)) malformed();
+  };
+  for (const line of result.lines) {
+    if (/^p[1-9]\d*$/.test(line)) {
+      finishProcess();
+      pid = Number(line.slice(1));
+      processSeen = true;
+      command = undefined;
+      fileSeen = false;
+    } else if (line.startsWith('c') && line.length > 1) {
+      if (!processSeen || command !== undefined || fileSeen) malformed();
+      command = line.slice(1);
+    } else if (line.startsWith('f') && line.length > 1) {
+      if (!processSeen || command === undefined || awaitingName) malformed();
+      fileSeen = true;
+      awaitingName = true;
+    } else if (line.startsWith('n')) {
+      const path = line.slice(1);
+      if (!awaitingName || !expected.has(path) || command === undefined) return malformed();
+      awaitingName = false;
+      const list = owners.get(path) ?? [];
+      list.push({ pid, command });
+      owners.set(path, list);
+    } else malformed();
+  }
+  finishProcess();
+  return owners;
 }
 export type Parsed = {
   message?: AgentMessage;
