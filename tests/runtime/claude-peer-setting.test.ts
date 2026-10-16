@@ -110,3 +110,12 @@ it('treats a managed policy folder it cannot interpret as the organization contr
   await expect(f.peer.allowAll(f.project)).rejects.toThrow(/organization/);
   await expect(stat(f.settings)).rejects.toMatchObject({ code: 'ENOENT' });
 });
+
+it('treats an unreadable managed-settings.json as the organization controlling the setting', async () => {
+  const f = await fixture();
+  await mkdir(f.managedDir);
+  await writeFile(join(f.managedDir, 'managed-settings.json'), '{ nope');
+  expect(await f.peer.read(f.project)).toEqual({ user: 'unset', forcedBy: 'organization' });
+  await expect(f.peer.allowAll(f.project)).rejects.toThrow(/organization/);
+  await expect(stat(f.settings)).rejects.toMatchObject({ code: 'ENOENT' });
+});

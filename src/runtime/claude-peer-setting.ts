@@ -51,12 +51,17 @@ export function createClaudePeerSetting(options: PeerSettingOptions = {}): PeerS
   const library = options.systemLibraryDir ?? '/Library';
   const managedDir = options.managedDir ?? join(library, 'Application Support', 'ClaudeCode');
   const userPath = join(configDir, 'settings.json');
-  // Repository and managed files Claude itself can't parse don't force anything.
+  // Repository files Claude itself can't parse don't force anything.
   const optional = (path: string) => readClaudeConfigFile(path).catch(() => undefined);
 
   async function read(project: string): Promise<PeerSetting> {
     const user = await readClaudeConfigFile(userPath).then(valueOf, () => 'unreadable' as const);
-    const managed = valueOf(await optional(join(managedDir, 'managed-settings.json')));
+    // A managed file that exists but can't be read safely fails closed, like the opaque policy paths.
+    const managedFile = await readClaudeConfigFile(join(managedDir, 'managed-settings.json')).catch(
+      () => 'unreadable' as const,
+    );
+    if (managedFile === 'unreadable') return { user, forcedBy: 'organization' };
+    const managed = valueOf(managedFile);
     if (tightens(managed)) return { user, forcedBy: 'organization', forced: managed };
     for (const path of opaqueManagedPolicyPaths({ home, library, managedDir }))
       if (await pathExists(path)) return { user, forcedBy: 'organization' };
@@ -77,7 +82,9 @@ export function createClaudePeerSetting(options: PeerSettingOptions = {}): PeerS
       if (current.user === 'accept') return current;
       const info = await lstat(userPath).catch((error: unknown) => {
         if (isMissingFile(error)) return undefined;
-        throw error;
+        throw new Error(
+          `Claude's settings.json (${userPath}) could not be checked, so Gloss left it unchanged.`,
+        );
       });
       if (info && (info.isSymbolicLink() || !info.isFile()))
         throw new Error(
