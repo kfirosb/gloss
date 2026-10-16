@@ -49,6 +49,8 @@ export const TYPING_UNCERTAIN_REASON =
 export const TMUX_UNCONFIRMED_REASON = `Claude has not shown this message within ${TMUX_CONFIRM_TIMEOUT_MS / 1000} seconds. Check delivery, or release the composer; Gloss will not type it again`;
 export const TERMINAL_GONE_REASON =
   'The terminal closed before the message was typed; nothing was sent';
+export const NO_TYPING_RECORD_REASON =
+  'Gloss could not record that typing started; nothing was sent';
 /** C0 controls except tab and line feed, DEL and C1 controls: a terminal acts on them (ESC [201~ ends a bracketed paste). */
 const TERMINAL_CONTROL_CHARACTER = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
 /** Claude reads a leading ! as a shell command, / as a slash command and # as a memory note. */
@@ -98,7 +100,8 @@ export async function typeIntoTerminal(input: {
   body: string;
   session: TerminalSession;
   transcriptSize(): Promise<number>;
-  onTyping?: ((evidence: { nativeAfterRevision: number }) => void) | undefined;
+  /** Synchronous on purpose: a returned promise would let its rejection escape after the paste. */
+  onTyping: (evidence: { nativeAfterRevision: number }) => undefined;
 }): Promise<TerminalSend> {
   const body = input.body.replace(/\r\n/g, '\n');
   if (TERMINAL_CONTROL_CHARACTER.test(body)) return { state: 'failed', reason: UNSAFE_TEXT_REASON };
@@ -122,7 +125,7 @@ export async function typeIntoTerminal(input: {
     return { state: 'failed', reason: PASTE_PREPARE_REASON };
   }
   try {
-    input.onTyping?.({ nativeAfterRevision });
+    input.onTyping({ nativeAfterRevision });
   } catch {
     await discard();
     return { state: 'failed', reason: PASTE_PREPARE_REASON };
@@ -135,6 +138,27 @@ export async function typeIntoTerminal(input: {
     return { state: 'unconfirmed', reason: TYPING_UNCERTAIN_REASON, nativeAfterRevision };
   }
   return { state: 'typed', nativeAfterRevision };
+}
+
+/**
+ * Runs typing tasks one at a time per session (spec 2.1.3): a second message is checked and pasted only after the
+ * first one's Enter, so two pastes never interleave. Other sessions are not held up, and a failed task does not stop
+ * the next.
+ */
+export function createTypingQueue() {
+  const tails = new Map<string, Promise<void>>();
+  return function typeInTurn<T>(sessionRef: string, task: () => Promise<T>): Promise<T> {
+    const run = (tails.get(sessionRef) ?? Promise.resolve()).then(task);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    tails.set(sessionRef, tail);
+    void tail.then(() => {
+      if (tails.get(sessionRef) === tail) tails.delete(sessionRef);
+    });
+    return run;
+  };
 }
 
 /** One message typed into the terminal: its text and the transcript size just before the paste. */

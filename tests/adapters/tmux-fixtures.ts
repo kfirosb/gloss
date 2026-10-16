@@ -48,7 +48,7 @@ export interface FixtureTerminalOptions {
   inMode?: boolean;
   cursorShift?: number;
   panePid?: number;
-  fail?: 'capture' | 'load' | 'paste';
+  fail?: 'capture' | 'load' | 'paste' | 'enter';
   onEnter?: (text: string) => Promise<void>;
 }
 /** A Gloss terminal that shows a captured screen and records what the adapter does to it. */
@@ -92,6 +92,7 @@ export function fixtureTerminal(
     },
     async pressEnter() {
       log.calls.push('enter');
+      fail('enter');
       await options.onEnter?.(log.loaded.at(-1) ?? '');
     },
   };

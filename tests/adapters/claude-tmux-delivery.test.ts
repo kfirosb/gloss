@@ -18,6 +18,7 @@ import {
   UNSENT_TEXT_REASON,
   assignTypedMessages,
   checkTerminal,
+  createTypingQueue,
   pasteBufferName,
   sameTypedText,
   typeIntoTerminal,
@@ -109,7 +110,7 @@ describe('typing into the terminal', () => {
   const send = (
     terminal: GlossTerminal,
     body: string,
-    onTyping?: (evidence: { nativeAfterRevision: number }) => void,
+    onTyping: (evidence: { nativeAfterRevision: number }) => undefined = () => undefined,
     requestId = 'delivery-1',
   ) =>
     typeIntoTerminal({
@@ -286,6 +287,38 @@ const user = (
   complete: true,
   ...(clientId ? { clientId } : {}),
 });
+describe('typing queue', () => {
+  it('types for one session at a time, other sessions in parallel, and keeps going after a failure', async () => {
+    const typeInTurn = createTypingQueue();
+    const order: string[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = typeInTurn('session-a', async () => {
+      order.push('a1 start');
+      await gate;
+      order.push('a1 end');
+      throw new Error('pane closed');
+    });
+    const second = typeInTurn('session-a', async () => {
+      order.push('a2');
+      return 'a2';
+    });
+    expect(
+      await typeInTurn('session-b', async () => {
+        order.push('b1');
+        return 'b1';
+      }),
+    ).toBe('b1');
+    expect(order).toEqual(['a1 start', 'b1']);
+    release();
+    await expect(first).rejects.toThrow('pane closed');
+    expect(await second).toBe('a2');
+    expect(order).toEqual(['a1 start', 'b1', 'a1 end', 'a2']);
+  });
+});
+
 describe('typed message matching', () => {
   it('confirms identical pending texts in send order and skips records already taken', () => {
     const messages = [user('m1', 50, 'yes'), user('m2', 60, 'yes')];

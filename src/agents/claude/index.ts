@@ -3,11 +3,17 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createConnection } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   REQUEST_ID_SOURCE,
+  isAwaitingEvidence,
+  isDeliveryTransport,
   type AgentAdapter,
   type Attachment,
   type CodingState,
+  type Delivery,
+  type DeliveryRoute,
+  type SendContext,
   type Target,
 } from '../../core/contracts.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
@@ -32,6 +38,24 @@ import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { ChannelStore } from './channel-store.js';
 import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
+import { selectClaudeRoute } from './route.js';
+import {
+  NO_TYPING_RECORD_REASON,
+  TERMINAL_GONE_REASON,
+  TMUX_CONFIRM_POLL_MS,
+  TMUX_CONFIRM_TIMEOUT_MS,
+  TMUX_UNCONFIRMED_REASON,
+  assignTypedMessages,
+  createTypingQueue,
+  sameTypedText,
+  typeIntoTerminal,
+  typedMessagesAfter,
+  type GlossTerminal,
+  type TypedSend,
+} from './tmux-delivery.js';
+
+/** A typed delivery's evidence names the transcript record that showed it. */
+const TYPED_EVIDENCE_PREFIX = 'transcript:';
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
 export const CLAUDE_PROTOCOL = {
@@ -96,6 +120,10 @@ async function psOwnsPid(
     result.lines.some((line) => names.includes(basename(line.trim())))
   );
 }
+/** A session's messaging socket can be written: with own-child credentials, or directly on a Unix platform. */
+function canWritePeerSocket(hasCredentials: boolean): boolean {
+  return hasCredentials || process.platform === 'darwin' || process.platform === 'linux';
+}
 export interface ClaudeCredentials {
   sessionRef: string;
   projectId: string;
@@ -116,6 +144,8 @@ export interface ClaudeAdapterOptions extends AdapterOptions {
   transcriptPath?: (target: Target) => Promise<string>;
   /** Own-child credentials, supplied by trusted server bootstrap; never a browser API. */
   credentials?: (target: Target) => Promise<ClaudeCredentials | undefined>;
+  /** Trusted server hook: the tmux pane Gloss launched this session in, while it lives. Never from a browser. */
+  glossTerminal?: (sessionRef: string) => Promise<GlossTerminal | undefined>;
   /**
    * Pre-check before the socket-owner probe; only "gone" is decided here. Defaults to
    * `kill(pid, 0)`, or to "exists" when `runner` is injected, because an injected
@@ -393,6 +423,8 @@ async function socketWrite(
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAdapter {
   const config = claudeConfigDir(options.configDir);
   const liveness = claudeLiveness(options);
+  /** Shared by every connection to a session, so two sends never type into the same pane at once. */
+  const typeInTurn = createTypingQueue();
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -608,6 +640,101 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       };
+      /** Gloss's own pane for this session, only while it still runs this session (a /resume inside it changes the pid). */
+      const terminalFor = async (current: Registry) => {
+        const terminal = await options.glossTerminal?.(target.sessionRef).catch(() => undefined);
+        return terminal && terminal.panePid === current.pid ? terminal : undefined;
+      };
+      const typedSend = (delivery: Delivery): TypedSend | undefined =>
+        delivery.transport === 'tmux' && delivery.nativeAfterRevision !== undefined
+          ? {
+              id: delivery.id,
+              body: claudeMessage(delivery.englishText, delivery.attachments),
+              after: delivery.nativeAfterRevision,
+            }
+          : undefined;
+      /** The transcript record confirming `send`: earlier identical sends still pending take records first. */
+      const confirmTyped = async (
+        send: TypedSend,
+        earlier: readonly Delivery[],
+      ): Promise<string | undefined> => {
+        const identical = earlier.flatMap((delivery) => {
+          const typed = typedSend(delivery);
+          return typed && sameTypedText(typed.body, send.body) ? [{ delivery, typed }] : [];
+        });
+        const taken = new Set(
+          identical.flatMap(({ delivery }) =>
+            delivery.state === 'sent' && delivery.nativeMessageId?.startsWith(TYPED_EVIDENCE_PREFIX)
+              ? [delivery.nativeMessageId.slice(TYPED_EVIDENCE_PREFIX.length)]
+              : [],
+          ),
+        );
+        const sends = [
+          ...identical
+            .filter(({ delivery }) => isAwaitingEvidence(delivery))
+            .map(({ typed }) => typed),
+          send,
+        ];
+        const messages = await typedMessagesAfter(
+          (cursor) => transcript.history(cursor),
+          Math.min(...sends.map((item) => item.after)),
+        );
+        return assignTypedMessages(sends, messages, taken).get(send.id);
+      };
+      /** Ends the confirmation wait when the connection detaches. */
+      const confirmationStop = new AbortController();
+      const pause = (ms: number) =>
+        (options.clock
+          ? options.clock.sleep(ms, confirmationStop.signal)
+          : delay(ms, undefined, { signal: confirmationStop.signal })
+        ).catch(() => undefined);
+      /**
+       * Spec 2.2-2.3: type once into Gloss's pane, then wait up to 30 s for the transcript to show it. The record and
+       * the screen are read inside the session's typing turn, after any earlier message's Enter; the wait is not.
+       */
+      const sendThroughTerminal = async (
+        requestId: string,
+        text: string,
+        attachments: Attachment[],
+        sendContext: SendContext,
+      ) => {
+        const { onTyping } = sendContext;
+        if (!onTyping) return { state: 'failed' as const, reason: NO_TYPING_RECORD_REASON };
+        const body = claudeMessage(text, attachments);
+        const typed = await typeInTurn(target.sessionRef, async () => {
+          const current = await exact(target);
+          const terminal = await terminalFor(current);
+          if (!terminal) return { state: 'failed' as const, reason: TERMINAL_GONE_REASON };
+          return typeIntoTerminal({
+            terminal,
+            requestId,
+            body,
+            session: current,
+            transcriptSize: async () => (await stat(path)).size,
+            onTyping,
+          });
+        });
+        if (typed.state !== 'typed') return typed;
+        const send = { id: requestId, body, after: typed.nativeAfterRevision };
+        for (let waited = 0; ; waited += TMUX_CONFIRM_POLL_MS) {
+          const sourceId = await confirmTyped(send, sendContext.earlier ?? []).catch(
+            () => undefined,
+          );
+          if (sourceId)
+            return {
+              state: 'sent' as const,
+              nativeAfterRevision: send.after,
+              nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId,
+            };
+          if (waited >= TMUX_CONFIRM_TIMEOUT_MS || confirmationStop.signal.aborted) break;
+          await pause(TMUX_CONFIRM_POLL_MS);
+        }
+        return {
+          state: 'unconfirmed' as const,
+          reason: TMUX_UNCONFIRMED_REASON,
+          nativeAfterRevision: send.after,
+        };
+      };
       const status = async (): Promise<CodingState> => {
         const current = await exact(target);
         if (
@@ -647,14 +774,14 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           sendWhileBusy: false,
           channelSendWhileBusy: true,
           peerSendWhileBusy: true,
+          tmuxSendWhileBusy: true,
           acknowledgement: 'accepted',
         },
         async dispatch(requestId, text, attachments = [], sendContext) {
-          if (
-            sendContext?.transport !== undefined &&
-            !['channel', 'peer'].includes(sendContext.transport)
-          )
+          if (sendContext?.transport !== undefined && !isDeliveryTransport(sendContext.transport))
             return { state: 'failed', reason: 'Invalid Claude transport' };
+          if (sendContext?.transport === 'tmux')
+            return sendThroughTerminal(requestId, text, attachments, sendContext);
           if (sendContext?.transport !== 'peer') {
             if (
               !context?.panelSessionId ||
@@ -728,10 +855,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
               state: 'failed',
               reason: 'Claude session credentials do not match; instruction preserved',
             };
-          if (
-            !registry.messagingSocketPath ||
-            (!credential && process.platform !== 'darwin' && process.platform !== 'linux')
-          )
+          if (!registry.messagingSocketPath || !canWritePeerSocket(!!credential))
             return {
               state: 'failed',
               reason: 'Claude live messaging connection unavailable; instruction preserved',
@@ -756,13 +880,19 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       });
-      connection.reconcileDelivery = async (delivery) => {
+      connection.reconcileDelivery = async (delivery, earlier) => {
         if (
           delivery.target.agent !== target.agent ||
           delivery.target.sessionRef !== target.sessionRef ||
           delivery.target.projectId !== target.projectId
         )
           return false;
+        if (delivery.transport === 'tmux') {
+          const send = typedSend(delivery);
+          if (!send) return false;
+          const sourceId = await confirmTyped(send, earlier ?? []);
+          return sourceId ? { nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId } : false;
+        }
         if (delivery.transport === 'channel') {
           if (!context?.panelSessionId) return false;
           const reader = ledger();
@@ -802,8 +932,22 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         } while (cursor && matches < 2);
         return matches === 1;
       };
+      connection.deliveryRoute = async (): Promise<DeliveryRoute> => {
+        const current = await exact(target);
+        const channel = await channelRegistry.resolveChannel(target).then(
+          (record) => !!record,
+          () => false,
+        );
+        return selectClaudeRoute({
+          entrypoint: current.entrypoint,
+          glossTerminal: !!(await terminalFor(current)),
+          channel: channel && !!context?.panelSessionId,
+          peer: !!current.messagingSocketPath && canWritePeerSocket(!!options.credentials),
+        });
+      };
       const detach = connection.detach.bind(connection);
       connection.detach = async () => {
+        confirmationStop.abort();
         await detach();
         ownedLedger?.close();
         ownedLedger = undefined;

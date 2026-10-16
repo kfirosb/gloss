@@ -202,8 +202,11 @@ export interface SendContext {
   transport: DeliveryTransport;
   /** Deliveries claimed before this one for the same session, oldest first. */
   earlier?: readonly Delivery[] | undefined;
-  /** Called once just before a terminal paste; it persists TYPING_STARTED_REASON. A throw cancels the send untyped. */
-  onTyping?: ((evidence: { nativeAfterRevision: number }) => void) | undefined;
+  /**
+   * Called once just before a terminal paste; it persists TYPING_STARTED_REASON. A throw cancels the send untyped.
+   * Synchronous: a terminal send without it types nothing.
+   */
+  onTyping?: ((evidence: { nativeAfterRevision: number }) => undefined) | undefined;
 }
 export interface AgentAdapter {
   kind: AgentKind;
