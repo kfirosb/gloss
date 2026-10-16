@@ -176,7 +176,8 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   }
   return {
     kind: 'codex',
-    discoverOpen: (signal) => discoverOpenCodex(options, signal, () => snapshot()),
+    discoverOpen: (signal, { fresh = false } = {}) =>
+      discoverOpenCodex(options, signal, () => snapshot({ fresh })),
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       let threads: Thread[];

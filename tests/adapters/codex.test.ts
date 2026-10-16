@@ -661,6 +661,68 @@ describe('closed Codex threads (no attached terminal)', () => {
     },
   );
 
+  it.runIf(process.platform === 'darwin')('runs a fresh discovery on request', async () => {
+    const h = await harness('codex');
+    cleanups.push(h.cleanup);
+    const { state, adapter } = await terminalRig(h);
+    await adapter.discoverOpen!(new AbortController().signal);
+    await adapter.discoverOpen!(new AbortController().signal, { fresh: true });
+    expect(state.writerProbes).toBe(2);
+  });
+
+  it.runIf(process.platform === 'darwin')(
+    'returns from a cancelled discovery while the shared probe is still running',
+    async () => {
+      const h = await harness('codex');
+      cleanups.push(h.cleanup);
+      await mkdir(join(h.dir, 'thread-writer-locks'));
+      await writeFile(join(h.dir, 'thread-writer-locks', `${h.sessionRef}.lock`), '');
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const runner: ProcessRunner = async function* () {
+        await held;
+        yield {
+          type: 'exit',
+          outcome: { code: 2, signal: null, reason: 'exited', diagnostics: '' },
+        };
+      };
+      cleanups.push(async () => release());
+      const adapter = createCodexAdapter({ codexHome: h.dir, runner });
+      const controller = new AbortController();
+      const scan = adapter.discoverOpen!(controller.signal);
+      controller.abort();
+      const settled = await Promise.race([
+        scan,
+        new Promise((resolve) => setTimeout(() => resolve('still waiting'), 500)),
+      ]);
+      expect(settled).toEqual({
+        candidates: [],
+        complete: false,
+        error: 'Codex discovery cancelled',
+      });
+    },
+  );
+
+  it('runs no probes off macOS', async () => {
+    const h = await harness('codex');
+    cleanups.push(h.cleanup);
+    const { state, adapter } = await terminalRig(h);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      const connection = await adapter.attach(h.target);
+      cleanups.push(() => connection.detach());
+      const w = watch(connection);
+      cleanups.push(w.stop);
+      await expect
+        .poll(() => w.events.filter((e) => e.type === 'status').at(-1))
+        .toEqual({ type: 'status', state: 'disconnected' });
+      expect(state.writerProbes).toBe(0);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it.runIf(process.platform === 'darwin')('checks liveness afresh before every send', async () => {
     const h = await harness('codex');
     cleanups.push(h.cleanup);

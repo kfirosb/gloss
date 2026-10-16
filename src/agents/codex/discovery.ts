@@ -260,6 +260,8 @@ export async function codexSnapshot(
   options: CodexAdapterOptions,
   signal: AbortSignal,
 ): Promise<CodexSnapshot> {
+  if (process.platform !== 'darwin')
+    throw new Error('Codex writer ownership verification is unavailable on this platform');
   const scan = await scanWriters(options, signal);
   if (scan.cancelled || signal.aborted) throw new Error('Codex liveness check cancelled');
   if (!scan.owned.size) return { scan, liveness: new Map() };
@@ -282,13 +284,20 @@ export async function codexSnapshot(
 
 /** Liveness of every locked thread, for adapter status checks. Throws when it cannot be verified. */
 export function threadLiveness(snapshot: CodexSnapshot): Map<string, ThreadLiveness> {
-  if (process.platform !== 'darwin')
-    throw new Error('Codex writer ownership verification is unavailable on this platform');
   const { scan, liveness } = snapshot;
   if (!scan.complete && !scan.owned.size)
     throw new Error(scan.error ?? 'Codex writer enumeration failed');
   if (!liveness) throw new Error('Codex terminal attachment verification failed');
   return liveness;
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('Cancelled'));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error('Cancelled'));
+    signal.addEventListener('abort', abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 /** Metadata-only discovery: writer candidates first, attachment second, exact SQLite rows last. */
@@ -316,7 +325,8 @@ export async function discoverOpenCodex(
     };
   let snap: CodexSnapshot;
   try {
-    snap = await snapshot();
+    // The probe round may be shared with other callers; stop waiting on our own cancellation.
+    snap = await untilAborted(snapshot(), signal);
   } catch {
     return cancelled();
   }
