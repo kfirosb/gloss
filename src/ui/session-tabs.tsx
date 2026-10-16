@@ -22,6 +22,7 @@ const tabTitle = (entry: CatalogEntry) =>
 const dotClass = (entry: CatalogEntry) =>
   entry.attention === 'approval' ||
   entry.attention === 'response' ||
+  entry.activity === 'dialog-open' ||
   entry.activity === 'approval-required'
     ? 'needs-you'
     : entry.activity;

@@ -26,6 +26,7 @@ import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
+import { claudeActivity } from './activity.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { ChannelStore } from './channel-store.js';
@@ -49,18 +50,14 @@ interface Registry {
   version: string;
   messagingSocketPath?: string | undefined;
   status?: string | undefined;
+  waitingFor?: unknown;
   peerProtocol?: number | undefined;
   entrypoint?: string | undefined;
   startedAt?: number | undefined;
   updatedAt?: number | undefined;
   name?: unknown;
 }
-export function claudeActivity(status: unknown): CodingState {
-  if (status === 'idle') return 'idle';
-  if (status === 'approval-required' || status === 'waiting_for_approval')
-    return 'approval-required';
-  return 'working';
-}
+export { claudeActivity } from './activity.js';
 type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
 function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
   return createClaudeLiveness({
@@ -163,6 +160,7 @@ async function registries(config: string): Promise<Registry[]> {
           version: r.version,
           messagingSocketPath: optional(r.messagingSocketPath, 'string'),
           status: optional(r.status, 'string'),
+          waitingFor: r.waitingFor,
           peerProtocol: optional(r.peerProtocol, 'number'),
           entrypoint: optional(r.entrypoint, 'string'),
           startedAt: optional(r.startedAt, 'number'),
@@ -241,7 +239,7 @@ export async function discoverOpenClaude(
         continue;
       }
       const target: Target = { agent: 'claude', sessionRef: record.sessionId, projectId };
-      const activity = claudeActivity(record.status);
+      const activity = claudeActivity(record.status, record.waitingFor);
       const sessionTitle = normalizeSessionTitle(record.name);
       result.candidates.push({
         target,
@@ -621,7 +619,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           ? await options.observeLive(target)
           : (await liveClaude(current, liveness, options.runner)) === 'alive';
         if (!live) return 'disconnected';
-        return claudeActivity(current.status);
+        return claudeActivity(current.status, current.waitingFor);
       };
       // A send must not rely on a cached answer: the session may have closed inside the window.
       const beforeSend = async (): Promise<string | undefined> => {

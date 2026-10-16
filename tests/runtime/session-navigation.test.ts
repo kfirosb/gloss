@@ -102,6 +102,9 @@ it('activity labels', () => {
     'Approval required',
   );
   expect(activityLabel(at('A', '/r/.git', '/f', true, 'working'))).toBe('Working');
+  expect(activityLabel(at('A', '/r/.git', '/f', true, 'dialog-open'))).toBe(
+    'A dialog is open in the terminal',
+  );
 });
 
 it('projects registered records missing from the catalog as saved entries', () => {

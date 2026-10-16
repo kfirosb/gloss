@@ -64,6 +64,7 @@ import { isHebrew } from '../core/language-style.js';
 import { ClaudeConnection, PeerExplanation, useClaudeConnection } from './claude-connection.js';
 import {
   canSendWhileWorking,
+  DIALOG_OPEN_REASON,
   isChannelAwaitingReply,
   isDeliverySubmitted,
 } from '../core/contracts.js';
@@ -1351,7 +1352,9 @@ export function SessionWorkspace({
                 ? activityLabel(entry)
                 : snapshot.codingState === 'approval-required'
                   ? 'Approval required'
-                  : snapshot.codingState[0]!.toUpperCase() + snapshot.codingState.slice(1)}
+                  : snapshot.codingState === 'dialog-open'
+                    ? DIALOG_OPEN_REASON
+                    : snapshot.codingState[0]!.toUpperCase() + snapshot.codingState.slice(1)}
             </span>
             <UsageReadout
               sessionId={record.id}
