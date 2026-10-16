@@ -1,6 +1,14 @@
 export type LiveView = 'translated' | 'original' | 'split' | 'terminal';
 export type ConversationView = 'translated' | 'original';
 export const LIVE_VIEWS: readonly LiveView[] = ['translated', 'original', 'split', 'terminal'];
+export const CONVERSATION_VIEWS: readonly ConversationView[] = ['translated', 'original'];
+export const LIVE_VIEW_LABELS: Record<LiveView, string> = {
+  translated: 'Translated',
+  original: 'Original',
+  split: 'Split',
+  terminal: 'Terminal',
+};
+export const NO_TERMINAL_TOOLTIP = 'Gloss can show the terminal only for sessions it started';
 export const showsTerminal = (view: LiveView): boolean => view === 'split' || view === 'terminal';
 // The terminal shortcut: opens split from a conversation view, and returns to the remembered side.
 export const toggleTerminal = (view: LiveView, conversation: ConversationView): LiveView =>

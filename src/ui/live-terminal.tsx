@@ -49,7 +49,9 @@ export function LiveTerminal({
           dir="auto"
           aria-label="Write to the terminal"
           value={text}
-          disabled={busy}
+          // Read-only rather than disabled while translating, so the focus stays in the line.
+          readOnly={busy}
+          aria-busy={busy}
           placeholder={busy ? 'Translating…' : undefined}
           onChange={(e) => setText(e.target.value)}
         />
