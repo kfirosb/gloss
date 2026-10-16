@@ -159,6 +159,45 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('keeps one bad record from failing the others', async () => {
+    const bad = socket(3);
+    const { liveness } = setup(held(1, 2, 3), (paths) =>
+      paths.includes(bad) ? { exit: 2 } : undefined,
+    );
+    await expect(liveness.checkMany([record(1), record(2), record(3)])).resolves.toEqual([
+      'alive',
+      'alive',
+      'failed',
+    ]);
+  });
+
+  it('probes a previously failed record on its own', async () => {
+    const bad = socket(3);
+    const { liveness, calls, at } = setup(held(1, 2, 3), (paths) =>
+      paths.includes(bad) ? { exit: 2 } : undefined,
+    );
+    await liveness.checkMany([record(1), record(2), record(3)]);
+    const before = calls.length;
+    at(3001);
+    await liveness.checkMany([record(1), record(2), record(3)]);
+    expect(calls.slice(before).map((args) => args.slice(4).sort())).toEqual([
+      [socket(1), socket(2)],
+      [bad],
+    ]);
+  });
+
+  it('runs a fresh check on demand despite the cache', async () => {
+    const owners = held(1);
+    const { liveness, calls, at } = setup(owners);
+    await expect(liveness.check(record(1))).resolves.toBe('alive');
+    at(100);
+    delete owners[socket(1)];
+    await expect(liveness.check(record(1), { fresh: true })).resolves.toBe('not-alive');
+    expect(calls).toHaveLength(2);
+    await expect(liveness.check(record(1))).resolves.toBe('not-alive');
+    expect(calls).toHaveLength(2);
+  });
+
   it('skips lsof when the process is gone', async () => {
     const fake = lsofRunner(held(1));
     const liveness = createClaudeLiveness({ runner: fake.runner, processExists: () => false });

@@ -1,4 +1,4 @@
-import { observedOwners } from '../shared.js';
+import { observedOwners, type OwnerResult } from '../shared.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
 
 export type Liveness = 'alive' | 'not-alive' | 'failed';
@@ -66,14 +66,27 @@ export function createClaudeLiveness(options: ClaudeLivenessOptions = {}) {
       if (!exists) states.set(entry, 'not-alive');
       return exists;
     });
-    if (!probed.length) return states;
-    const owners = await observedOwners(
-      probed.map((entry) => entry.record.messagingSocketPath),
-      runner,
-    );
+    const results = new Map<Entry, OwnerResult | undefined>();
+    const pathOf = (entry: Entry) => entry.record.messagingSocketPath;
+    // A record that failed last time is probed alone, so it cannot fail the shared walk again.
+    const shared = probed.filter((entry) => entry.state !== 'failed');
+    if (shared.length) {
+      const owners = await observedOwners(shared.map(pathOf), runner);
+      for (const entry of shared) results.set(entry, owners.get(pathOf(entry)));
+    }
+    // A failed shared walk cannot say which path caused it; recheck those paths one by one.
+    const retry =
+      new Set(shared.map(pathOf)).size > 1 ? shared.filter((e) => !results.get(e)?.ok) : [];
+    const alone = [...retry, ...probed.filter((entry) => entry.state === 'failed')];
+    const single = new Map<string, OwnerResult | undefined>();
+    for (const entry of alone) {
+      const path = pathOf(entry);
+      if (!single.has(path)) single.set(path, (await observedOwners([path], runner)).get(path));
+      results.set(entry, single.get(path));
+    }
     for (const entry of probed) {
-      const { pid, version, messagingSocketPath } = entry.record;
-      const result = owners.get(messagingSocketPath);
+      const { pid, version } = entry.record;
+      const result = results.get(entry);
       if (!result?.ok) continue;
       const names = ['claude', 'claude.exe', version];
       const owned = result.owners.some((o) => o.pid === pid && names.includes(o.command));
@@ -104,7 +117,8 @@ export function createClaudeLiveness(options: ClaudeLivenessOptions = {}) {
     return (entry.pending = queued.done.then(() => entry.state ?? 'failed'));
   }
 
-  function request(record: SocketRecord): Promise<Liveness> {
+  /** `fresh` skips a cached answer (still joining a walk already queued or running), for a check right before a send. */
+  function request(record: SocketRecord, { fresh = false } = {}): Promise<Liveness> {
     const key = keyOf(record);
     const at = now();
     const entry = entries.get(key) ?? { record, expiresAt: -Infinity, lastRequested: at };
@@ -113,7 +127,7 @@ export function createClaudeLiveness(options: ClaudeLivenessOptions = {}) {
     entry.lastRequested = at;
     if (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value!);
     if (entry.pending) return entry.pending;
-    if (entry.state && at <= entry.expiresAt) return Promise.resolve(entry.state);
+    if (!fresh && entry.state && at <= entry.expiresAt) return Promise.resolve(entry.state);
     const pending = enqueue(entry);
     // Refresh the rest of the working set in the same walk; forget records nobody asked about lately.
     for (const [otherKey, other] of entries) {
@@ -126,6 +140,7 @@ export function createClaudeLiveness(options: ClaudeLivenessOptions = {}) {
 
   return {
     check: request,
-    checkMany: (records: readonly SocketRecord[]) => Promise.all(records.map(request)),
+    checkMany: (records: readonly SocketRecord[]) =>
+      Promise.all(records.map((record) => request(record))),
   };
 }

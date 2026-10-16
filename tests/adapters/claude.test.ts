@@ -15,7 +15,7 @@ import {
 } from '../../src/agents/claude/index.js';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 import { harness, watch } from './agent-harness.js';
-import { lsofPaths, lsofRunner, ownerLines } from './lsof-fixture.js';
+import { lsofPaths, lsofRunner, ownerLines, type LsofOwner } from './lsof-fixture.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) await fn();
@@ -811,6 +811,36 @@ describe('Claude native peer inbox', () => {
       await expect.poll(() => polls, { timeout: 2000 }).toBeGreaterThanOrEqual(10);
       expect(w.events).toContainEqual({ type: 'status', state: 'idle' });
       expect(calls.length).toBeLessThanOrEqual(2);
+    },
+  );
+  it.runIf(process.platform === 'darwin')(
+    'refuses a send cleanly when the session closed inside the cache window',
+    async () => {
+      const h = await harness('claude');
+      cleanups.push(h.cleanup);
+      const owners: Record<string, LsofOwner[]> = {
+        [join(h.dir, 'inbox.sock')]: [{ pid: process.pid, command: 'claude' }],
+      };
+      const { runner } = lsofRunner(owners);
+      const c = await createClaudeAdapter({
+        configDir: h.dir,
+        transcriptPath: async () => h.transcript,
+        runner,
+        pollMs: 5,
+      }).attach(h.target);
+      cleanups.push(() => c.detach());
+      const w = watch(c);
+      cleanups.push(w.stop);
+      await expect.poll(() => w.events).toContainEqual({ type: 'status', state: 'idle' });
+      delete owners[join(h.dir, 'inbox.sock')];
+      const receipt = await c.send('request', 'Send this', [], {
+        panelSessionId: 'panel',
+        transport: 'peer',
+      });
+      expect(receipt).toEqual({
+        state: 'failed',
+        reason: 'Agent is disconnected, busy, or requires native approval',
+      });
     },
   );
   it('publishes an appended message and exact delivery receipt when the subsequent status lookup fails once', async () => {

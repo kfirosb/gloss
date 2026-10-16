@@ -600,11 +600,23 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         if (!live) return 'disconnected';
         return claudeActivity(current.status);
       };
+      // A send must not rely on a cached answer: the session may have closed inside the window.
+      const beforeSend = async (): Promise<string | undefined> => {
+        if (options.observeLive) return undefined;
+        const current = await exact(target);
+        const { messagingSocketPath } = current;
+        if (!messagingSocketPath) return undefined;
+        const state = await liveness.check({ ...current, messagingSocketPath }, { fresh: true });
+        return state === 'alive'
+          ? undefined
+          : 'Agent is disconnected, busy, or requires native approval';
+      };
       const connection = await transcriptConnection({
         target,
         transcript: feed,
         options,
         status,
+        beforeSend,
         capabilities: {
           history: true,
           liveMessages: true,
