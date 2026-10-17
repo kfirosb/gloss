@@ -6,6 +6,7 @@ import * as pty from 'node-pty';
 import { WebSocketServer } from 'ws';
 import { isLoopbackOrigin, rejectUpgrade } from './loopback.js';
 import type { LaunchRecord } from './session-launcher.js';
+import { isTerminalWheel } from '../core/terminal-wheel.js';
 import { sessionNameFor, tmuxEnvironment, type Tmux } from './tmux.js';
 
 export interface PtyProcess {
@@ -173,6 +174,13 @@ export function createTerminalBridge(options: {
           }
         });
         pty.onExit(() => ws.close());
+        // Input and scrolling run in arrival order; after scrolling up, the pane may be browsing history in copy
+        // mode, which would swallow keystrokes, so typing first returns it to the live screen.
+        let ordered = Promise.resolve();
+        let browsing = false;
+        const inOrder = (step: () => Promise<void>) => {
+          ordered = ordered.then(step).catch(() => undefined);
+        };
         let tokens = RATE_BURST;
         let last = now();
         let dropped = 0;
@@ -191,8 +199,23 @@ export function createTerminalBridge(options: {
           } catch {
             return;
           }
-          if (m?.type === 'input' && typeof m.data === 'string') pty.write(m.data);
-          else if (m?.type === 'resize') {
+          if (m?.type === 'input' && typeof m.data === 'string') {
+            const data = m.data;
+            inOrder(async () => {
+              if (browsing) {
+                browsing = false;
+                await tmux.exitCopyMode(name).catch(() => undefined);
+              }
+              pty.write(data);
+            });
+          } else if (m?.type === 'scroll') {
+            const wheel = { lines: Number(m.lines), col: Number(m.col), row: Number(m.row) };
+            if (!isTerminalWheel(wheel)) return;
+            inOrder(async () => {
+              if (wheel.lines < 0) browsing = true;
+              await tmux.scroll(name, wheel);
+            });
+          } else if (m?.type === 'resize') {
             const cols = Number(m.cols),
               rows = Number(m.rows);
             if (![cols, rows].every((n) => Number.isSafeInteger(n) && n >= 10 && n <= 1000)) return;

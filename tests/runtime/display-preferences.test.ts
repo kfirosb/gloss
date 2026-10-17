@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { LAYOUT_SIZE_MAX, LAYOUT_SIZE_MIN } from '../../src/core/session-contracts.js';
 import {
   applyTheme,
   DARK_STYLES,
@@ -30,6 +31,7 @@ it('recovers from unavailable, corrupt and unknown-version preferences', () => {
       version: 1,
       collapsed: false,
       assistantModes: {},
+      liveViews: {},
       lastByFolder: {},
       tabOrder: {},
       sidebarWidth: 300,
@@ -51,6 +53,7 @@ it('persists validated per-session modes and folder state without routing or cap
       version: 1,
       collapsed: true,
       assistantModes: { A: 'compact', B: 'full' },
+      liveViews: {},
       lastByFolder: {},
       tabOrder: {},
       sidebarWidth: 300,
@@ -63,6 +66,7 @@ it('persists validated per-session modes and folder state without routing or cap
     version: 1,
     collapsed: true,
     assistantModes: { A: 'compact', B: 'full' },
+    liveViews: {},
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
@@ -76,6 +80,7 @@ it('persists validated per-session modes and folder state without routing or cap
     version: 1,
     collapsed: false,
     assistantModes: { A: 'compact' },
+    liveViews: {},
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
@@ -99,12 +104,14 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
       collapsed: true,
       grouping: 'folder',
       assistantModes: { A: 'compact' },
+      liveViews: {},
     }),
   );
   expect(readDisplayPreferences(s)).toEqual({
     version: 1,
     collapsed: true,
     assistantModes: { A: 'compact' },
+    liveViews: {},
     lastByFolder: {},
     tabOrder: {},
     sidebarWidth: 300,
@@ -116,6 +123,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
       version: 1,
       collapsed: false,
       assistantModes: {},
+      liveViews: {},
       lastByFolder: { '/f': 'A', bad: 1 as any },
       tabOrder: { '/f': ['A', 'B'], x: 'no' as any },
       sidebarWidth: 300,
@@ -128,6 +136,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     version: 1,
     collapsed: false,
     assistantModes: {},
+    liveViews: {},
     lastByFolder: { '/f': 'A' },
     tabOrder: { '/f': ['A', 'B'] },
     sidebarWidth: 300,
@@ -144,6 +153,7 @@ it('keeps long-lived tab order beyond 200 keys and prunes only vanished keys, fo
       version: 1,
       collapsed: false,
       assistantModes: {},
+      liveViews: {},
       lastByFolder: { '/f': 'k0', '/gone': 'x' },
       tabOrder: { '/f': keys, '/gone': ['x'] },
       sidebarWidth: 300,
@@ -223,4 +233,35 @@ it('defines every dark color variable the stylesheets use for each dark style', 
   expect(used.size).toBeGreaterThan(100);
   for (const [, defined] of blocks) expect([...used].filter((v) => !defined.has(v))).toEqual([]);
   expect(sheets).not.toMatch(/light-dark\([^,]+,\s*#/);
+});
+
+it('remembers a validated Live Conversation layout per session', () => {
+  const roundTrip = (liveViews: unknown) => {
+    const s = storage();
+    writeDisplayPreferences({ ...readDisplayPreferences(), liveViews: liveViews as never }, s);
+    return readDisplayPreferences(s).liveViews;
+  };
+  const kept = { view: 'split', conversation: 'original', split: 30 };
+  expect(roundTrip({ s1: kept })).toEqual({ s1: kept });
+  expect(readDisplayPreferences(storage('{"version":1}')).liveViews).toEqual({});
+  expect(
+    roundTrip({
+      badView: { ...kept, view: 'sideways' },
+      badConversation: { ...kept, conversation: 'terminal' },
+      nan: { ...kept, split: NaN },
+      text: { ...kept, split: '30' },
+      str: 'split',
+      nul: null,
+      low: { ...kept, split: 1 },
+      high: { ...kept, split: 99 },
+    }),
+  ).toEqual({
+    low: { ...kept, split: LAYOUT_SIZE_MIN },
+    high: { ...kept, split: LAYOUT_SIZE_MAX },
+  });
+  const many = Object.fromEntries(Array.from({ length: 600 }, (_, i) => ['s' + i, kept]));
+  const result = roundTrip(many);
+  expect(Object.keys(result)).toHaveLength(500);
+  expect(Object.keys(result)[0]).toBe('s100');
+  expect(Object.keys(result).at(-1)).toBe('s599');
 });

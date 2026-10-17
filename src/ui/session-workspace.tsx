@@ -6,7 +6,15 @@ import {
   ATTACHMENT_LIMIT_MESSAGE,
   IMAGE_LIMIT_MESSAGE,
 } from '../core/content-policy.js';
-import React, { useEffect, useLayoutEffect, useState, useRef, useId, type ReactNode } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  useId,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 
 import type { AgentMessage } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
@@ -18,7 +26,12 @@ import { InventoryPicker, detectInvocation, type InvocationMention } from './inv
 import type { CardReference } from './attachment-cards.js';
 import type { FileReference } from '../core/file-references.js';
 import { MovableWorkspace } from './movable-workspace.js';
-import { useDisplayPreferences, type AssistantMode } from './display-preferences.js';
+import {
+  DEFAULT_LIVE_LAYOUT,
+  useDisplayPreferences,
+  type AssistantMode,
+  type LiveLayout,
+} from './display-preferences.js';
 import {
   SelectionDialog,
   ReplaceInstructionDialog,
@@ -37,12 +50,29 @@ import {
 } from './session-client.js';
 import { useWorkspace } from './use-workspace.js';
 
-import { TerminalPopup } from './terminal-popup.js';
+import { LiveTerminal } from './live-terminal.js';
+import { ViewRadios } from './live-view-switch.js';
+import { PaneDivider, useWideLayout } from './pane-divider.js';
+import {
+  CONVERSATION_VIEWS,
+  LIVE_VIEWS,
+  LIVE_VIEW_LABELS,
+  NO_TERMINAL_TOOLTIP,
+  approvalSwitch,
+  historyView,
+  selectView,
+  showsTerminal,
+  toggleTerminal,
+  type ConversationView,
+  type LiveView,
+} from './live-view.js';
 import {
   usePopupMode,
   useAutoOpenTerminal,
   lastKeystrokeAt,
   noteKeystroke,
+  typedRecently,
+  AUTO_OPEN_POLL_MS,
 } from './launch-controls.js';
 
 import { RunCommandContext } from './run-command.js';
@@ -52,7 +82,7 @@ import type { CatalogEntry } from '../core/session-catalog.js';
 import type { UsageSnapshot } from '../core/usage.js';
 import { QuotaBreakDialog, UsageReadout } from './usage-dialogs.js';
 import { terminalDestinationLabel } from './provider-label.js';
-import type { SessionRecord } from '../core/session-contracts.js';
+import { clampLayoutSize, type SessionRecord } from '../core/session-contracts.js';
 
 import { SessionLanguageControl } from './language-controls.js';
 import {
@@ -273,10 +303,6 @@ export function SessionWorkspace({
   const routeReady = !isClaude || !!routeTransport;
   const workspace = useWorkspace(record.id);
   const popupMode = usePopupMode();
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const terminalTitle =
-    record.sessionTitle ?? (record.target.agent === 'claude' ? 'Claude' : 'Codex');
-  useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => setTerminalOpen(true));
   const [preferences, setPreferences] = useDisplayPreferences();
   const assistantMode = preferences.assistantModes[record.id] ?? 'compact';
   const setAssistantMode = (mode: AssistantMode) =>
@@ -284,6 +310,72 @@ export function SessionWorkspace({
       ...value,
       assistantModes: { ...value.assistantModes, [record.id]: mode },
     }));
+  const launchId = entry?.launchId;
+  const wideLayout = useWideLayout();
+  const approval = entry?.activity === 'approval-required';
+  const liveLayout = preferences.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT;
+  // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
+  // A manual choice saves itself and drops this override.
+  const [approvalView, setApprovalView] = useState<LiveView | null>(null);
+  // A remembered terminal view falls back to its conversation side while there is no terminal to show.
+  const liveView: LiveView =
+    (launchId && approvalView) ||
+    (launchId || !showsTerminal(liveLayout.view) ? liveLayout.view : liveLayout.conversation);
+  const conversationView = selectView(liveView, liveLayout.conversation);
+  const setLiveLayout = (change: Partial<LiveLayout>) =>
+    setPreferences((value) => ({
+      ...value,
+      liveViews: {
+        ...value.liveViews,
+        [record.id]: { ...(value.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT), ...change },
+      },
+    }));
+  const [terminalFocus, setTerminalFocus] = useState(true);
+  const chooseLiveView = (view: LiveView) => {
+    setApprovalView(null);
+    setTerminalFocus(true);
+    setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
+  };
+  const chooseConversation = (conversation: ConversationView) => {
+    // During an approval only the side is saved; the approval's Split stays temporary and still restores.
+    setLiveLayout(approvalView ? { conversation } : { view: liveView, conversation });
+  };
+  // The approval poll keeps its first callback, so it reads the current view through a ref.
+  const liveViewNow = useRef(liveView);
+  liveViewNow.current = liveView;
+  useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => {
+    const { view, returnTo } = approvalSwitch(liveViewNow.current);
+    if (!returnTo) return;
+    setTerminalFocus(false);
+    setApprovalView(view);
+  });
+  const terminalDraft = useRef(false);
+  // Restore once the approval is over and the user has left the terminal: not while typing, focused there or
+  // holding unsent Hebrew-line text. An approval that comes back first simply keeps the terminal.
+  useEffect(() => {
+    if (approval || !approvalView) return;
+    const tick = () => {
+      if (typedRecently(lastKeystrokeAt(), Date.now()) || terminalDraft.current) return;
+      if (document.activeElement?.closest('.live-terminal')) return;
+      setApprovalView(null);
+    };
+    tick();
+    const timer = setInterval(tick, AUTO_OPEN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [approval, approvalView]);
+  useEffect(() => {
+    if (!launchId) return;
+    // Capture phase: the terminal's own textarea would otherwise take the key first.
+    const toggle = (event: KeyboardEvent) => {
+      // Ctrl+` too on the Mac, where the system may keep ⌘` for switching windows.
+      if (event.key !== '`' || !(event.metaKey || event.ctrlKey)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      chooseLiveView(toggleTerminal(liveViewNow.current, liveLayout.conversation));
+    };
+    window.addEventListener('keydown', toggle, true);
+    return () => window.removeEventListener('keydown', toggle, true);
+  }, [launchId, liveLayout.conversation]);
   const data = workspace.record.data;
   const call = (action: Action) => client.action(action);
 
@@ -994,37 +1086,124 @@ export function SessionWorkspace({
   const newestReply = snapshot.discussion.filter((t) => t.role === 'assistant').at(-1);
   const assistantState: 'arriving' | undefined =
     newestReply && newestReply.complete === false ? 'arriving' : undefined;
+  const liveSwitch = (
+    <>
+      <ViewRadios
+        label="Live Conversation view"
+        value={liveView}
+        onChange={chooseLiveView}
+        options={LIVE_VIEWS.map((view) => {
+          const unavailable = showsTerminal(view) && !launchId;
+          return {
+            value: view,
+            label: LIVE_VIEW_LABELS[view],
+            disabled: unavailable,
+            title: unavailable ? NO_TERMINAL_TOOLTIP : undefined,
+            badge: view === 'terminal' && approval && (
+              <span className="live-view-dot" aria-hidden="true" />
+            ),
+          };
+        })}
+      />
+      {launchId && entry?.attentionNotice && (
+        <small className="live-attention-notice">{entry.attentionNotice}</small>
+      )}
+    </>
+  );
+  const liveFeed = (
+    <section ref={feed} className="feed" aria-label="Live Hebrew conversation">
+      {visibleMessages.length === 0 && (
+        <p className="discussion-empty">Waiting for the next assistant response.</p>
+      )}
+      {visibleMessages.map((m) => (
+        <Message
+          key={m.sourceId}
+          message={m}
+          client={client}
+          replyLanguage={languageSettings.reply}
+          assist={languageSettings.assist}
+          original={
+            m.role === 'assistant' &&
+            (conversationView === 'original' || !needsReplyTranslation(languageSettings))
+          }
+          onTranslate={() =>
+            void call({ type: 'translate-message', sourceId: m.sourceId }).catch((e) =>
+              setError(errorMessage(e, 'Translation failed')),
+            )
+          }
+        />
+      ))}
+      {liveHistory && snapshot.historyCursor && (
+        <button onClick={() => void run({ type: 'older-history' })}>Load earlier messages</button>
+      )}
+    </section>
+  );
+  const terminalShown = launchId !== undefined && showsTerminal(liveView);
+  // Children keep fixed slots so the terminal stays one mounted connection across Split and Terminal.
   const livePanel = (
     <ReadingPane
       title="Live Conversation"
       name="live"
       liveState={liveState}
       history={liveHistory}
-      onHistory={() => setLiveHistory((value) => !value)}
+      controls={liveSwitch}
+      onHistory={() => {
+        if (liveView === 'terminal') {
+          chooseLiveView(historyView(liveView));
+          setLiveHistory(true);
+        } else setLiveHistory((value) => !value);
+      }}
     >
-      <section ref={feed} className="feed" aria-label="Live Hebrew conversation">
-        {visibleMessages.length === 0 && (
-          <p className="discussion-empty">Waiting for the next assistant response.</p>
-        )}
-        {visibleMessages.map((m) => (
-          <Message
-            key={m.sourceId}
-            message={m}
+      <div
+        className="live-body"
+        data-view={liveView}
+        dir="ltr"
+        style={
+          {
+            '--terminal-share': liveLayout.split,
+            '--conversation-share': 100 - liveLayout.split,
+          } as CSSProperties
+        }
+      >
+        {terminalShown && (
+          <LiveTerminal
+            launchId={launchId}
             client={client}
-            replyLanguage={languageSettings.reply}
-            assist={languageSettings.assist}
-            original={m.role === 'assistant' && !needsReplyTranslation(languageSettings)}
-            onTranslate={() =>
-              void call({ type: 'translate-message', sourceId: m.sourceId }).catch((e) =>
-                setError(errorMessage(e, 'Translation failed')),
-              )
+            attention={approval}
+            autoFocus={terminalFocus}
+            onDraft={(hasDraft) => {
+              terminalDraft.current = hasDraft;
+            }}
+          />
+        )}
+        {liveView === 'split' && (
+          <PaneDivider
+            name="Resize terminal"
+            responsive
+            // The divider measures the right (or, stacked, the top) pane; the terminal is left and on top.
+            value={wideLayout ? 100 - liveLayout.split : liveLayout.split}
+            change={(value) =>
+              setLiveLayout({ split: clampLayoutSize(wideLayout ? 100 - value : value) })
             }
           />
-        ))}
-        {liveHistory && snapshot.historyCursor && (
-          <button onClick={() => void run({ type: 'older-history' })}>Load earlier messages</button>
         )}
-      </section>
+        {liveView !== 'terminal' && (
+          <div className="live-conversation">
+            {liveView === 'split' && (
+              <ViewRadios
+                label="Conversation side"
+                value={liveLayout.conversation}
+                onChange={chooseConversation}
+                options={CONVERSATION_VIEWS.map((view) => ({
+                  value: view,
+                  label: LIVE_VIEW_LABELS[view],
+                }))}
+              />
+            )}
+            {liveFeed}
+          </div>
+        )}
+      </div>
     </ReadingPane>
   );
   const assistantPanel = (
@@ -1361,25 +1540,9 @@ export function SessionWorkspace({
               provider={record.target.agent}
               usage={usage?.[record.target.agent]}
             />
-            {entry?.launchId && (
-              <span className="launch-terminal">
-                <button type="button" onClick={() => setTerminalOpen(true)}>
-                  Show terminal
-                </button>
-                {entry.attentionNotice && <small>{entry.attentionNotice}</small>}
-              </span>
-            )}
             <SessionLanguageControl client={client} settings={languageSettings} />
           </div>
           <QuotaBreakDialog provider={record.target.agent} usage={usage?.[record.target.agent]} />
-          {entry?.launchId && (
-            <TerminalPopup
-              launchId={entry.launchId}
-              title={terminalTitle}
-              open={terminalOpen}
-              onClose={() => setTerminalOpen(false)}
-            />
-          )}
           <div className="file-workspace">
             {filesOpen && (
               <FileBrowser

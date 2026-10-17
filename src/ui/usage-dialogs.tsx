@@ -313,7 +313,7 @@ export function QuotaBreakDialog({
       className={`quota-break ${weekly ? 'weekly' : 'five-hour'}`}
       dir="ltr"
     >
-      <div className="review-body">
+      <div className="review-body" dir="ltr">
         <p className="quota-eyebrow">{weekly ? 'Weekly quota used up' : '5-hour window used up'}</p>
         <h3>{weekly ? 'This is a real break' : 'Time for a break'}</h3>
         <p className="quota-renew">

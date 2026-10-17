@@ -86,7 +86,10 @@ export function useKeystrokeTracker() {
 
 /** Auto-open waits this long after the last keystroke so it never interrupts typing. */
 const AUTO_OPEN_TYPING_DELAY_MS = 2000;
-const AUTO_OPEN_POLL_MS = 500;
+export const AUTO_OPEN_POLL_MS = 500;
+/** True while the last keystroke is within the typing delay: nothing should move under the user's hands. */
+export const typedRecently = (lastKeystrokeAt: number, now: number) =>
+  now - lastKeystrokeAt < AUTO_OPEN_TYPING_DELAY_MS;
 export function shouldAutoOpen(
   entry: CatalogEntry | undefined,
   selectedId: string,
@@ -97,7 +100,7 @@ export function shouldAutoOpen(
   if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
     return false;
   if (entry.sessionId !== selectedId) return false; // 'auto' and 'current-tab' only ever open the shown session
-  return now - lastKeystrokeAt >= AUTO_OPEN_TYPING_DELAY_MS;
+  return !typedRecently(lastKeystrokeAt, now);
 }
 type AutoOpenRule = typeof shouldAutoOpen;
 /** Polls `rule` while `entry` waits for approval and calls `open` once per launch and activity. */
@@ -148,7 +151,7 @@ export function shouldAutoOpenLaunch(
   if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
     return false;
   if (entry.sessionId && entry.sessionId === selectedId) return false; // the per-session auto-open owns it
-  return now - lastKeystrokeAt >= AUTO_OPEN_TYPING_DELAY_MS;
+  return !typedRecently(lastKeystrokeAt, now);
 }
 export function useAutoOpenWaitingLaunch(
   entry: CatalogEntry | undefined,

@@ -19,6 +19,7 @@ export function ReadingPane({
   history = false,
   onHistory,
   liveState,
+  controls,
   children,
 }: {
   title: string;
@@ -27,6 +28,8 @@ export function ReadingPane({
   history?: boolean;
   onHistory?: () => void;
   liveState?: LiveState | undefined;
+  /** Extra toolbar controls, rendered after the title inline and when expanded. */
+  controls?: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const home = useRef<HTMLDivElement>(null);
@@ -58,6 +61,7 @@ export function ReadingPane({
         <PanelMoveControl />
         <h2>{title}</h2>
         <LivePill state={liveState} />
+        {controls}
         {onHistory && (
           <button
             type="button"
@@ -94,6 +98,7 @@ export function ReadingPane({
         <div className="pane-toolbar">
           <h2>{title}</h2>
           <LivePill state={liveState} />
+          {controls}
           {onHistory && (
             <button
               type="button"

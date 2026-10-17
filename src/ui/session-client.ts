@@ -235,6 +235,14 @@ export class SessionClient {
       body: JSON.stringify(outgoing(action)),
     });
   }
+  async translateComposer(text: string) {
+    const { translation } = await sessionRequest<SessionEnvelope & { translation?: string }>(
+      this.base + '/actions',
+      { method: 'POST', body: JSON.stringify(outgoing({ type: 'translate-composer', text })) },
+    );
+    if (typeof translation !== 'string') throw new Error('Translation unavailable');
+    return translation;
+  }
   snapshot() {
     return sessionRequest<SessionEnvelope>(this.base + '/snapshot');
   }

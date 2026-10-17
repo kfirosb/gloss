@@ -64,51 +64,6 @@ async function withLaunch(
   );
   return { tickets, received };
 }
-test('Show terminal opens the popup, streams output, sends input and closing leaves the session', async ({
-  page,
-}) => {
-  const { received } = await withLaunch(page);
-  await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Show terminal' }).click();
-  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
-  await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
-  await expect.poll(() => received.some((m) => m.type === 'resize' && m.cols > 0)).toBe(true);
-  await dialog.locator('.xterm-helper-textarea').focus();
-  await page.keyboard.type('y');
-  await expect
-    .poll(() =>
-      received
-        .filter((m) => m.type === 'input')
-        .map((m) => m.data)
-        .join(''),
-    )
-    .toBe('y');
-  await dialog.getByRole('button', { name: /Close terminal/ }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Show terminal' })).toBeVisible();
-});
-test('shows the attention notice beside Show terminal', async ({ page }) => {
-  await withLaunch(page, 'idle', 'auto', [], {
-    attentionNotice: 'Cannot tell if this session needs you',
-  });
-  await page.goto('/#capability=test');
-  await expect(page.getByText('Cannot tell if this session needs you')).toBeVisible();
-});
-test('auto mode opens on approval, but not while typing', async ({ page }) => {
-  await withLaunch(page, 'approval-required', 'auto');
-  await page.goto('/#capability=test');
-  const box = page.getByRole('textbox', { name: 'Discuss with language assistant' });
-  await box.pressSequentially('typing now', { delay: 200 });
-  await expect(page.getByRole('dialog', { name: /Terminal:/ })).toBeHidden();
-  await expect(page.getByRole('dialog', { name: /Terminal:/ })).toBeVisible({ timeout: 4000 });
-});
-test('dot-only mode never opens automatically', async ({ page }) => {
-  await withLaunch(page, 'approval-required', 'dot-only');
-  await page.goto('/#capability=test');
-  await page.waitForTimeout(2500);
-  await expect(page.getByRole('dialog', { name: /Terminal:/ })).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Show terminal' })).toBeVisible();
-});
 test('auto mode toasts another session that needs approval, without opening it', async ({
   page,
 }) => {
@@ -139,16 +94,8 @@ test('no toast in dot-only mode', async ({ page }) => {
     }),
   ]);
   await page.goto('/#capability=test');
-  await expect(page.getByRole('button', { name: 'Show terminal' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Terminal' })).toBeEnabled();
   await expect(page.getByText('Billing fix needs approval')).toHaveCount(0);
-});
-test('discovered sessions without a launch get no Show terminal button', async ({ page }) => {
-  await mockSession(page, () => basicSnapshot());
-  await page.goto('/#capability=test');
-  await expect(
-    page.getByRole('textbox', { name: 'Discuss with language assistant' }),
-  ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Show terminal' })).toHaveCount(0);
 });
 test('language defaults dialog edits popup behavior and extra launch arguments', async ({
   page,
@@ -186,32 +133,4 @@ test('language defaults dialog edits popup behavior and extra launch arguments',
       popup: 'dot-only',
       terminalView: 'workspace',
     });
-});
-
-test('the popup shows a status and an Expand button when given one', async ({ page }) => {
-  await withLaunch(page);
-  await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Show terminal' }).click();
-  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
-  await expect(dialog.getByRole('button', { name: 'Expand' })).toHaveCount(0); // agent popups have no Expand
-  await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
-});
-
-test('the terminal has keyboard focus as soon as the popup opens', async ({ page }) => {
-  const { received } = await withLaunch(page);
-  await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Show terminal' }).click();
-  const dialog = page.getByRole('dialog', { name: /Terminal:/ });
-  await expect(dialog.locator('.xterm')).toContainText('Allow this command?');
-  await expect.poll(() => received.some((m) => m.type === 'resize' && m.cols > 0)).toBe(true);
-  await expect(dialog.locator('.xterm-helper-textarea')).toBeFocused();
-  await page.keyboard.type('y');
-  await expect
-    .poll(() =>
-      received
-        .filter((m) => m.type === 'input')
-        .map((m) => m.data)
-        .join(''),
-    )
-    .toBe('y');
 });

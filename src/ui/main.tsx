@@ -52,6 +52,7 @@ import {
   sessionTitle,
   buildProjectTree,
   mergeSavedRecords,
+  agentName,
   visibleProjectTree,
   applySidebarSettings,
   removableSessions,
@@ -149,9 +150,6 @@ function App() {
     title: string;
     terminal?: boolean;
   } | null>(null);
-  const [ending, setEnding] = useState<CatalogEntry | null>(null);
-  const [endError, setEndError] = useState('');
-  const [endBusy, setEndBusy] = useState(false);
   const [waitingLaunchId, setWaitingLaunchId] = useState<string | undefined>();
   useKeystrokeTracker();
   const popupMode = usePopupMode();
@@ -545,6 +543,15 @@ function App() {
       (e) => setSelectionError(`Could not end ${ended.title}: ${errorMessage(e, 'unknown error')}`),
     );
   };
+  // End session closes at once from the tab's X or menu; the agent is asked to exit first, and a failure is shown in the error line.
+  const endSession = (launchId: string) => {
+    const ended = allEntries.find((e) => e.launchId === launchId);
+    const name = ended ? (ended.sessionTitle ?? agentName(ended)) : 'session';
+    setSelectionError('');
+    void endLaunch(launchId).catch((e) =>
+      setSelectionError(`Could not end ${name}: ${errorMessage(e, 'unknown error')}`),
+    );
+  };
   const [composerInsert, setComposerInsert] = useState<{
     sessionId: string;
     text: string;
@@ -749,10 +756,7 @@ function App() {
           selectedId={selected}
           onSelect={chooseSession}
           onNewSession={() => setNewOpen(true)}
-          onEnd={(id) => {
-            setEndError('');
-            setEnding(allEntries.find((e) => e.launchId === id) ?? null);
-          }}
+          onEnd={endSession}
           onShowTerminal={(launchId, title) => setLaunchTerminal({ launchId, title })}
           selectedTerminalId={selectedTerminal || undefined}
           terminalView={terminalView}
@@ -884,43 +888,6 @@ function App() {
             if (id) chooseSession(id);
           }}
         />
-        <PanelDialog title="End session" open={!!ending} close={() => setEnding(null)}>
-          <div className="review-body" dir="ltr">
-            <p>
-              {ending
-                ? `${ending.target.agent === 'claude' ? 'Claude' : 'Codex'} will be asked to exit. If it may be waiting for an answer, or does not exit within 10 seconds, the session is closed.`
-                : ''}
-            </p>
-            {endError && <p role="alert">{endError}</p>}
-          </div>
-          <div className="review-actions">
-            <button type="button" onClick={() => setEnding(null)}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={endBusy}
-              onClick={() => {
-                const launchId = ending?.launchId;
-                if (!launchId) return;
-                setEndBusy(true);
-                setEndError('');
-                void sessionRequest(`/api/launches/${encodeURIComponent(launchId)}/end`, {
-                  method: 'POST',
-                  body: '{}',
-                })
-                  .then(
-                    () => setEnding(null),
-                    (e) => setEndError(errorMessage(e, 'Could not end session')),
-                  )
-                  .finally(() => setEndBusy(false));
-              }}
-            >
-              End session
-            </button>
-          </div>
-        </PanelDialog>
         {approvalToasts.map((e) => {
           const name =
             e.sessionTitle ??
