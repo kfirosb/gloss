@@ -40,6 +40,23 @@ export const CAPTURED = {
   typed: 'Reply with the single word OK.\nThis second line checks a multi-line paste.',
   busy: 'After counting, also say DONE.',
 } as const;
+/** Versions whose long-paste transcript (`claude-typed-long-<version>.jsonl`, the capture script's `long` mode) exists. */
+export const LONG_FIXTURE_VERSIONS = ['2.1.301', '2.1.302'] as const;
+/** The long texts the capture script's `long` mode typed and submitted; keep them identical to its constants. */
+export const CAPTURED_LONG = {
+  sevenLines: [
+    'Reply with the single word OK.',
+    ...Array.from({ length: 6 }, (_, i) => `Line ${i + 2} of a seven-line paste.`),
+  ].join('\n'),
+  longLine: 'Reply with the single word OK.'.padEnd(2000, ' filler'),
+  manifestText: 'Reply with the single word OK after reading the referenced files.',
+  /** The probe texts on each side of Claude's chip thresholds (more than 3 lines, more than 800 characters). */
+  probeLines: (count: number) =>
+    Array.from({ length: count }, (_, i) => `Probe line ${i + 1}.`).join('\n'),
+  probeLine: (length: number) => 'Probe of one long line.'.padEnd(length, 'x'),
+  /** The scratch project the references point into, as the scrubbed transcript names it. */
+  project: (version: string) => `/fixture/home/project-long-${version.replaceAll('.', '-')}`,
+} as const;
 export interface TerminalLog {
   calls: string[];
   loaded: string[];

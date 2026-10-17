@@ -3,7 +3,9 @@
 // private tmux server inside that home, in a scratch project, with Haiku, no MCP servers and
 // --permission-mode default (these versions otherwise start in auto mode and never show the permission prompt).
 // It reads ~/.claude.json (copied into the fake home) and links ~/Library/Keychains for the login; it never
-// writes to the real home. Usage: node scripts/probes/capture-claude-input-screens.mjs <version> <fake home>
+// writes to the real home. Usage: node scripts/probes/capture-claude-input-screens.mjs <version> <fake home> [long]
+// The `long` mode captures only claude-typed-long-<version>.jsonl: where Claude starts collapsing a paste to a chip,
+// and how it records long pastes and the attachment manifest once submitted (D-1, the `<pasted_content>` wrapper).
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -27,20 +29,34 @@ const TYPED_MESSAGE = 'Reply with the single word OK.\nThis second line checks a
 const BUSY_MESSAGE = 'After counting, also say DONE.';
 const BUSY_PROMPT = 'Count from 1 to 60, one number per line.';
 const PERMISSION_PROMPT = 'Run this shell command and nothing else: touch gloss-fixture.txt';
+// Long mode (tests/adapters/tmux-fixtures.ts, CAPTURED_LONG): seven short lines, one 2,000-character line, and a
+// message with Gloss's numbered attachment manifest (src/core/file-references.ts attachmentManifest).
+const SEVEN_LINES = [
+  'Reply with the single word OK.',
+  ...Array.from({ length: 6 }, (_, i) => `Line ${i + 2} of a seven-line paste.`),
+].join('\n');
+const LONG_LINE = 'Reply with the single word OK.'.padEnd(2000, ' filler');
+const MANIFEST_TEXT = 'Reply with the single word OK after reading the referenced files.';
+// A 1x1 red PNG for the manifest's image reference.
+const RED_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 const execFileAsync = promisify(execFile);
-const [version, homeArgument] = process.argv.slice(2);
-if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !homeArgument)
+const [version, homeArgument, mode] = process.argv.slice(2);
+if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !homeArgument || (mode && mode !== 'long'))
   throw new Error(
-    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var>',
+    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long]',
   );
+const long = mode === 'long';
 const home = await realpath(homeArgument);
 if (!home.startsWith('/private/var/'))
   throw new Error('The fake home must resolve under /private/var');
 const claude = join(homedir(), '.local', 'share', 'claude', 'versions', version);
 const tmux = '/opt/homebrew/bin/tmux';
 const base = ['-u', '-S', join(home, 'cap.sock'), '-f', '/dev/null'];
-const project = join(home, 'project-' + version.replaceAll('.', '-'));
+const project = join(home, (long ? 'project-long-' : 'project-') + version.replaceAll('.', '-'));
 const out = join(process.cwd(), 'tests', 'fixtures', 'tmux-screens');
 const prefix = `claude-${version}`;
 const sessionId = randomUUID();
@@ -139,12 +155,17 @@ async function transcriptRecords() {
 }
 const userText = (record) =>
   record.type === 'user' && !record.isMeta ? record.message?.content : undefined;
+// The probe must not depend on the code under test, so a long paste counts as recorded when the record contains it.
+const recorded = (record, text) => {
+  const content = userText(record);
+  return content === text || (long && typeof content === 'string' && content.includes(text));
+};
 // Waits until Claude recorded `text` as a user message and then ended a turn after it.
 async function answered(text, timeoutMs) {
   const end = Date.now() + timeoutMs;
   for (;;) {
     const records = await transcriptRecords();
-    const at = records.findIndex((record) => userText(record) === text);
+    const at = records.findIndex((record) => recorded(record, text));
     const done = records
       .slice(at + 1)
       .some((r) => r.type === 'assistant' && r.message?.stop_reason === 'end_turn');
@@ -206,43 +227,70 @@ async function clear(presses) {
   if (/hello|line one|line two|Pasted|^❯ !/.test(line))
     throw new Error('Could not clear the input: ' + line);
 }
-
-await t(
-  'new-session',
-  '-d',
-  '-s',
-  'cap',
-  '-x',
-  '200',
-  '-y',
-  '50',
-  '-c',
-  project,
-  '--',
-  '/usr/bin/env',
-  '-i',
-  ...Object.entries({ ...env, DISABLE_AUTOUPDATER: '1' }).map(([k, v]) => `${k}=${v}`),
-  claude,
-  '--session-id',
-  sessionId,
-  '--model',
-  'haiku',
-  '--permission-mode',
-  'default',
-  '--strict-mcp-config',
-  '--mcp-config',
-  '{"mcpServers":{}}',
-);
-try {
-  const first = await until((s) => idle(s) || /Yes, I trust this folder/.test(s), 'startup');
-  if (/Yes, I trust this folder/.test(first)) {
-    await save('trust');
-    // The question opens on "No, exit"; move to the trust answer before confirming.
-    await keys('Down');
-    await until((s) => /❯ Yes, I trust this folder/.test(s), 'trust answer selected', 10_000);
-    await keys('Enter');
+// The input box shows a paste either as its text or as a `[Pasted text …]` chip.
+const chipped = (screen) => /\[Pasted text/.test(promptBox(screen));
+const drawn = (screen, text) => chipped(screen) || promptBox(screen).includes(text.slice(0, 12));
+// Pastes `text`, reports whether Claude collapsed it to a chip, and clears the input again without sending.
+async function chipFor(text) {
+  await paste(text);
+  const screen = await until((s) => drawn(s, text), 'paste drawn', 10_000);
+  await sleep(500);
+  const chip = chipped(await plain());
+  await t('send-keys', '-t', pane, '-N', String(text.length + 10), 'BSpace');
+  await until((s) => idle(s) && !/Probe|Pasted text/.test(promptBox(s)), 'probe cleared', 30_000);
+  return chip || chipped(screen);
+}
+const linesOf = (count) =>
+  Array.from({ length: count }, (_, i) => `Probe line ${i + 1}.`).join('\n');
+const lineOf = (length) => 'Probe of one long line.'.padEnd(length, 'x');
+// Smallest value in [low, high] for which `chip(value)` is true, assuming it is monotonic; undefined when none is.
+async function threshold(low, high, chip) {
+  if (!(await chip(high))) return undefined;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (await chip(middle)) high = middle;
+    else low = middle + 1;
   }
-  await until(idle, 'input box');
+  return low;
+}
+async function submit(text) {
+  await paste(text);
+  await until((s) => drawn(s, text), 'paste drawn', 10_000);
+  await sleep(500);
+  await keys('Enter');
+  await answered(text, 120_000);
+}
+async function captureLong() {
+  const lines = await threshold(2, 12, (count) => chipFor(linesOf(count)));
+  const chars = await threshold(100, 3000, (length) => chipFor(lineOf(length)));
+  console.log(`chip from ${lines} lines (short lines); from ${chars} characters (one line)`);
+  await writeFile(join(project, 'note.txt'), 'The colour is red.\n');
+  await writeFile(join(project, 'red.png'), RED_PNG);
+  const reference = (kind, index, name) =>
+    `${kind} ${index}: name=${JSON.stringify(name)} path=${JSON.stringify(join(project, name))} worktree=${JSON.stringify(project)}`;
+  const manifest = [
+    MANIFEST_TEXT,
+    '',
+    'References:',
+    reference('File', 1, 'note.txt'),
+    reference('Image', 1, 'red.png'),
+    'Read the referenced files and inspect referenced images before responding.',
+  ].join('\n');
+  // Each side of both thresholds, then the three D-1 messages.
+  const boundary = [];
+  if (lines !== undefined) boundary.push(linesOf(lines - 1), linesOf(lines));
+  if (chars !== undefined) boundary.push(lineOf(chars - 1), lineOf(chars));
+  for (const text of [...boundary, SEVEN_LINES, LONG_LINE, manifest]) {
+    await submit(text);
+    const record = (await transcriptRecords()).findLast((r) => recorded(r, text));
+    const content = userText(record);
+    console.log(
+      `${text.split('\n').length} lines, ${text.length} chars:`,
+      content === text ? 'recorded as typed' : `recorded wrapped (${content.length} chars)`,
+    );
+  }
+}
+async function captureScreens() {
   await checkPanePid();
   await save('empty');
   await literal('hello there');
@@ -291,9 +339,51 @@ try {
   await saveRecord('permission');
   await keys('Escape');
   await until(inputBox, 'permission closed');
+}
+
+await t(
+  'new-session',
+  '-d',
+  '-s',
+  'cap',
+  '-x',
+  '200',
+  '-y',
+  '50',
+  '-c',
+  project,
+  '--',
+  '/usr/bin/env',
+  '-i',
+  ...Object.entries({ ...env, DISABLE_AUTOUPDATER: '1' }).map(([k, v]) => `${k}=${v}`),
+  claude,
+  '--session-id',
+  sessionId,
+  '--model',
+  'haiku',
+  '--permission-mode',
+  'default',
+  '--strict-mcp-config',
+  '--mcp-config',
+  '{"mcpServers":{}}',
+);
+try {
+  const first = await until((s) => idle(s) || /Yes, I trust this folder/.test(s), 'startup');
+  if (/Yes, I trust this folder/.test(first)) {
+    if (!long) await save('trust');
+    // The question opens on "No, exit"; move to the trust answer before confirming.
+    await keys('Down');
+    await until((s) => /❯ Yes, I trust this folder/.test(s), 'trust answer selected', 10_000);
+    await keys('Enter');
+  }
+  await until(idle, 'input box');
+  await (long ? captureLong() : captureScreens());
 } finally {
   const records = await transcriptRecords();
   if (records.length)
-    await writeFile(join(out, `claude-typed-${version}.jsonl`), scrubbedTranscript(records));
+    await writeFile(
+      join(out, `claude-typed-${long ? 'long-' : ''}${version}.jsonl`),
+      scrubbedTranscript(records),
+    );
   await t('kill-server').catch(() => undefined);
 }

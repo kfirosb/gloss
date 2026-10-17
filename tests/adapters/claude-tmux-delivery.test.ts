@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../src/core/contracts.js';
 import { recordOf } from '../../src/core/json-record.js';
-import { parseClaudeRecord } from '../../src/agents/claude/index.js';
+import { claudeMessage, parseClaudeRecord } from '../../src/agents/claude/index.js';
+import type { FileReference } from '../../src/core/file-references.js';
 import { createTmux } from '../../src/runtime/tmux.js';
 import {
   COMMAND_PREFIX_REASON,
@@ -31,8 +32,10 @@ import {
 } from '../../src/agents/claude/tmux-delivery.js';
 import {
   CAPTURED,
+  CAPTURED_LONG,
   FIXTURE_DIR,
   FIXTURE_VERSIONS,
+  LONG_FIXTURE_VERSIONS,
   fixtureTerminal,
   readRecord,
 } from './tmux-fixtures.js';
@@ -423,6 +426,27 @@ describe('typed message matching', () => {
     ];
     expect(assignTypedMessages([send], messages).size).toBe(0);
   });
+  // Synthetic records (not captured): only a single, whole wrapper with one id in both tags is Claude's paste wrapper.
+  it('does not unwrap a record that is not exactly one pasted-content wrapper (synthetic)', () => {
+    const send = { id: 'a', body: 'Fix it', after: 0 };
+    const records = [
+      '<pasted_content id="aa11">\nFix it\n</pasted_content id="bb22">',
+      '<pasted_content id="aa11">\nFix it\n</pasted_content id="aa11">\n\n<pasted_content id="aa11">\nFix it\n</pasted_content id="aa11">',
+      '<pasted_content id="aa11">\nFix\n</pasted_content id="aa11">\n<pasted_content id="aa11">\nit\n</pasted_content id="aa11">',
+      'Please: <pasted_content id="aa11">\nFix it\n</pasted_content id="aa11">',
+      '<pasted_content id="aa11">\nFix it\n</pasted_content id="aa11">\nand more',
+      '<pasted_content id="aa11">\n<pasted_content id="bb22">\nFix it\n</pasted_content id="bb22">\n</pasted_content id="aa11">',
+      '<pasted_content id="aa11">\nFix it later\n</pasted_content id="aa11">',
+      '<pasted_content id="aa11">\nFix it',
+    ];
+    for (const [index, text] of records.entries())
+      expect(assignTypedMessages([send], [user(`m${index}`, 1, text)]).size, text).toBe(0);
+  });
+  it('confirms the text inside one whole pasted-content wrapper and its blank lines (synthetic)', () => {
+    const send = { id: 'a', body: 'Fix it\r\nnow', after: 0 };
+    const wrapped = '\n\n<pasted_content id="aa11">\nFix it\nnow\n</pasted_content id="aa11">\n';
+    expect([...assignTypedMessages([send], [user('m1', 1, wrapped)])]).toEqual([['a', 'm1']]);
+  });
   it('compares texts without surrounding whitespace or carriage returns', () => {
     expect(sameTypedText('a\r\nb\n', 'a\nb')).toBe(true);
     expect(sameTypedText('a b', 'a  b')).toBe(false);
@@ -467,5 +491,60 @@ describe.each(FIXTURE_VERSIONS)('transcript of the captured Claude %s session', 
   });
   it('records nothing for text cleared before sending', () => {
     expect(typed.some((m) => /hello there|pasted line 1|line two/.test(m.text))).toBe(false);
+  });
+});
+
+describe.each(LONG_FIXTURE_VERSIONS)('long pastes in the captured Claude %s session', (version) => {
+  const messages = readFileSync(join(FIXTURE_DIR, `claude-typed-long-${version}.jsonl`), 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .flatMap((line, offset) => {
+      const value: unknown = JSON.parse(line);
+      const record = recordOf(value);
+      if (!record || typeof record.sessionId !== 'string') return [];
+      const parsed = parseClaudeRecord(record, offset, record.sessionId);
+      return parsed.message ? [parsed.message] : [];
+    });
+  const confirms = (body: string) =>
+    assignTypedMessages([{ id: 'send', body, after: -1 }], messages).has('send');
+  const project = CAPTURED_LONG.project(version);
+  const reference = (kind: 'file' | 'image', name: string, mime: string): FileReference => ({
+    id: name,
+    sessionId: 'session',
+    kind,
+    index: 1,
+    name,
+    path: `${project}/${name}`,
+    worktreePath: project,
+    source: 'worktree',
+    mime,
+    size: 1,
+  });
+  it('records a chip paste wrapped in pasted-content tags', () => {
+    const sevenLines = messages.find((m) => m.text.includes(CAPTURED_LONG.sevenLines));
+    expect(sevenLines?.text).toMatch(/^\n\n<pasted_content id="[0-9a-f]+">\n/);
+  });
+  it('confirms a seven-line message', () => {
+    expect(confirms(CAPTURED_LONG.sevenLines)).toBe(true);
+  });
+  it('confirms a 2,000-character single line', () => {
+    expect(CAPTURED_LONG.longLine).toHaveLength(2000);
+    expect(confirms(CAPTURED_LONG.longLine)).toBe(true);
+  });
+  it('confirms a message with the numbered attachment manifest', () => {
+    const body = claudeMessage(CAPTURED_LONG.manifestText, [
+      reference('file', 'note.txt', 'text/plain'),
+      reference('image', 'red.png', 'image/png'),
+    ]);
+    expect(confirms(body)).toBe(true);
+  });
+  it('confirms messages on each side of the chip thresholds', () => {
+    for (const body of [
+      CAPTURED_LONG.probeLines(3),
+      CAPTURED_LONG.probeLines(4),
+      CAPTURED_LONG.probeLine(800),
+      CAPTURED_LONG.probeLine(801),
+    ])
+      expect(confirms(body), body.slice(0, 40)).toBe(true);
   });
 });

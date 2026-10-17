@@ -214,6 +214,21 @@ export interface TypedSend {
 const normalized = (text: string) => text.replace(/\r\n?/g, '\n').trim();
 export const sameTypedText = (a: string, b: string) => normalized(a) === normalized(b);
 /**
+ * Claude 2.1.301 and 2.1.302 record a paste they collapsed to a chip (more than 3 lines or 800 characters) as the
+ * pasted text inside one `<pasted_content id="…">` tag pair with the same id in both tags, after blank lines
+ * (tests/fixtures/tmux-screens/claude-typed-long-*.jsonl). Matched against the normalised record text.
+ */
+const PASTED_CONTENT_WRAPPER =
+  /^<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">$/;
+const PASTED_CONTENT_TAG = /<\/?pasted_content\b/;
+/** The text a typed user record holds: the paste inside Claude's wrapper, or the record text as it is. */
+function typedRecordText(text: string): string {
+  const match = PASTED_CONTENT_WRAPPER.exec(normalized(text));
+  const inner = match?.[2];
+  // Only one whole wrapper is unwrapped; a tag inside it means several, nested or partial wrappers.
+  return inner === undefined || PASTED_CONTENT_TAG.test(inner) ? text : inner;
+}
+/**
  * Gives each send, in order, the first unclaimed plain user message after its paste with the same text, so identical
  * texts confirm in send order. `taken` are records that already confirmed an earlier send.
  */
@@ -230,7 +245,9 @@ export function assignTypedMessages(
   for (const send of sends) {
     const match = candidates.find(
       (m) =>
-        !claimed.has(m.sourceId) && m.revision > send.after && sameTypedText(m.text, send.body),
+        !claimed.has(m.sourceId) &&
+        m.revision > send.after &&
+        sameTypedText(typedRecordText(m.text), send.body),
     );
     if (!match) continue;
     claimed.add(match.sourceId);

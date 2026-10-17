@@ -161,6 +161,22 @@ it('re-checks a held message on its own timer', async () => {
   await expect.poll(() => composerDelivery(workflow, 'r1')?.state).toBe('sent');
   expect(agent.sent).toHaveLength(2);
 });
+it('a held message stops naming unsent text once the session disconnects, and is typed once it is back', async () => {
+  const store = new MemoryConversationStore();
+  const { agent, workflow } = await terminalApp({ store });
+  agent.results = [{ state: 'held', reason: UNSENT }];
+  await workflow.sendComposer('r1', 'שלום');
+  const writes = store.operationLog.length;
+  agent.emit({ type: 'status', state: 'disconnected' });
+  await expect
+    .poll(() => composerDelivery(workflow, 'r1'))
+    .toMatchObject({ state: 'held', reason: 'Claude is not connected' });
+  expect(store.operationLog.slice(writes)).toContain('update:held');
+  expect(agent.sent).toHaveLength(1);
+  agent.emit({ type: 'status', state: 'idle' });
+  await expect.poll(() => composerDelivery(workflow, 'r1')?.state).toBe('sent');
+  expect(agent.sent).toHaveLength(2);
+});
 it('a re-check that finds the terminal unchanged writes and broadcasts nothing', async () => {
   const store = new MemoryConversationStore();
   const { agent, workflow } = await terminalApp({ store });

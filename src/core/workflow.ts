@@ -604,8 +604,10 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           // Its first send is still checking the terminal; that send re-checks when it ends.
           if (dispatching.has(next.id)) return;
           if (sendGate(state.codingState, active.capabilities, next.transport) !== 'send') {
-            const reason = state.codingState === 'disconnected' ? next.reason : holdReason();
-            if (reason !== undefined && reason !== next.reason) {
+            // A reason from an earlier check (unsent text) no longer describes a session that is gone.
+            const reason =
+              state.codingState === 'disconnected' ? NOT_CONNECTED_REASON : holdReason();
+            if (reason !== next.reason) {
               next.reason = reason;
               deps.store.updateDelivery(copy(next));
               publish(false);
