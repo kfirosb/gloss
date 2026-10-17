@@ -104,6 +104,8 @@ const storedView = (page: Page) =>
     return saved.liveViews?.['L-panel']?.view;
   });
 const feed = (page: Page) => page.getByRole('region', { name: 'Live Hebrew conversation' });
+const expand = (page: Page) =>
+  page.getByRole('button', { name: 'Expand Live Conversation' }).click();
 
 test('Terminal view streams output and sends keystrokes', async ({ page }) => {
   const { received } = await withLaunch(page);
@@ -365,12 +367,25 @@ test('the Hebrew line translates and types the result into the terminal', async 
   await page.goto('/#capability=test');
   await view(page, 'Terminal').click();
   await expect.poll(() => received.some((m) => m.type === 'resize')).toBe(true);
+  await expand(page);
   const line = page.getByRole('textbox', { name: 'Write to the terminal' });
   await line.fill('כן בבקשה');
   await line.press('Enter');
   await expect.poll(() => typed(received)).toBe('yes please\r');
   await expect(line).toHaveValue('');
   await expect(line).toBeFocused();
+});
+test('the Hebrew line shows only in the expanded pane', async ({ page }) => {
+  await withLaunch(page);
+  await page.goto('/#capability=test');
+  await view(page, 'Split').click();
+  const line = page.getByRole('textbox', { name: 'Write to the terminal' });
+  await expect(terminal(page).locator('.xterm')).toBeVisible();
+  await expect(line).toBeHidden();
+  await expand(page);
+  await expect(line).toBeVisible();
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(line).toBeHidden();
 });
 test('a failed translation keeps the Hebrew line text and sends nothing', async ({ page }) => {
   const { received } = await withLaunch(page);
@@ -380,6 +395,7 @@ test('a failed translation keeps the Hebrew line text and sends nothing', async 
   await page.goto('/#capability=test');
   await view(page, 'Terminal').click();
   await expect.poll(() => received.some((m) => m.type === 'resize')).toBe(true);
+  await expand(page);
   const line = page.getByRole('textbox', { name: 'Write to the terminal' });
   await line.fill('כן בבקשה');
   await line.press('Enter');
@@ -399,6 +415,7 @@ test('a translation of only control characters is not typed and keeps the text',
   await page.goto('/#capability=test');
   await view(page, 'Terminal').click();
   await expect.poll(() => received.some((m) => m.type === 'resize')).toBe(true);
+  await expand(page);
   const line = page.getByRole('textbox', { name: 'Write to the terminal' });
   await line.fill('כן');
   await line.press('Enter');
@@ -422,14 +439,15 @@ test('the approval restore waits until the user leaves the terminal and stops ty
   await page.waitForTimeout(2500);
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
   // Unsent text in the Hebrew line holds the terminal too, even with the focus elsewhere.
+  await expand(page);
   const line = page.getByRole('textbox', { name: 'Write to the terminal' });
   await line.fill('לא');
   await feed(page).click();
   await page.waitForTimeout(2500);
-  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await expect(view(page, 'Split').first()).toHaveAttribute('aria-checked', 'true');
   await line.fill('');
   await feed(page).click();
-  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true', {
+  await expect(view(page, 'Translated').first()).toHaveAttribute('aria-checked', 'true', {
     timeout: 4000,
   });
 });

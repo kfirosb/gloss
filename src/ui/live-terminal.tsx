@@ -10,7 +10,7 @@ export const terminalLine = (text: string) =>
     .replace(/[\x00-\x1f\x7f]/g, '')
     .trim();
 
-/** The session's terminal with a Hebrew line under it: the text is translated, then typed into the terminal. */
+/** The session's terminal with a Hebrew line under it (shown only in the expanded pane): the text is translated, then typed into the terminal. */
 export function LiveTerminal({
   launchId,
   client,

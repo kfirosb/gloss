@@ -145,7 +145,7 @@ Status: idea captured; brainstorm separately.
 
 ## 16. Terminal inside the Live Conversation
 
-Status: implemented on branch `terminal-to-live` on 2026-10-17; manual check in the Electron app pending (⌘` and the Hebrew line in a real session).
+Status: implemented on branch `terminal-to-live` on 2026-10-17; checked by the user in the Electron app; the Hebrew line shows only in the expanded pane.
 
 - [x] Show the session's terminal as part of the Live Conversation panel, so the user can view the terminal instead of the conversation in the same place.
 - [x] Replace the terminal pop-up there with a switch between "Coding agent · translated", the regular (original) conversation, and the terminal.

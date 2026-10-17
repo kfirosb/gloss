@@ -4058,11 +4058,14 @@ button.dictation-finishing .dictation-icon {
   color: light-dark(#a8291f, var(--dk-fg-a8291f));
 }
 .live-terminal-line {
-  display: flex;
+  display: none;
   gap: 8px;
   padding: 8px;
   border-top: 1px solid light-dark(#d9deea, var(--dk-bg-d9deea));
   background: light-dark(#f0f3fa, var(--dk-bg-f0f3fa));
+}
+.expanded-pane .live-terminal-line {
+  display: flex;
 }
 .live-terminal-line input {
   flex: 1;
