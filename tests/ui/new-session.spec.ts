@@ -99,7 +99,10 @@ test('a launch without a panel shows a Starting tab', async ({ page, context }) 
   await page.goto('/#capability=test');
   await expect(page.getByRole('tab', { name: /Starting…/ })).toBeVisible();
 });
-test('End session asks for confirmation and calls end', async ({ page, context }) => {
+test('hovering a session tab turns its dot into an X that ends the session at once', async ({
+  page,
+  context,
+}) => {
   const f = await sessionFixture(context);
   await serve(context, [entryFor(f, 0, { launchId: 'L1', launchState: 'running' })]);
   const ended: string[] = [];
@@ -108,14 +111,33 @@ test('End session asks for confirmation and calls end', async ({ page, context }
     return r.fulfill({ json: {} });
   });
   await page.goto('/#capability=test');
+  const tab = page.getByRole('tab', { name: /Session A/ });
+  const close = page.getByRole('button', { name: 'End Session A' });
+  await expect(close).toBeHidden();
+  await tab.hover();
+  await expect(close).toBeVisible();
+  await close.click();
+  await expect.poll(() => ended).toEqual(['L1']);
+  await expect(page.getByRole('dialog', { name: 'End session' })).toHaveCount(0);
+});
+test('End session in the context menu ends at once and a failure says why', async ({
+  page,
+  context,
+}) => {
+  const f = await sessionFixture(context);
+  await serve(context, [entryFor(f, 0, { launchId: 'L1', launchState: 'running' })]);
+  await context.route('**/api/launches/L1/end', (r) =>
+    r.fulfill({ status: 400, json: { error: 'tmux command failed: lost server' } }),
+  );
+  await page.goto('/#capability=test');
   await page.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'End session…' }).click();
-  const confirm = page.getByRole('dialog', { name: 'End session' });
-  await expect(confirm).toContainText('Claude will be asked to exit');
-  expect(ended).toEqual([]);
-  await confirm.getByRole('button', { name: 'End session', exact: true }).click();
-  await expect(confirm).toBeHidden();
-  expect(ended).toEqual(['L1']);
+  await page.getByRole('menuitem', { name: 'End session', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'End session' })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'Could not end Session A: tmux command failed: lost server' }),
+  ).toBeVisible();
 });
 test('the context menu opens from the keyboard and Escape returns focus to the tab', async ({
   page,
@@ -130,12 +152,12 @@ test('the context menu opens from the keyboard and Escape returns focus to the t
   const tab = page.getByRole('tab', { name: /Session A/ });
   await tab.focus();
   await page.keyboard.press('Shift+F10');
-  await expect(page.getByRole('menuitem', { name: 'End session…' })).toBeFocused();
+  await expect(page.getByRole('menuitem', { name: 'End session', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(tab).toBeFocused();
   await page.keyboard.press('ContextMenu');
-  await expect(page.getByRole('menuitem', { name: 'End session…' })).toBeFocused();
+  await expect(page.getByRole('menuitem', { name: 'End session', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   const other = page.getByRole('tab', { name: /Session B/ });
   await other.focus();

@@ -1,18 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { chunkInput, terminalTicket } from './launch-controls.js';
 import { errorMessage } from './error-message.js';
+import { MAX_WHEEL_LINES, wheelLineCounter, type TerminalWheel } from '../core/terminal-wheel.js';
 
 const COALESCE_MS = 10;
+const WHEEL_COALESCE_MS = 30;
 /** One live attachment to a launch's tmux session. Mount it to connect; unmount to disconnect (the session keeps running). */
 export function TerminalView({
   launchId,
   onSelection,
+  autoFocus = true,
+  inputRef,
 }: {
   launchId: string;
   onSelection?(text: string): void;
+  autoFocus?: boolean;
+  /** Set while mounted to a sender that returns false when the socket is not open. */
+  inputRef?: MutableRefObject<((text: string) => boolean) | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
@@ -29,13 +36,16 @@ export function TerminalView({
     term.loadAddon(fit);
     term.open(host.current);
     fit.fit();
-    term.focus();
+    if (autoFocus) term.focus();
     let ws: WebSocket | undefined;
     let disposed = false;
     let pending = '';
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = (
-      value: { type: 'input'; data: string } | { type: 'resize'; cols: number; rows: number },
+      value:
+        | { type: 'input'; data: string }
+        | { type: 'resize'; cols: number; rows: number }
+        | ({ type: 'scroll' } & TerminalWheel),
     ) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
     };
@@ -46,6 +56,15 @@ export function TerminalView({
       pending = '';
       for (const part of chunkInput(data)) send({ type: 'input', data: part });
     };
+    const handle = (text: string) => {
+      if (ws?.readyState !== WebSocket.OPEN) return false;
+      // Keep order with keystrokes still waiting in the coalescing window.
+      if (timer) clearTimeout(timer);
+      pending += text;
+      flush();
+      return true;
+    };
+    if (inputRef) inputRef.current = handle;
     terminalTicket(launchId).then(
       ({ ticket }) => {
         if (disposed) return;
@@ -67,6 +86,37 @@ export function TerminalView({
         if (!disposed) setError(errorMessage(e, 'Terminal unavailable'));
       },
     );
+    // tmux owns the history (the attached screen has no scrollback of its own), so wheel movement goes to the
+    // server rather than becoming the arrow keys xterm.js would otherwise send, which agents read as prompt history.
+    const countLines = wheelLineCounter();
+    let wheelLines = 0;
+    let wheelAt = { col: 1, row: 1 };
+    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushWheel = () => {
+      wheelTimer = undefined;
+      while (wheelLines !== 0) {
+        const lines = Math.max(-MAX_WHEEL_LINES, Math.min(MAX_WHEEL_LINES, wheelLines));
+        wheelLines -= lines;
+        send({ type: 'scroll', lines, ...wheelAt });
+      }
+    };
+    term.attachCustomWheelEventHandler((event) => {
+      const screen = term.element?.querySelector('.xterm-screen')?.getBoundingClientRect();
+      if (!screen || event.deltaY === 0) return false;
+      event.preventDefault();
+      const cellHeight = screen.height / term.rows;
+      const lines = countLines(event, cellHeight, term.rows);
+      if (lines === 0) return false;
+      const cell = (offset: number, size: number, count: number) =>
+        Math.min(count, Math.max(1, Math.floor(offset / size) + 1));
+      wheelAt = {
+        col: cell(event.clientX - screen.left, screen.width / term.cols, term.cols),
+        row: cell(event.clientY - screen.top, cellHeight, term.rows),
+      };
+      wheelLines += lines;
+      wheelTimer ??= setTimeout(flushWheel, WHEEL_COALESCE_MS);
+      return false;
+    });
     const input = term.onData((data) => {
       pending += data;
       timer ??= setTimeout(flush, COALESCE_MS);
@@ -84,7 +134,9 @@ export function TerminalView({
     observer.observe(host.current);
     return () => {
       disposed = true;
+      if (inputRef?.current === handle) inputRef.current = null;
       if (timer) clearTimeout(timer);
+      if (wheelTimer) clearTimeout(wheelTimer);
       observer.disconnect();
       input.dispose();
       selected.dispose();

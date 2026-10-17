@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { LAYOUT_SIZE_MAX, LAYOUT_SIZE_MIN } from '../core/session-contracts.js';
+/** True while the window is wide enough for side-by-side panes; below it responsive dividers stack. */
+export function useWideLayout() {
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width:761px)').matches);
+  useEffect(() => {
+    const media = window.matchMedia('(min-width:761px)');
+    const update = () => setWide(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return wide;
+}
 export function PaneDivider({
   name,
   value,
@@ -11,13 +22,7 @@ export function PaneDivider({
   change(value: number): void;
   responsive?: boolean;
 }) {
-  const [wide, setWide] = useState(() => window.matchMedia('(min-width:761px)').matches);
-  useEffect(() => {
-    const media = window.matchMedia('(min-width:761px)');
-    const update = () => setWide(media.matches);
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
+  const wide = useWideLayout();
   const drag = useRef<{
     id: number;
     startX: number;
