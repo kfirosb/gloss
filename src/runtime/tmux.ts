@@ -8,6 +8,7 @@ import {
   type ProcessRunner,
 } from './process-runner.js';
 import { ensurePrivateDirectory } from './private-directory.js';
+import { isTerminalWheel, type TerminalWheel } from '../core/terminal-wheel.js';
 
 export class TmuxUnavailable extends Error {
   readonly code = 'tmux-unavailable';
@@ -84,6 +85,10 @@ export interface Tmux {
   /** Types text literally (no key-name parsing), then presses Enter. */
   typeText(name: string, text: string): Promise<void>;
   resizeWindow(name: string, cols: number, rows: number): Promise<void>;
+  /** Scrolls the pane like a wheel would: negative lines scroll up. col/row (1-based) is the pointer cell. */
+  scroll(name: string, wheel: TerminalWheel): Promise<void>;
+  /** Leaves copy mode (history browsing) so typed keys reach the agent again. */
+  exitCopyMode(name: string): Promise<void>;
   killSession(name: string): Promise<void>;
   attachArgv(name: string): string[];
 }
@@ -111,6 +116,13 @@ const sessionAbsent = (outcome: ProcessOutcome) =>
 
 const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
 
+/** One wheel report in the encoding the pane's app asked for: SGR, or legacy X10 (coordinates capped at 223). */
+function wheelReport(up: boolean, col: number, row: number, sgr: boolean): number[] {
+  const button = up ? 64 : 65;
+  if (sgr) return [...Buffer.from(`\x1b[<${button};${col};${row}M`)];
+  return [0x1b, 0x5b, 0x4d, 32 + button, 32 + Math.min(col, 223), 32 + Math.min(row, 223)];
+}
+
 export async function createTmux(
   options: { stateDir?: string; executable?: string; runner?: ProcessRunner } = {},
 ): Promise<Tmux> {
@@ -122,6 +134,8 @@ export async function createTmux(
   // -u: always UTF-8. An app opened from the Dock or Finder has no LANG, and tmux would then print the listing's
   // tab separators as "_" (every live session would look ended) and draw Hebrew in the popup terminal as "_".
   const base = ['-u', '-S', socket, '-f', '/dev/null'];
+  // Wheel lines not yet worth a page, per session, for full-screen apps that only page (see scroll).
+  const pageCarry = new Map<string, number>();
   const check = (name: string) => {
     if (!NAME.test(name)) throw new Error('Invalid tmux session name');
   };
@@ -241,8 +255,72 @@ export async function createTmux(
         throw new Error('Invalid size');
       await run(['resize-window', '-t', '=' + name + ':', '-x', String(cols), '-y', String(rows)]);
     },
+    // tmux's mouse option stays off so the browser keeps its own text selection; the wheel is routed here instead,
+    // mirroring tmux's default wheel binding: copy-mode scrolls, mouse-aware apps (Claude) get wheel reports,
+    // other full-screen apps get arrow keys, and a plain shell enters copy mode to browse its history.
+    async scroll(name, wheel) {
+      check(name);
+      if (!isTerminalWheel(wheel)) throw new Error('Invalid scroll');
+      const target = '=' + name + ':';
+      const state = await run([
+        'display-message',
+        '-p',
+        '-t',
+        target,
+        '#{pane_in_mode} #{mouse_any_flag} #{mouse_sgr_flag} #{alternate_on} #{pane_height}',
+      ]);
+      const fields = (state.lines.at(-1) ?? '').split(' ');
+      const [inMode, mouse, sgr, alternate] = fields.map((f) => f === '1');
+      const height = Number(fields[4]) || 24;
+      const up = wheel.lines < 0;
+      const count = String(Math.abs(wheel.lines));
+      if (inMode) {
+        await run(['send-keys', '-X', '-N', count, '-t', target, up ? 'scroll-up' : 'scroll-down']);
+      } else if (mouse) {
+        const report = wheelReport(up, wheel.col, wheel.row, sgr === true);
+        const bytes = Array.from({ length: Math.abs(wheel.lines) }, () => report).flat();
+        await run(['send-keys', '-H', '-t', target, ...bytes.map((b) => b.toString(16))]);
+      } else if (alternate) {
+        // Full-screen apps that ignore the mouse (Codex) scroll by page and read arrow keys as prompt history.
+        // A page per third of a screen of wheel movement keeps a single notch from jumping a whole screen.
+        const before = pageCarry.get(name) ?? 0;
+        const carry = (Math.sign(before) === Math.sign(wheel.lines) ? before : 0) + wheel.lines;
+        const step = Math.max(3, Math.floor(height / 3));
+        const pages = Math.trunc(carry / step);
+        pageCarry.set(name, carry - pages * step);
+        if (pages)
+          await run([
+            'send-keys',
+            '-N',
+            String(Math.abs(pages)),
+            '-t',
+            target,
+            up ? 'PPage' : 'NPage',
+          ]);
+      } else if (up) {
+        await run([
+          'copy-mode',
+          '-e',
+          '-t',
+          target,
+          ';',
+          'send-keys',
+          '-X',
+          '-N',
+          count,
+          '-t',
+          target,
+          'scroll-up',
+        ]);
+      }
+    },
+    async exitCopyMode(name) {
+      check(name);
+      await run(['copy-mode', '-q', '-t', '=' + name + ':']);
+    },
     async killSession(name) {
       check(name);
+      pageCarry.delete(name);
       const { outcome } = await run(['kill-session', '-t', '=' + name], true);
       if ((outcome.reason === 'exited' && outcome.code === 0) || sessionAbsent(outcome)) return;
       throw tmuxFailure(outcome);

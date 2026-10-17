@@ -130,6 +130,39 @@ it('streams output, forwards input and resize, and kills the attach client on cl
   await new Promise((r) => setTimeout(r, 50));
   expect(pty.killed).toBe(true);
 });
+it('routes wheel scrolling to tmux and leaves history browsing before forwarding typed input', async () => {
+  const events: string[] = [];
+  let release: () => void = () => undefined;
+  const { bridge, connect, pty } = await setup(0, {
+    tmux: async () =>
+      ({
+        attachArgv: (n: string) => ['tmux', 'attach', n],
+        scroll: async (n: string, w: { lines: number; col: number; row: number }) => {
+          events.push(`scroll ${n} ${w.lines} ${w.col},${w.row}`);
+          // The first scroll is slow; input sent meanwhile must still wait for it.
+          if (events.length === 1) await new Promise<void>((r) => (release = r));
+        },
+        exitCopyMode: async (n: string) => {
+          events.push(`exit ${n}`);
+        },
+      }) as any,
+  });
+  const ws = connect(`/api/launches/L1/terminal?ticket=${bridge.issueTicket('L1').ticket}`);
+  await opened(ws);
+  ws.send(JSON.stringify({ type: 'scroll', lines: -3, col: 4, row: 2 }));
+  ws.send(JSON.stringify({ type: 'scroll', lines: 0, col: 4, row: 2 }));
+  ws.send(JSON.stringify({ type: 'scroll', lines: -3, col: 'x', row: 2 }));
+  ws.send(JSON.stringify({ type: 'input', data: 'a' }));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(pty.writes).toEqual([]);
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+  ws.send(JSON.stringify({ type: 'input', data: 'b' }));
+  ws.send(JSON.stringify({ type: 'scroll', lines: 2, col: 1, row: 1 }));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(events).toEqual(['scroll la-L1 -3 4,2', 'exit la-L1', 'scroll la-L1 2 1,1']);
+  expect(pty.writes).toEqual(['a', 'b']);
+});
 it('rejects reused, expired, wrong-launch and missing tickets without spawning', async () => {
   const { bridge, connect, spawned, advance } = await setup();
   const t = bridge.issueTicket('L1').ticket;

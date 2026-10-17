@@ -97,15 +97,17 @@ Status: idea captured on 2026-10-16; benefits and feasibility still to be worked
 
 ## 7. Remove the large end-of-session popup
 
-Status: captured.
+Status: implemented on `make-pop-up-smaller`; not released.
 
-- [ ] Ending a session opens a huge popup; the user does not want it.
+- [x] Ending a session opens a huge popup; the user does not want it.
+- [x] Hovering a session or terminal tab swaps its activity dot for an X; clicking it ends the session or terminal at once. The tab's context menu "End session" also ends at once, and a failure is shown in the error line.
 
 ## 8. Smaller usage-limit notice
 
-Status: captured.
+Status: implemented on `make-pop-up-smaller`; not released.
 
-- [ ] When tokens run out and the usage limit is hit, the window that opens is too big and too long. Make it short and compact.
+- [x] When tokens run out and the usage limit is hit, the window that opens is too big and too long. Make it short and compact.
+- [x] The quota break dialog stretched to the full window height and laid its English text out right to left; it is now a 320px card sized to its content, left to right, with the same content and buttons.
 
 ## 9. Redesign the whole window
 

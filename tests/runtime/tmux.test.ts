@@ -242,6 +242,36 @@ describe.skipIf(!available)('with real tmux on a private socket', () => {
     const tmux = await createTmux({ stateDir: await stateTemp() });
     expect(await tmux.listSessions()).toEqual([]);
   });
+  it('scrolls a shell into its history and returns to the live screen', async () => {
+    const tmux = await createTmux({ stateDir: await stateTemp() });
+    await tmux.newSession('la-t3', '/', ['sh', '-c', 'seq 1 200; sleep 30']);
+    await expect.poll(() => tmux.capturePane('la-t3'), { timeout: 5000 }).toContain('200');
+    const paneState = async () =>
+      (
+        await new Promise<string>((resolve, reject) =>
+          execFile(
+            tmux.executable,
+            [
+              '-S',
+              tmux.socket,
+              'display-message',
+              '-p',
+              '-t',
+              '=la-t3:',
+              '#{pane_in_mode} #{scroll_position}',
+            ],
+            (e, out) => (e ? reject(e) : resolve(out)),
+          ),
+        )
+      ).trim();
+    await tmux.scroll('la-t3', { lines: -5, col: 1, row: 1 });
+    expect(await paneState()).toBe('1 5');
+    await tmux.scroll('la-t3', { lines: 2, col: 1, row: 1 });
+    expect(await paneState()).toBe('1 3');
+    await tmux.exitCopyMode('la-t3');
+    expect(await paneState()).toBe('0');
+    await tmux.exitCopyMode('la-t3');
+  });
 });
 
 it('distinguishes an absent server from tmux timeouts and other listing failures', async () => {
@@ -367,4 +397,116 @@ it('types text literally and then presses Enter as two commands', async () => {
     ['send-keys', '-t', '=la-one:', '-l', '--', '-n "C-c" && echo done'],
     ['send-keys', '-t', '=la-one:', '--', 'Enter'],
   ]);
+});
+
+describe('scroll', () => {
+  const scrollCalls = async (
+    paneState: string,
+    wheel: { lines: number; col: number; row: number },
+  ) => {
+    const calls: string[][] = [];
+    const tmux = await createTmux({
+      stateDir: await temp(),
+      executable: '/stub/tmux',
+      runner: async function* (_exe, args) {
+        calls.push(args.slice(5));
+        if (args.includes('display-message')) yield { type: 'line', line: paneState };
+        yield {
+          type: 'exit',
+          outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' },
+        };
+      },
+    });
+    await tmux.scroll('la-one', wheel);
+    return calls.slice(1);
+  };
+  // Pane state fields: in copy mode, app wants the mouse, app wants SGR reports, alternate screen, height.
+  it('scrolls copy mode when the pane is already browsing history', async () => {
+    expect(await scrollCalls('1 0 0 0', { lines: -3, col: 1, row: 1 })).toEqual([
+      ['send-keys', '-X', '-N', '3', '-t', '=la-one:', 'scroll-up'],
+    ]);
+    expect(await scrollCalls('1 1 1 1', { lines: 2, col: 1, row: 1 })).toEqual([
+      ['send-keys', '-X', '-N', '2', '-t', '=la-one:', 'scroll-down'],
+    ]);
+  });
+  it('sends wheel reports at the pointer cell to an app that asked for the mouse', async () => {
+    const sgr = (s: string) => [...Buffer.from(s)].map((b) => b.toString(16));
+    expect(await scrollCalls('0 1 1 1', { lines: -2, col: 7, row: 3 })).toEqual([
+      ['send-keys', '-H', '-t', '=la-one:', ...sgr('\x1b[<64;7;3M\x1b[<64;7;3M')],
+    ]);
+    expect(await scrollCalls('0 1 1 1', { lines: 1, col: 7, row: 3 })).toEqual([
+      ['send-keys', '-H', '-t', '=la-one:', ...sgr('\x1b[<65;7;3M')],
+    ]);
+    expect(await scrollCalls('0 1 0 1', { lines: -1, col: 300, row: 3 })).toEqual([
+      [
+        'send-keys',
+        '-H',
+        '-t',
+        '=la-one:',
+        '1b',
+        '5b',
+        '4d',
+        (96).toString(16),
+        (255).toString(16),
+        (35).toString(16),
+      ],
+    ]);
+  });
+  it('pages other full-screen apps once a third of a screen has been scrolled', async () => {
+    const calls: string[][] = [];
+    const tmux = await createTmux({
+      stateDir: await temp(),
+      executable: '/stub/tmux',
+      runner: async function* (_exe, args) {
+        if (args.includes('display-message')) yield { type: 'line', line: '0 0 0 1 30' };
+        else calls.push(args.slice(5));
+        yield {
+          type: 'exit',
+          outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' },
+        };
+      },
+    });
+    const at = { col: 1, row: 1 };
+    await tmux.scroll('la-one', { lines: -6, ...at });
+    expect(calls).toEqual([]);
+    await tmux.scroll('la-one', { lines: -6, ...at });
+    await tmux.scroll('la-one', { lines: -20, ...at });
+    // Reversing direction drops the carry instead of cancelling it out.
+    await tmux.scroll('la-one', { lines: 9, ...at });
+    await tmux.scroll('la-one', { lines: 1, ...at });
+    expect(calls).toEqual([
+      ['send-keys', '-N', '1', '-t', '=la-one:', 'PPage'],
+      ['send-keys', '-N', '2', '-t', '=la-one:', 'PPage'],
+      ['send-keys', '-N', '1', '-t', '=la-one:', 'NPage'],
+    ]);
+  });
+  it('enters copy mode to scroll a plain shell up and ignores scrolling down past the live screen', async () => {
+    expect(await scrollCalls('0 0 0 0', { lines: -3, col: 1, row: 1 })).toEqual([
+      [
+        'copy-mode',
+        '-e',
+        '-t',
+        '=la-one:',
+        ';',
+        'send-keys',
+        '-X',
+        '-N',
+        '3',
+        '-t',
+        '=la-one:',
+        'scroll-up',
+      ],
+    ]);
+    expect(await scrollCalls('0 0 0 0', { lines: 3, col: 1, row: 1 })).toEqual([]);
+  });
+  it('rejects malformed wheel movements without running tmux', async () => {
+    for (const wheel of [
+      { lines: 0, col: 1, row: 1 },
+      { lines: 51, col: 1, row: 1 },
+      { lines: 1.5, col: 1, row: 1 },
+      { lines: 1, col: 0, row: 1 },
+      { lines: 1, col: 1, row: 1001 },
+    ])
+      await expect(scrollCalls('0 0 0 0', wheel)).rejects.toThrow('Invalid scroll');
+  });
 });
