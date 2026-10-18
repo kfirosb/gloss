@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -54,6 +54,22 @@ it('tails appended bytes, then reports a shrink and ends', async () => {
   await writeFile(path, 'x');
   const third = await within(tail.next());
   expect(third.value).toMatchObject({ kind: 'error' });
+  expect((await within(tail.next())).done).toBe(true);
+});
+
+it('reports a file renamed over the tailed path as replaced and ends', async () => {
+  const path = await file('one\n');
+  const abort = new AbortController();
+  const tail = tailOutput(path, abort.signal, 10);
+  expect((await within(tail.next())).value).toMatchObject({ kind: 'chunk', text: 'one\n' });
+  const replacement = `${path}.new`;
+  // Longer than the original, so only the inode check can tell the files apart.
+  await writeFile(replacement, 'one\ntwo\nthree\n');
+  await rename(replacement, path);
+  expect((await within(tail.next())).value).toEqual({
+    kind: 'error',
+    reason: 'Output file was replaced',
+  });
   expect((await within(tail.next())).done).toBe(true);
 });
 
