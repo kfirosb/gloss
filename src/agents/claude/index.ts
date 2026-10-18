@@ -1,7 +1,7 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -28,13 +28,14 @@ import {
   type AdapterOptions,
   type Parsed,
 } from '../shared.js';
-import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
 import { claudeActivity } from './activity.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
+import { isClaudeExecutable, readProcess } from './process-probe.js';
+import { pidRunsSession, readSessionRecords, type ClaudeSessionRecord } from './session-records.js';
 import { ChannelStore } from './channel-store.js';
 import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
@@ -91,20 +92,6 @@ export type ClaudeProtocolVersion = string;
 export function supportsClaudeProtocol(version: unknown): version is ClaudeProtocolVersion {
   return typeof version === 'string' && version.trim().length > 0;
 }
-interface Registry {
-  sessionId: string;
-  cwd: string;
-  pid: number;
-  version: string;
-  messagingSocketPath?: string | undefined;
-  status?: string | undefined;
-  waitingFor?: unknown;
-  peerProtocol?: number | undefined;
-  entrypoint?: string | undefined;
-  startedAt?: number | undefined;
-  updatedAt?: number | undefined;
-  name?: unknown;
-}
 export { claudeActivity } from './activity.js';
 type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
 function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
@@ -115,7 +102,7 @@ function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
 }
 /** A native Claude binary is named after its version; the npm package runs as `claude.exe`. Older terminals may have no messaging socket. */
 async function liveClaude(
-  record: Registry,
+  record: ClaudeSessionRecord,
   liveness: ClaudeLiveness,
   runner: ClaudeAdapterOptions['runner'],
 ): Promise<Liveness> {
@@ -124,25 +111,12 @@ async function liveClaude(
   return (await psOwnsPid(record, runner)) ? 'alive' : 'not-alive';
 }
 async function psOwnsPid(
-  record: Registry,
+  record: ClaudeSessionRecord,
   runner: ClaudeAdapterOptions['runner'],
 ): Promise<boolean> {
-  const names = ['claude', 'claude.exe', record.version];
   if (process.platform !== 'darwin') return false;
-  const result = await collectProcess(
-    (runner ?? runProcess)(
-      '/bin/ps',
-      ['-o', 'comm=', '-p', String(record.pid)],
-      '',
-      new AbortController().signal,
-      { timeoutMs: 3000, maxOutputBytes: 4096 },
-    ),
-  );
-  return (
-    result.outcome.reason === 'exited' &&
-    result.outcome.code === 0 &&
-    result.lines.some((line) => names.includes(basename(line.trim())))
-  );
+  const live = await readProcess(record.pid, new AbortController().signal, runner);
+  return live?.pid === record.pid && isClaudeExecutable(live.command, record.version);
 }
 /** A session's messaging socket can be written: with own-child credentials, or directly on a Unix platform. */
 function canWritePeerSocket(hasCredentials: boolean): boolean {
@@ -177,69 +151,6 @@ export interface ClaudeAdapterOptions extends AdapterOptions {
    */
   processExists?: (pid: number) => boolean;
 }
-function optional(value: unknown, type: 'string'): string | undefined;
-function optional(value: unknown, type: 'number'): number | undefined;
-function optional(value: unknown, type: 'string' | 'number') {
-  return typeof value === type ? value : undefined;
-}
-/** One `sessions/*.json` record; undefined when it is missing, too large or malformed. */
-async function readRegistry(path: string): Promise<Registry | undefined> {
-  try {
-    if ((await stat(path)).size > 65_536) return undefined;
-    const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
-    if (
-      typeof r?.sessionId === 'string' &&
-      typeof r.cwd === 'string' &&
-      typeof r.pid === 'number' &&
-      Number.isInteger(r.pid) &&
-      r.pid > 0 &&
-      typeof r.version === 'string' &&
-      // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
-      (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
-      (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
-    )
-      return {
-        sessionId: r.sessionId,
-        cwd: r.cwd,
-        pid: r.pid,
-        version: r.version,
-        messagingSocketPath: optional(r.messagingSocketPath, 'string'),
-        status: optional(r.status, 'string'),
-        waitingFor: r.waitingFor,
-        peerProtocol: optional(r.peerProtocol, 'number'),
-        entrypoint: optional(r.entrypoint, 'string'),
-        startedAt: optional(r.startedAt, 'number'),
-        updatedAt: optional(r.updatedAt, 'number'),
-        name: r.name,
-      };
-  } catch {
-    /* Unreadable metadata does not establish a target. */
-  }
-  return undefined;
-}
-async function registries(config: string): Promise<Registry[]> {
-  let names: string[];
-  try {
-    names = await readdir(join(config, 'sessions'));
-  } catch {
-    return [];
-  }
-  if (names.length > 10_000) throw new Error('Session metadata enumeration exceeds bound');
-  const records: Registry[] = [];
-  for (const name of names.filter((n) => n.endsWith('.json'))) {
-    const record = await readRegistry(join(config, 'sessions', name));
-    if (record) records.push(record);
-  }
-  return records;
-}
-/**
- * Whether the process `pid` runs session `sessionRef` now, by Claude's own record for it, `sessions/<pid>.json`.
- * `/resume` and `/clear` switch sessions inside the same process: the pid stays and the record names the new session.
- */
-async function pidRunsSession(config: string, pid: number, sessionRef: string): Promise<boolean> {
-  const record = await readRegistry(join(config, 'sessions', `${pid}.json`));
-  return record?.pid === pid && record.sessionId === sessionRef;
-}
 async function locateTranscript(config: string, id: string): Promise<string> {
   const root = join(config, 'projects');
   const dirs = await readdir(root, { withFileTypes: true });
@@ -265,9 +176,9 @@ export async function discoverOpenClaude(
   if (signal.aborted)
     return { candidates: [], complete: false, error: 'Claude discovery cancelled' };
   const config = claudeConfigDir(options.configDir);
-  let records: Registry[];
+  let records: ClaudeSessionRecord[];
   try {
-    records = await registries(config);
+    records = await readSessionRecords(config);
   } catch {
     return { candidates: [], complete: false, error: 'Claude session metadata unavailable' };
   }
@@ -503,11 +414,13 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         typingBySession.delete(ref);
     return typingBySession.get(sessionRef);
   };
-  async function exact(target: Target): Promise<Registry> {
+  async function exact(target: Target): Promise<ClaudeSessionRecord> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
-    const matches = (await registries(config)).filter((r) => r.sessionId === target.sessionRef);
-    const projectMatches: Registry[] = [];
+    const matches = (await readSessionRecords(config)).filter(
+      (r) => r.sessionId === target.sessionRef,
+    );
+    const projectMatches: ClaudeSessionRecord[] = [];
     for (const record of matches) {
       try {
         if ((await projectIdentity(record.cwd)) === project) projectMatches.push(record);
@@ -543,7 +456,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       const targets: Target[] = [];
-      for (const r of await registries(config)) {
+      for (const r of await readSessionRecords(config)) {
         try {
           if ((await projectIdentity(r.cwd)) === project)
             targets.push({ agent: 'claude', sessionRef: r.sessionId, projectId: project });
@@ -725,7 +638,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       const paneRunsSession = (terminal: GlossTerminal) =>
         pidRunsSession(config, terminal.panePid, target.sessionRef);
       /** Gloss's own pane for this session, and whether the process in it still runs this session. */
-      const glossPane = async (current: Registry) => {
+      const glossPane = async (current: ClaudeSessionRecord) => {
         const terminal = await options.glossTerminal?.(target.sessionRef).catch(() => undefined);
         if (!terminal) return undefined;
         return {

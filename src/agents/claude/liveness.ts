@@ -1,5 +1,6 @@
 import { observedOwners, type OwnerResult } from '../shared.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
+import { isClaudeExecutable } from './process-probe.js';
 
 export type Liveness = 'alive' | 'not-alive' | 'failed';
 /**
@@ -88,8 +89,9 @@ export function createClaudeLiveness(options: ClaudeLivenessOptions = {}) {
       const { pid, version } = entry.record;
       const result = results.get(entry);
       if (!result?.ok) continue;
-      const names = ['claude', 'claude.exe', version];
-      const owned = result.owners.some((o) => o.pid === pid && names.includes(o.command));
+      const owned = result.owners.some(
+        (o) => o.pid === pid && isClaudeExecutable(o.command, version),
+      );
       states.set(entry, owned ? 'alive' : 'not-alive');
     }
     return states;

@@ -9,6 +9,7 @@ import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-type
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
 import { claudeConfigDir, validateTarget } from '../agents/shared.js';
 import { GLOSS_SERVER, LEGACY_SERVER } from '../agents/claude/channel-names.js';
+import { shellQuote } from '../core/command-text.js';
 import { writeFileAtomic } from './atomic-file.js';
 import {
   channelServerPaths,
@@ -74,7 +75,6 @@ export { CLAUDE_SETUP_PROMPT };
 // Per-session files and the commands users saved with them name the legacy server. Never change this key:
 // a file keyed `gloss` under a saved `server:language-assistant` command makes Claude ignore the channel.
 const serverName = LEGACY_SERVER;
-const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const privateDirectory = (path: string) =>
   ensurePrivateDirectory(
     path,
@@ -314,7 +314,7 @@ export function createClaudeChannelSetup(
       return {
         kind: 'command',
         command,
-        cdCommand: 'cd ' + quote(project) + ' && ' + command,
+        cdCommand: 'cd ' + shellQuote(project) + ' && ' + command,
         folder: project,
       };
     },
@@ -331,7 +331,7 @@ export function createClaudeChannelSetup(
         'server:' + serverName,
       ];
       return {
-        command: 'cd ' + quote(project) + ' && ' + args.map(quote).join(' '),
+        command: 'cd ' + shellQuote(project) + ' && ' + args.map(shellQuote).join(' '),
         experimental: true,
         instructions:
           'This starts a new session when you run it. The disclosed setup prompt “' +

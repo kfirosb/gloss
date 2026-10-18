@@ -103,8 +103,8 @@ it.runIf(process.platform === 'darwin').each([
       if (executable === '/usr/sbin/lsof')
         for (const line of ownerLines(s102, lsofPaths(args))) yield { type: 'line', line };
       // A malformed path must be rejected even when the legacy process check would pass.
-      if (executable === '/bin/ps' && args.at(-1) === '102')
-        yield { type: 'line', line: '/usr/local/bin/claude' };
+      if (executable === '/bin/ps' && args[1] === '102')
+        yield { type: 'line', line: '102 1 501 Sat Oct 18 10:00:00 2026 /usr/local/bin/claude' };
       yield exit;
     };
     const scan = await discoverOpenClaude(
@@ -174,8 +174,11 @@ it.runIf(process.platform === 'darwin')(
     const runner: ProcessRunner = async function* (executable, args) {
       if (executable === '/usr/sbin/lsof')
         for (const line of ownerLines(owners, lsofPaths(args))) yield { type: 'line', line };
-      if (executable === '/bin/ps' && args.at(-1) === '104')
-        yield { type: 'line', line: '/Users/me/.local/share/claude/versions/2.1.224' };
+      if (executable === '/bin/ps' && args[1] === '104')
+        yield {
+          type: 'line',
+          line: '104 1 501 Sat Oct 18 10:00:00 2026 /Users/me/.local/share/claude/versions/2.1.224',
+        };
       yield exit;
     };
     const scan = await discoverOpenClaude(

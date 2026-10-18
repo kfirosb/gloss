@@ -2,13 +2,14 @@ import type { Target } from '../../core/contracts.js';
 import { recordOf, type JsonRecord } from '../../core/json-record.js';
 import type { ChannelRecord } from './channel-types.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
-import { collectProcess, runProcess } from '../../runtime/process-runner.js';
+import { isClaudeExecutable, readProcess, type ProcessInfo } from './process-probe.js';
+import { sessionRecordOf, trustedProcStart } from './session-records.js';
 import { constants } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   claudeConfigDir,
   projectIdentity,
@@ -17,13 +18,7 @@ import {
   verifyFirstRecord,
 } from '../shared.js';
 
-export interface ChannelProcess {
-  pid: number;
-  ppid: number;
-  uid: number;
-  startedAt: string;
-  command: string;
-}
+export type ChannelProcess = ProcessInfo;
 export interface ChannelRegistryOptions {
   registryDir?: string;
   configDir?: string;
@@ -131,41 +126,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     if (!positivePid(pid) || signal.aborted) return undefined;
     let value: ChannelProcess | undefined;
     if (options.probe) value = await options.probe(pid, signal);
-    else {
-      const result = await collectProcess(
-        (options.runner ?? runProcess)(
-          '/bin/ps',
-          ['-p', String(pid), '-o', 'pid=,ppid=,uid=,lstart=,comm='],
-          '',
-          signal,
-          {
-            env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' },
-            timeoutMs: 1000,
-            maxOutputBytes: 4096,
-            maxLineBytes: 4096,
-            maxDiagnosticBytes: 1024,
-          },
-        ),
-      );
-      if (
-        result.outcome.reason !== 'exited' ||
-        result.outcome.code !== 0 ||
-        result.lines.length !== 1
-      )
-        return undefined;
-      const match =
-        /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z]{3} [A-Za-z]{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4})\s+(.+?)\s*$/.exec(
-          result.lines[0]!,
-        );
-      if (!match) return undefined;
-      value = {
-        pid: Number(match[1]),
-        ppid: Number(match[2]),
-        uid: Number(match[3]),
-        startedAt: match[4]!,
-        command: match[5]!,
-      };
-    }
+    else value = await readProcess(pid, signal, options.runner);
     return value &&
       value.pid === pid &&
       value.uid === uid() &&
@@ -198,34 +159,26 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
       if (signal.aborted) throw new Error('Identity verification expired');
       if (!name.endsWith('.json')) continue;
       try {
-        const r = await readJson(join(configDir, 'sessions', name));
+        const r = sessionRecordOf(await readJson(join(configDir, 'sessions', name)));
+        const procStart = r && trustedProcStart(r);
         if (
           !r ||
-          typeof r.sessionId !== 'string' ||
+          !procStart ||
           !uuid.test(r.sessionId) ||
           !positivePid(r.pid) ||
-          typeof r.cwd !== 'string' ||
           !isAbsolute(r.cwd) ||
-          r.pidDomain !== 'darwin' ||
-          typeof r.procStart !== 'string' ||
-          !r.procStart ||
-          typeof r.version !== 'string' ||
           !r.version ||
           (r.entrypoint !== undefined && r.entrypoint !== 'cli')
         )
           continue;
         const live = await probe(r.pid, signal);
-        if (
-          live &&
-          live.startedAt === r.procStart &&
-          ['claude', r.version].includes(basename(live.command))
-        )
+        if (live && live.startedAt === procStart && isClaudeExecutable(live.command, r.version))
           records.push({
             sessionId: r.sessionId,
             cwd: r.cwd,
             pid: r.pid,
-            procStart: r.procStart,
-            pidDomain: r.pidDomain,
+            procStart,
+            pidDomain: 'darwin',
             version: r.version,
             ...(r.entrypoint === 'cli' ? { entrypoint: r.entrypoint } : {}),
           });
