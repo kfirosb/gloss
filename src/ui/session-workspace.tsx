@@ -1202,6 +1202,7 @@ export function SessionWorkspace({
             client={client}
             activity={snapshot.activity}
             translationOn={needsReplyTranslation(languageSettings)}
+            replyLanguage={languageSettings.reply}
             agentIsClaude={isClaude}
             disconnected={snapshot.codingState === 'disconnected'}
           />

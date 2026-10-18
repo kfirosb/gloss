@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivityCall, ActivityEvent } from '../../src/core/activity-contracts.js';
+import type {
+  ActivityCall,
+  ActivityEvent,
+  ActivityTask,
+} from '../../src/core/activity-contracts.js';
 import { emptyActivity } from '../../src/core/activity-reducer.js';
-import { foldStreamEvents } from '../../src/ui/use-activity-streams.js';
+import {
+  ACTIVITY_STREAM_LIMIT,
+  StreamSlots,
+  foldStreamEvents,
+  takeReportRequests,
+} from '../../src/ui/use-activity-streams.js';
 
 const call = (id: string, position: number): ActivityCall => ({
   id,
@@ -47,5 +56,85 @@ describe('subagent stream fold', () => {
     });
     const folded = foldStreamEvents('s2:a1', previous, 's2:a1', callEvent('c2', 3));
     expect(folded.state.calls.map((c) => c.id)).toEqual(['c2']);
+  });
+});
+
+describe('activity stream slots', () => {
+  const recorder = () => {
+    const states: boolean[] = [];
+    return { states, set: (open: boolean) => states.push(open) };
+  };
+  it('holds at most two activity streams open at once', () => {
+    expect(ACTIVITY_STREAM_LIMIT).toBe(2);
+  });
+  it('closes the oldest open stream when one more opens, and reopens it when another closes', () => {
+    const slots = new StreamSlots(2);
+    const a = recorder();
+    const b = recorder();
+    const c = recorder();
+    slots.claim(a.set);
+    const releaseB = slots.claim(b.set);
+    expect([a.states, b.states]).toEqual([[true], [true]]);
+    const releaseC = slots.claim(c.set);
+    expect([a.states, b.states, c.states]).toEqual([[true, false], [true], [true]]);
+    releaseB();
+    expect(a.states).toEqual([true, false, true]);
+    releaseC();
+    expect(a.states).toEqual([true, false, true]);
+  });
+  it('pauses the same oldest stream when the newest is closed and claimed again at once', () => {
+    const slots = new StreamSlots(2);
+    const a = recorder();
+    const b = recorder();
+    slots.claim(a.set);
+    slots.claim(b.set);
+    const c = recorder();
+    slots.claim(c.set)();
+    slots.claim(c.set);
+    expect(a.states.at(-1)).toBe(false);
+    expect(b.states).toEqual([true]);
+  });
+  it('forgets a paused stream that closes before it reopens', () => {
+    const slots = new StreamSlots(1);
+    const a = recorder();
+    const b = recorder();
+    const releaseA = slots.claim(a.set);
+    const releaseB = slots.claim(b.set);
+    expect(a.states).toEqual([true, false]);
+    releaseA();
+    releaseB();
+    expect(a.states).toEqual([true, false]);
+    const c = recorder();
+    slots.claim(c.set);
+    expect(c.states).toEqual([true]);
+  });
+});
+
+describe('report translation requests', () => {
+  const report = (text: string, over: Partial<ActivityTask> = {}): ActivityTask => ({
+    kind: 'subagent',
+    id: 'a1',
+    description: 'Review',
+    position: 1,
+    depth: 0,
+    status: 'finished',
+    report: text,
+    ...over,
+  });
+  it('asks once per report, and again when the report changes', () => {
+    const requested = new Set<string>();
+    expect(takeReportRequests('s1', [report('First.')], requested)).toEqual(['a1']);
+    expect(takeReportRequests('s1', [report('First.')], requested)).toEqual([]);
+    expect(takeReportRequests('s1', [report('Second.')], requested)).toEqual(['a1']);
+    expect(takeReportRequests('s2', [report('Second.')], requested)).toEqual(['a1']);
+  });
+  it('skips translated, report-less and background tasks', () => {
+    const requested = new Set<string>();
+    const tasks = [
+      report('Done.', { reportTranslation: { text: 'בוצע.', status: 'complete' } }),
+      report('', { id: 'a2' }),
+      report('Out.', { id: 'b1', kind: 'background' }),
+    ];
+    expect(takeReportRequests('s1', tasks, requested)).toEqual([]);
   });
 });

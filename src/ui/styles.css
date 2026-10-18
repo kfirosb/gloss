@@ -4078,6 +4078,7 @@ button.dictation-finishing .dictation-icon {
   color: light-dark(#647089, var(--dk-fg-647089));
 }
 .activity-empty,
+.activity-gap,
 .activity-meta {
   margin: 0;
   color: light-dark(#647089, var(--dk-fg-647089));
@@ -4123,6 +4124,26 @@ button.activity-card-head {
   margin-inline-start: 6px;
   color: light-dark(#647089, var(--dk-fg-647089));
   font-size: 0.75rem;
+}
+.activity-gap {
+  margin-top: 6px;
+  font-style: italic;
+}
+.activity-nested-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.activity-nested-task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 0.8rem;
+}
+.activity-nested-task .activity-nested {
+  margin-inline-start: 0;
 }
 .activity-head-end {
   display: inline-flex;
@@ -4175,7 +4196,12 @@ button.activity-card-head {
   padding: 6px 8px;
   border-radius: 6px;
   background: light-dark(#edf1ff, var(--dk-bg-edf1ff));
-  white-space: pre-wrap;
+}
+.activity-report .rich-text > :first-child {
+  margin-top: 0;
+}
+.activity-report .rich-text > :last-child {
+  margin-bottom: 0;
 }
 .activity-report[dir='rtl'] {
   text-align: right;

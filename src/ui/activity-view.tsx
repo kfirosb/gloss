@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActivityCall, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
+import { languageDirection, type LanguageCode } from '../core/language-settings.js';
+import { RichText } from './rich-text.js';
 import type { SessionClient } from './session-client.js';
-import { useOutputTail, useSubagentStream } from './use-activity-streams.js';
+import { useOutputTail, useReportTranslations, useSubagentStream } from './use-activity-streams.js';
 
 type ActivityClient = Pick<
   SessionClient,
@@ -10,6 +12,7 @@ type ActivityClient = Pick<
 type CardStatus = ActivityTask['status'] | 'unknown';
 /** Pixels from the bottom that still count as "at the bottom" for the output tail's auto-scroll. */
 const STICK_TO_BOTTOM_PX = 8;
+const STREAM_PAUSED = 'Stream paused while newer streams are open; it resumes when one closes.';
 
 function clock(timestamp?: string): string {
   if (!timestamp) return '';
@@ -72,6 +75,23 @@ function Timeline({ calls }: { calls: readonly ActivityCall[] }) {
   );
 }
 
+/** A task the subagent itself started; counted only in its own transcript, never in the main badge. */
+function NestedTaskRow({ task }: { task: ActivityTask }) {
+  const labels = [task.kind === 'subagent' ? task.agentType : task.command, task.status]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div className="activity-nested-task" data-nested-task={task.id} data-status={task.status}>
+      <span aria-hidden="true">{task.status === 'running' ? '● ' : '○ '}</span>
+      <span>
+        {task.kind === 'subagent' ? 'Subagent' : 'Background'} · {task.description}
+      </span>
+      <span className="activity-meta">{labels}</span>
+      <span className="activity-nested">nested ×{task.depth}</span>
+    </div>
+  );
+}
+
 function SubagentTimeline({
   client,
   taskId,
@@ -81,15 +101,29 @@ function SubagentTimeline({
   taskId: string;
   active: boolean;
 }) {
-  const stream = useSubagentStream(client, taskId, active);
+  const { activity: stream, paused } = useSubagentStream(client, taskId, active);
   return (
     <div className="activity-sub">
+      {paused && (
+        <p className="activity-meta" role="status">
+          {STREAM_PAUSED}
+        </p>
+      )}
+      {stream.tasks.length > 0 && (
+        <div className="activity-nested-tasks" aria-label="Nested tasks">
+          {stream.tasks.map((task) => (
+            <NestedTaskRow key={task.id} task={task} />
+          ))}
+        </div>
+      )}
       {stream.calls.length > 0 ? (
         <Timeline calls={stream.calls} />
       ) : (
-        <p className="activity-meta">
-          {active ? 'Waiting for its first tool call.' : 'No live transcript.'}
-        </p>
+        !paused && (
+          <p className="activity-meta">
+            {active ? 'Waiting for its first tool call.' : 'No live transcript.'}
+          </p>
+        )
       )}
       {stream.gaps.map((gap) => (
         <p key={gap} className="activity-meta">
@@ -100,19 +134,27 @@ function SubagentTimeline({
   );
 }
 
-function Report({ task, translationOn }: { task: ActivityTask; translationOn: boolean }) {
+function Report({
+  task,
+  translationOn,
+  replyLanguage,
+}: {
+  task: ActivityTask;
+  translationOn: boolean;
+  replyLanguage: LanguageCode;
+}) {
   if (!task.report) return null;
   const translation = task.reportTranslation;
   if (translationOn && translation?.status === 'complete')
     return (
-      <div className="activity-report" dir="rtl">
-        {translation.text}
+      <div className="activity-report" dir={languageDirection(replyLanguage)}>
+        <RichText language={replyLanguage} text={translation.text} />
       </div>
     );
   return (
     <>
       <div className="activity-report" dir="ltr">
-        {task.report}
+        <RichText language="auto" text={task.report} />
       </div>
       {translationOn && translation?.status === 'pending' && (
         <p className="activity-meta">Translating the report…</p>
@@ -146,6 +188,11 @@ function OutputPanel({ client, taskId }: { client: ActivityClient; taskId: strin
       >
         {tail.lines}
       </pre>
+      {tail.paused && (
+        <p className="activity-meta" role="status">
+          {STREAM_PAUSED}
+        </p>
+      )}
       {tail.error && (
         <p className="activity-meta" role="status">
           {tail.error}
@@ -160,11 +207,13 @@ function TaskCard({
   task,
   disconnected,
   translationOn,
+  replyLanguage,
 }: {
   client: ActivityClient;
   task: ActivityTask;
   disconnected: boolean;
   translationOn: boolean;
+  replyLanguage: LanguageCode;
 }) {
   const [open, setOpen] = useState(false);
   const status: CardStatus = disconnected && task.status === 'running' ? 'unknown' : task.status;
@@ -187,7 +236,6 @@ function TaskCard({
         <span aria-hidden="true">{status === 'running' ? '● ' : '○ '}</span>
         {subagent ? 'Subagent' : 'Background'} · {task.description}
       </b>
-      {task.depth > 1 && <span className="activity-nested">nested ×{task.depth}</span>}
     </>
   );
   const labels = subagent ? [task.agentType, task.model].filter(Boolean).join(' · ') : '';
@@ -236,7 +284,9 @@ function TaskCard({
         <SubagentTimeline client={client} taskId={task.id} active={!disconnected} />
       )}
       {!subagent && open && !disconnected && <OutputPanel client={client} taskId={task.id} />}
-      {subagent && <Report task={task} translationOn={translationOn} />}
+      {subagent && (
+        <Report task={task} translationOn={translationOn} replyLanguage={replyLanguage} />
+      )}
     </article>
   );
 }
@@ -250,44 +300,26 @@ function cardOrder(tasks: readonly ActivityTask[]): ActivityTask[] {
   ];
 }
 
-/** Asks once per task for a translation of each finished subagent report that has none yet. */
-function useReportTranslations(
-  client: ActivityClient,
-  tasks: readonly ActivityTask[],
-  translationOn: boolean,
-) {
-  const requested = useRef(new Set<string>());
-  useEffect(() => {
-    if (!translationOn) return;
-    for (const task of tasks) {
-      if (task.kind !== 'subagent' || !task.report || task.reportTranslation) continue;
-      const key = `${client.sessionId}:${task.id}`;
-      if (requested.current.has(key)) continue;
-      requested.current.add(key);
-      // The server answers only after translating; its pending and complete states arrive in the snapshot
-      // stream, so the response is not awaited here. A failed request leaves the English report in place.
-      void client.translateActivityReport(task.id).catch(() => {});
-    }
-  }, [client, tasks, translationOn]);
-}
-
 export function ActivityView({
   client,
   activity,
   translationOn,
+  replyLanguage,
   agentIsClaude,
   disconnected,
 }: {
   client: ActivityClient;
   activity: ActivitySnapshot | undefined;
   translationOn: boolean;
+  replyLanguage: LanguageCode;
   agentIsClaude: boolean;
   disconnected: boolean;
 }) {
   const tasks = activity?.tasks ?? [];
   const calls = activity?.calls ?? [];
+  const gaps = activity?.gaps ?? [];
   useReportTranslations(client, tasks, translationOn);
-  if (tasks.length === 0 && calls.length === 0)
+  if (tasks.length === 0 && calls.length === 0 && gaps.length === 0)
     return (
       <div className="activity" dir="ltr">
         <p className="activity-empty">No tool calls yet.</p>
@@ -305,6 +337,7 @@ export function ActivityView({
               task={task}
               disconnected={disconnected}
               translationOn={translationOn}
+              replyLanguage={replyLanguage}
             />
           ))}
         </section>
@@ -313,11 +346,15 @@ export function ActivityView({
         <h3 className="activity-label">
           {agentIsClaude ? 'What Claude did' : 'What the agent did'}
         </h3>
-        {calls.length > 0 ? (
-          <Timeline calls={calls} />
-        ) : (
+        {calls.length > 0 && <Timeline calls={calls} />}
+        {calls.length === 0 && gaps.length === 0 && (
           <p className="activity-empty">No tool calls yet.</p>
         )}
+        {gaps.map((gap) => (
+          <p key={gap} className="activity-gap">
+            {gap}
+          </p>
+        ))}
       </section>
     </div>
   );

@@ -92,7 +92,13 @@ const sse = (events: unknown[]) => ({
   body: events.map((event) => 'data: ' + JSON.stringify(event) + '\n\n').join(''),
 });
 
-async function open(page: Page, target: Target, codingState = 'idle', value = activity()) {
+async function open(
+  page: Page,
+  target: Target,
+  codingState = 'idle',
+  value = activity(),
+  subagentEvents: ActivityEvent[] = [streamed],
+) {
   const snapshot = { ...basicSnapshot(), id: 'act', target, codingState, activity: value };
   await mockSession(page, () => snapshot);
   await page.route('**/api/sessions/*/events', (route) => route.fulfill(sse([])));
@@ -106,9 +112,9 @@ async function open(page: Page, target: Target, codingState = 'idle', value = ac
     return route.fulfill({ json: { sessionId: snapshot.id, sequence: 1, snapshot } });
   });
   const streams: string[] = [];
-  await page.route('**/activity/subagents/a1/events', (route) => {
-    streams.push('a1');
-    return route.fulfill(sse([streamed]));
+  await page.route('**/activity/subagents/*/events', (route) => {
+    streams.push(route.request().url().split('/').at(-2) ?? '');
+    return route.fulfill(sse(subagentEvents));
   });
   await page.route('**/activity/tasks/b1/output', (route) => {
     streams.push('b1');
@@ -159,7 +165,7 @@ test('the Activity view shows running tasks, their streams and the tool timeline
   await expect(tail).toHaveCount(0);
 
   const finished = view.locator('[data-task="a0"]');
-  await expect(finished.locator('[dir="rtl"]')).toHaveText('נמצאו שלושה קוראים.');
+  await expect(finished.locator('.activity-report[dir="rtl"]')).toHaveText('נמצאו שלושה קוראים.');
   // The translated report needs no new translation request.
   expect(translations).toEqual([]);
 
@@ -207,22 +213,82 @@ test('a disconnected session shows no running task and opens no stream', async (
 test('a finished report is translated once when translation is on', async ({ page }) => {
   const value = activity();
   const finished = value.tasks.find((t) => t.id === 'a0');
-  if (finished) delete finished.reportTranslation;
+  if (finished) {
+    delete finished.reportTranslation;
+    finished.report = 'Found **three** callers.';
+  }
   const { translations } = await open(page, claude, 'idle', value);
   await activityRadio(page).click();
-  await expect(page.locator('[data-task="a0"]')).toContainText('Found three callers.');
+  const report = page.locator('[data-task="a0"] .activity-report');
+  await expect(report).toHaveText('Found three callers.');
+  // The report is markdown, rendered like a reply.
+  await expect(report.locator('strong')).toHaveText('three');
   await expect.poll(() => translations).toEqual(['a0']);
   await page.locator('[data-call="c-bash"]').getByRole('button').click();
   await page.locator('[data-call="c-bash"]').getByRole('button').click();
   expect(translations).toEqual(['a0']);
 });
 
-test('a nested task shows its depth', async ({ page }) => {
-  const value = activity();
-  const nested = value.tasks.find((t) => t.id === 'a1');
-  if (nested) nested.depth = 2;
-  await open(page, claude, 'idle', value);
+test('an expanded subagent lists the tasks it started, outside the main badge', async ({
+  page,
+}) => {
+  const nested: ActivityEvent = {
+    kind: 'task-start',
+    task: task({
+      id: 'n1',
+      kind: 'subagent',
+      description: 'Check the reducer',
+      position: 35,
+      depth: 2,
+      agentType: 'Explore',
+    }),
+  };
+  await open(page, claude, 'idle', activity(), [nested, streamed]);
+  await expect(activityRadio(page)).toHaveText('Activity2');
   await activityRadio(page).click();
-  await expect(page.locator('[data-task="a1"]')).toContainText('nested ×2');
-  await expect(page.locator('[data-task="b1"]')).not.toContainText('nested');
+  const subagent = page.locator('[data-task="a1"]');
+  await expect(subagent).not.toContainText('nested');
+  await subagent.getByRole('button', { name: /Re-review final fix wave/ }).click();
+  const row = subagent.locator('[data-nested-task="n1"]');
+  await expect(row).toContainText('Check the reducer');
+  await expect(row).toContainText('Explore');
+  await expect(row).toContainText('running');
+  await expect(row).toContainText('nested ×2');
+  await expect(subagent.locator('[data-call="s-grep"]')).toHaveCount(1);
+  await expect(page.locator('[data-task]')).toHaveCount(3);
+  await expect(activityRadio(page)).toHaveText('Activity2');
+});
+
+test('activity gaps are shown instead of the empty state', async ({ page }) => {
+  const reason = 'Older activity is not shown; the lookback is bounded.';
+  await open(page, claude, 'idle', { calls: [], tasks: [], running: 0, gaps: [reason] });
+  await activityRadio(page).click();
+  const view = page.locator('.activity');
+  await expect(view.locator('.activity-gap')).toHaveText(reason);
+  await expect(view.getByText('No tool calls yet.')).toHaveCount(0);
+});
+
+test('a third activity stream pauses the oldest until another closes', async ({ page }) => {
+  const value = activity();
+  value.tasks.push(
+    task({ id: 'a2', kind: 'subagent', description: 'Second reviewer', position: 27 }),
+  );
+  const { streams } = await open(page, claude, 'idle', value);
+  await activityRadio(page).click();
+  const first = page.locator('[data-task="a1"]');
+  const second = page.locator('[data-task="a2"]');
+  const background = page.locator('[data-task="b1"]');
+  await first.getByRole('button', { name: /Re-review final fix wave/ }).click();
+  await expect(first.locator('[data-call="s-grep"]')).toHaveCount(1);
+  await second.getByRole('button', { name: /Second reviewer/ }).click();
+  await expect(second.locator('[data-call="s-grep"]')).toHaveCount(1);
+  await background.getByRole('button', { name: 'Show output' }).click();
+  await expect(background.locator('pre')).toHaveText('Running 279 tests\n');
+  await expect(first).toContainText('Stream paused');
+  await expect(second).not.toContainText('Stream paused');
+  await expect.poll(() => streams).toEqual(['a1', 'a2', 'b1']);
+  await background.getByRole('button', { name: 'Hide output' }).click();
+  await expect(first).not.toContainText('Stream paused');
+  await expect(first.locator('[data-call="s-grep"]')).toHaveCount(1);
+  await expect.poll(() => streams).toEqual(['a1', 'a2', 'b1', 'a1']);
 });

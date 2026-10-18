@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActivityEvent, ActivitySnapshot } from '../core/activity-contracts.js';
+import type { ActivityEvent, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
 import { applyActivityEvent, emptyActivity } from '../core/activity-reducer.js';
 import type { SessionClient } from './session-client.js';
 
@@ -8,6 +8,108 @@ const TAIL_CHARS_LIMIT = 256_000;
 const SUBAGENT_UNAVAILABLE = 'Subagent transcript unavailable';
 const OUTPUT_UNAVAILABLE = 'Output unavailable';
 const EARLIER_UNAVAILABLE = 'Earlier output unavailable';
+
+/**
+ * Activity streams the page holds open at once. The browser allows six connections per host over
+ * HTTP/1.1 and the session and catalog event streams already use two; actions need the rest.
+ */
+export const ACTIVITY_STREAM_LIMIT = 2;
+
+interface StreamSlot {
+  order: number; // claim order: the lowest open one is the oldest
+  setOpen: (open: boolean) => void;
+}
+const byOrder = (a: StreamSlot, b: StreamSlot) => a.order - b.order;
+
+/** Grants at most `limit` open streams; a new one closes the oldest, which reopens when another closes. */
+export class StreamSlots {
+  private readonly open: StreamSlot[] = [];
+  private readonly paused: StreamSlot[] = [];
+  private claims = 0;
+  constructor(private readonly limit: number) {}
+  /** `setOpen` hears whether the stream may hold its connection now and whenever that changes. */
+  claim(setOpen: (open: boolean) => void): () => void {
+    const slot: StreamSlot = { order: this.claims++, setOpen };
+    this.open.push(slot);
+    setOpen(true);
+    if (this.open.length > this.limit) {
+      const oldest = this.open.shift();
+      if (oldest) {
+        this.paused.push(oldest);
+        this.paused.sort(byOrder);
+        oldest.setOpen(false);
+      }
+    }
+    return () => {
+      const pausedAt = this.paused.indexOf(slot);
+      if (pausedAt >= 0) {
+        this.paused.splice(pausedAt, 1);
+        return;
+      }
+      const openAt = this.open.indexOf(slot);
+      if (openAt < 0) return;
+      this.open.splice(openAt, 1);
+      // The newest waiting stream reopens and keeps its place in the claim order, so a stream that is
+      // closed and claimed again at once (as React's development mode does) pauses the same one again.
+      const next = this.paused.pop();
+      if (!next) return;
+      this.open.push(next);
+      this.open.sort(byOrder);
+      next.setOpen(true);
+    };
+  }
+}
+const activityStreamSlots = new StreamSlots(ACTIVITY_STREAM_LIMIT);
+
+/** Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming. */
+function useStreamSlot(active: boolean): boolean | undefined {
+  const [open, setOpen] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    if (!active) return;
+    const release = activityStreamSlots.claim(setOpen);
+    return () => {
+      release();
+      setOpen(undefined);
+    };
+  }, [active]);
+  return active ? open : undefined;
+}
+
+/**
+ * The finished subagent reports to ask a translation for, recording each in `requested`. A report is
+ * asked for once; a resumed agent's new report has a new key, so it is asked for again.
+ */
+export function takeReportRequests(
+  sessionId: string,
+  tasks: readonly ActivityTask[],
+  requested: Set<string>,
+): string[] {
+  const ids: string[] = [];
+  for (const task of tasks) {
+    if (task.kind !== 'subagent' || !task.report || task.reportTranslation) continue;
+    const key = JSON.stringify([sessionId, task.id, task.report]);
+    if (requested.has(key)) continue;
+    requested.add(key);
+    ids.push(task.id);
+  }
+  return ids;
+}
+
+/** Asks for a translation of each finished subagent report that has none yet. */
+export function useReportTranslations(
+  client: Pick<SessionClient, 'translateActivityReport' | 'sessionId'>,
+  tasks: readonly ActivityTask[],
+  translationOn: boolean,
+) {
+  const requested = useRef(new Set<string>());
+  useEffect(() => {
+    if (!translationOn) return;
+    for (const id of takeReportRequests(client.sessionId, tasks, requested.current))
+      // The server answers at once; its pending and complete states arrive in the snapshot stream.
+      // A failed request leaves the English report in place.
+      void client.translateActivityReport(id).catch(() => {});
+  }, [client, tasks, translationOn]);
+}
 
 export interface StreamState {
   key: string;
@@ -30,18 +132,25 @@ export function foldStreamEvents(
   return { key, state: applyActivityEvent(base, event) };
 }
 
-/** The activity of one subagent's own transcript, streamed while `active`. */
+export interface SubagentStream {
+  activity: ActivitySnapshot;
+  /** Wanted but closed while newer activity streams hold the connections. */
+  paused: boolean;
+}
+/** The activity of one subagent's own transcript, streamed while `active` and holding a slot. */
 export function useSubagentStream(
   client: Pick<SessionClient, 'subagentActivity' | 'sessionId'>,
   taskId: string,
   active: boolean,
-): ActivitySnapshot {
+): SubagentStream {
   const key = streamKey(client.sessionId, taskId);
   const keyNow = useRef(key);
   keyNow.current = key;
   const [stream, setStream] = useState<StreamState>(() => ({ key, state: emptyActivity() }));
+  const slot = useStreamSlot(active);
+  const open = slot === true;
   useEffect(() => {
-    if (!active) return;
+    if (!open) return;
     const controller = new AbortController();
     // Each connection replays the transcript from its start, so it folds onto a fresh state.
     setStream({ key, state: emptyActivity() });
@@ -58,8 +167,11 @@ export function useSubagentStream(
       }
     })();
     return () => controller.abort();
-  }, [client, taskId, key, active]);
-  return stream.key === key ? stream.state : emptyActivity();
+  }, [client, taskId, key, open]);
+  return {
+    activity: stream.key === key ? stream.state : emptyActivity(),
+    paused: slot === false,
+  };
 }
 
 interface TailState {
@@ -88,10 +200,12 @@ export interface OutputTail {
   lines: string;
   start: number;
   error?: string;
+  /** Wanted but closed while newer activity streams hold the connections. */
+  paused: boolean;
   /** Prepends the window before `start`; never rejects, a failure becomes `error`. */
   showEarlier(): Promise<void>;
 }
-/** A background command's output, newest at the bottom, tailed while `active`. */
+/** A background command's output, newest at the bottom, tailed while `active` and holding a slot. */
 export function useOutputTail(
   client: Pick<SessionClient, 'outputTail' | 'outputWindow' | 'sessionId'>,
   taskId: string,
@@ -105,8 +219,10 @@ export function useOutputTail(
   const current = tail.key === key ? tail : empty();
   const startNow = useRef(current.start);
   startNow.current = current.start;
+  const slot = useStreamSlot(active);
+  const open = slot === true;
   useEffect(() => {
-    if (!active) return;
+    if (!open) return;
     const controller = new AbortController();
     setTail({ key, lines: '', start: 0, end: 0 });
     const update = (change: (state: TailState) => TailState) =>
@@ -129,7 +245,7 @@ export function useOutputTail(
       }
     })();
     return () => controller.abort();
-  }, [client, taskId, key, active]);
+  }, [client, taskId, key, open]);
   const showEarlier = useCallback(async () => {
     const requestedKey = key;
     const before = startNow.current;
@@ -154,6 +270,7 @@ export function useOutputTail(
     lines: current.lines,
     start: current.start,
     ...(current.error === undefined ? {} : { error: current.error }),
+    paused: slot === false,
     showEarlier,
   };
 }
