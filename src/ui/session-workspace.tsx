@@ -347,14 +347,18 @@ export function SessionWorkspace({
   // The approval poll keeps its first callback, so it reads the current view through a ref.
   const liveViewNow = useRef(liveView);
   liveViewNow.current = liveView;
-  /** The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with why. */
-  const showTerminalFor = (delivery: Delivery | undefined) => {
-    if (!delivery?.openTerminal || !launchId) return;
+  /**
+   * The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with why.
+   * Returns whether the terminal was shown.
+   */
+  const showTerminalFor = (delivery: Delivery | undefined): boolean => {
+    if (!delivery?.openTerminal || !launchId) return false;
     if (!showsTerminal(liveViewNow.current)) chooseLiveView('split');
     else setTerminalFocus(true);
     setTerminalNotice(
       `Not sent: ${delivery.reason ?? 'the terminal needs you'}. Your message is still in Gloss; press Send again when the terminal is ready.`,
     );
+    return true;
   };
   useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => {
     const { view, returnTo } = approvalSwitch(liveViewNow.current);
@@ -1049,7 +1053,7 @@ export function SessionWorkspace({
       if (!belongsHere(result)) return;
       const accepted = apply(result);
       // Newest first: a retry claims a later revision, and an older declined delivery keeps its in-memory flag.
-      showTerminalFor(
+      const terminalShown = showTerminalFor(
         result.snapshot.deliveries.findLast(
           (d) => d.draftId === review.draft.id && d.revision >= review.draft.revision,
         ),
@@ -1074,6 +1078,8 @@ export function SessionWorkspace({
           if (!workspace.envelope?.snapshot.currentDraft && data.composer === text)
             data.composer = '';
         });
+      // The modal review would cover the terminal just shown; the review stays saved for Resume review.
+      else if (terminalShown) setReviewOpen(false);
       else if (accepted) setReviewOpen(true);
     } catch (e) {
       setReviewError(errorMessage(e, 'Delivery failed'));

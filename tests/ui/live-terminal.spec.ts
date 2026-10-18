@@ -624,10 +624,13 @@ test('a review Send shows the terminal only for its own newest delivery, not an 
   await review.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
   await expect(notice(page)).toContainText('Not sent: A dialog is open in the terminal');
-  await expect(review.getByRole('status')).toContainText('Not sent');
-  await review.getByRole('button', { name: 'Close review' }).click();
+  // The modal review would cover the terminal, so it closes; its text waits behind Resume review.
+  await expect(review).toBeHidden();
+  await expect(terminal(page)).toBeVisible();
   await view(page, 'Translated').click();
   await page.getByRole('button', { name: 'Resume review', exact: true }).click();
+  await expect(review).toContainText('הוראה מוכנה');
+  await expect(review.getByRole('status')).toContainText('Not sent');
   await review.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
   await expect.poll(() => reviewSends).toBe(2);
   await expect(page.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
