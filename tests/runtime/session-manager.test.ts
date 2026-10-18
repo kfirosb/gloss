@@ -5,6 +5,7 @@ import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
 import type { SessionRecord } from '../../src/core/session-contracts.js';
+import { CHECKING_TERMINAL_REASON, NOT_TYPED_AT_RESTART_REASON } from '../../src/core/contracts.js';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -398,6 +399,84 @@ describe('session manager lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1);
     expect(store.listSessions()).toHaveLength(1);
     store.close();
+  });
+  it('recovers a terminal send a restart interrupted before an early action opens its workflow', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'language-assistant-'));
+    cleanup.push(() => rm(directory, { recursive: true, force: true }));
+    const path = join(directory, 'state.db');
+    const terminalAgent = (onSend?: FakeAgent['onSend']) => {
+      const agent = new FakeAgent('claude');
+      agent.route = { transport: 'tmux' };
+      agent.capabilities.tmuxSendWhileBusy = true;
+      if (onSend) agent.onSend = onSend;
+      return agent;
+    };
+    const workflowFor = (store: SqliteStore, agent: FakeAgent) => async (record: SessionRecord) => {
+      const language = new FakeLanguageSession();
+      language.translationReply = 'Hello';
+      const workflow = createWorkflow({
+        conversationId: record.id,
+        language: 'he',
+        languageModel: 'test',
+        projectContext: () => '',
+        languageSession: language,
+        agents: [agent],
+        store,
+      });
+      await workflow.connect(record.target);
+      return workflow;
+    };
+    const before = new SqliteStore(path);
+    before.registerSession({
+      id: 'A',
+      target: { agent: 'claude', sessionRef: 'A', projectId: process.cwd() },
+      canonicalRoot: process.cwd(),
+      projectName: 'A',
+      enabled: true,
+    });
+    const interrupted = terminalAgent(() => new Promise<void>(() => {}));
+    const first = createSessionManager({
+      store: before,
+      agents: [interrupted],
+      createWorkflowForSession: workflowFor(before, interrupted),
+    });
+    void first
+      .action('A', { type: 'send-composer', requestId: 'r1', text: 'שלום' })
+      .catch(() => undefined);
+    await expect.poll(() => interrupted.sent.length).toBe(1);
+    expect(before.load('A')?.deliveries[0]).toMatchObject({
+      state: 'sending',
+      reason: CHECKING_TERMINAL_REASON,
+    });
+    // Gloss stops here: the old process never finishes, so its store is simply abandoned.
+    const store = new SqliteStore(path);
+    const agent = terminalAgent();
+    const manager = createSessionManager({
+      store,
+      agents: [agent],
+      createWorkflowForSession: workflowFor(store, agent),
+    });
+    cleanup.push(async () => {
+      await manager.close();
+      await first.close();
+      store.close();
+      before.close();
+    });
+    const notSent = { state: 'failed', reason: NOT_TYPED_AT_RESTART_REASON };
+    // The composer's status check can reach the server before restore runs.
+    await manager.action('A', { type: 'check-composer', requestId: 'r1' });
+    expect(manager.snapshot('A').snapshot.deliveries[0]).toMatchObject(notSent);
+    await manager.restore();
+    expect(manager.snapshot('A').snapshot.deliveries[0]).toMatchObject(notSent);
+    expect(store.load('A')?.deliveries[0]).toMatchObject(notSent);
+    await manager.action('A', { type: 'release-composer', requestId: 'r1' });
+    expect(manager.snapshot('A').snapshot.composerDraft).toBeUndefined();
+    await manager.action('A', { type: 'send-composer', requestId: 'r2', text: 'שלום' });
+    expect(agent.sent).toHaveLength(1);
+    expect(manager.snapshot('A').snapshot.deliveries.at(-1)).toMatchObject({
+      state: 'sent',
+      transport: 'tmux',
+    });
   });
 });
 
