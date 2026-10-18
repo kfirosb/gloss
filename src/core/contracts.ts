@@ -13,8 +13,7 @@ export type CodingState =
   /** Claude's session record names an open dialog (status "waiting" or any waitingFor). */
   | 'dialog-open'
   | 'disconnected';
-/** `held`: claimed but not handed to the agent yet, e.g. a terminal send waiting for the screen to clear. Never typed. */
-export type DeliveryState = 'sending' | 'held' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
+export type DeliveryState = 'sending' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
 /** How a Claude message reaches the session: typed into Gloss's tmux pane, the gloss channel, or Claude's peer inbox. */
 export type DeliveryTransport = 'tmux' | 'channel' | 'peer';
 const DELIVERY_TRANSPORTS: readonly string[] = ['tmux', 'channel', 'peer'];
@@ -91,9 +90,13 @@ export function isDeliverySubmitted(delivery: Pick<Delivery, 'state' | 'transpor
 }
 /** The outcome is not known yet: a new composer send waits and the draft is kept. */
 export function isDeliveryUnresolved(delivery: Pick<Delivery, 'state'>): boolean {
-  return ['sending', 'held', 'queued', 'unconfirmed'].includes(delivery.state);
+  return ['sending', 'queued', 'unconfirmed'].includes(delivery.state);
 }
-/** Native evidence may still settle it. A held delivery was never handed over, so there is none to find. */
+/** A failed terminal send typed nothing: after typing starts a failure becomes `unconfirmed`. The UI says "Not sent". */
+export function isFailedUntyped(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
+  return delivery.state === 'failed' && delivery.transport === 'tmux';
+}
+/** Native evidence may still settle it. */
 export function isAwaitingEvidence(delivery: Pick<Delivery, 'state'>): boolean {
   return ['sending', 'queued', 'unconfirmed'].includes(delivery.state);
 }

@@ -65,8 +65,8 @@ export function RouteLine({
       {route.transport === 'tmux' && (
         <p>
           Gloss types your message into this session’s terminal, as if you typed it there. If a
-          dialog is open or there is unsent text in the terminal, the message waits until the
-          terminal is clear, then goes out once.
+          dialog is open, Gloss shows you the terminal instead and sends nothing. Text you left
+          unsent there is set aside with Ctrl+S, and Claude puts it back after the message goes in.
         </p>
       )}
       {route.transport === 'channel' && (

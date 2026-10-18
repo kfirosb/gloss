@@ -105,6 +105,8 @@ const storedView = (page: Page) =>
     return saved.liveViews?.['L-panel']?.view;
   });
 const feed = (page: Page) => page.getByRole('region', { name: 'Live Hebrew conversation' });
+/** The notice next to the docked panel's view switch (the expanded panel renders its own copy). */
+const notice = (page: Page) => page.locator('.pane-live > .pane-toolbar .live-attention-notice');
 const expand = (page: Page) =>
   page.getByRole('button', { name: 'Expand Live Conversation' }).click();
 
@@ -490,4 +492,145 @@ test('changing the conversation side during an approval keeps the restore', asyn
       name: 'Original',
     }),
   ).toHaveAttribute('aria-checked', 'true');
+});
+test('a terminal Send the server declines shows the terminal in Split with the reason and keeps the text', async ({
+  page,
+}) => {
+  await withLaunch(page);
+  const target = { agent: 'claude', sessionRef: 's1', projectId: '/project' };
+  await page.route('**/api/sessions/*/claude-route', (r) =>
+    r.fulfill({ json: { transport: 'tmux' } }),
+  );
+  await page.route('**/api/sessions/*/claude-channel', (r) =>
+    r.fulfill({ json: { state: 'setup-required' } }),
+  );
+  let sequence = 0;
+  await page.route('**/api/sessions/*/actions', (r) => {
+    const action: unknown = r.request().postDataJSON();
+    const requestId =
+      action && typeof action === 'object' && 'requestId' in action
+        ? String(action.requestId)
+        : 'x';
+    return r.fulfill({
+      json: {
+        sessionId: 'L-panel',
+        sequence: ++sequence,
+        snapshot: {
+          ...snapshot(),
+          deliveries: [
+            {
+              id: 'd-' + requestId,
+              draftId: 'composer-' + requestId,
+              revision: 1,
+              target,
+              englishText: 'Hello',
+              state: 'failed',
+              reason: 'A dialog is open in the terminal',
+              transport: 'tmux',
+              openTerminal: true,
+            },
+          ],
+        },
+      },
+    });
+  });
+  await page.goto('/#capability=test');
+  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true');
+  const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  await input.fill('שלום');
+  const send = page.getByRole('button', { name: 'Send to Terminal in English', exact: true });
+  await send.click();
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await expect(terminal(page)).toBeVisible();
+  await expect(notice(page)).toContainText(
+    'Not sent: A dialog is open in the terminal. Your message is still in Gloss',
+  );
+  await expect(page.locator('.status-strip')).toContainText(
+    'Not sent: A dialog is open in the terminal',
+  );
+  await expect(input).toHaveValue('שלום');
+  await expect(send).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Don’t send' })).toHaveCount(0);
+  // Picking a view is the user's answer to the notice: it goes away.
+  await view(page, 'Translated').click();
+  await expect(notice(page)).toHaveCount(0);
+});
+test('a review Send shows the terminal only for its own newest delivery, not an older declined one', async ({
+  page,
+}) => {
+  await withLaunch(page);
+  const target = { agent: 'claude', sessionRef: 's1', projectId: '/project' };
+  const draft = {
+    id: 'review-draft',
+    revision: 1,
+    target,
+    sourceRevision: 1,
+    language: 'he',
+    localizedText: 'הוראה מוכנה',
+    englishText: 'Prepared instruction',
+    selectedDiscussion: [0],
+  };
+  const declined = {
+    id: 'd-1',
+    draftId: draft.id,
+    revision: 1,
+    target,
+    englishText: 'Prepared instruction',
+    state: 'failed',
+    reason: 'A dialog is open in the terminal',
+    transport: 'tmux',
+    // Still in the server's memory from the declined Send; a later Send's reply carries it too.
+    openTerminal: true,
+  };
+  const delivered = {
+    id: 'd-2',
+    draftId: draft.id,
+    revision: 2,
+    target,
+    englishText: 'Prepared instruction',
+    state: 'sent',
+    transport: 'tmux',
+  };
+  let deliveries: Record<string, unknown>[] = [];
+  const current = () => ({
+    ...snapshot(),
+    discussion: [{ role: 'user', text: 'Selected request' }],
+    currentDraft: draft,
+    deliveries,
+  });
+  await page.route('**/api/**/snapshot', (r) =>
+    r.fulfill({ json: { sessionId: 'L-panel', sequence: 0, snapshot: current() } }),
+  );
+  await page.route('**/api/sessions/*/claude-route', (r) =>
+    r.fulfill({ json: { transport: 'tmux' } }),
+  );
+  await page.route('**/api/sessions/*/claude-channel', (r) =>
+    r.fulfill({ json: { state: 'setup-required' } }),
+  );
+  let sequence = 0;
+  let reviewSends = 0;
+  await page.route('**/api/sessions/*/actions', (r) => {
+    const action: unknown = r.request().postDataJSON();
+    if (action && typeof action === 'object' && 'type' in action && action.type === 'send-review')
+      deliveries = ++reviewSends === 1 ? [declined] : [declined, delivered];
+    return r.fulfill({
+      json: { sessionId: 'L-panel', sequence: ++sequence, snapshot: current() },
+    });
+  });
+  await page.goto('/#capability=test');
+  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true');
+  const review = page.getByRole('dialog', { name: 'Review instruction', exact: true });
+  await page.getByRole('button', { name: 'Resume review', exact: true }).click();
+  await review.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
+  await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
+  await expect(notice(page)).toContainText('Not sent: A dialog is open in the terminal');
+  await expect(review.getByRole('status')).toContainText('Not sent');
+  await review.getByRole('button', { name: 'Close review' }).click();
+  await view(page, 'Translated').click();
+  await page.getByRole('button', { name: 'Resume review', exact: true }).click();
+  await review.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
+  await expect.poll(() => reviewSends).toBe(2);
+  await expect(page.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
+  await expect(view(page, 'Translated')).toHaveAttribute('aria-checked', 'true');
+  await expect(notice(page)).toHaveCount(0);
 });

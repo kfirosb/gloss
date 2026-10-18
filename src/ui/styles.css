@@ -3618,7 +3618,6 @@ pre {
   background: light-dark(#e6efff, var(--dk-bg-e6efff));
   color: light-dark(#2d5fb8, var(--dk-fg-2d5fb8));
 }
-.status-strip[data-state='held'],
 .status-strip[data-state='queued'],
 .status-strip[data-state='sending'],
 .status-strip[data-state='unconfirmed'] {

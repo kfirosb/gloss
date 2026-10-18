@@ -16,7 +16,7 @@ import React, {
   type ReactNode,
 } from 'react';
 
-import type { AgentMessage } from '../core/contracts.js';
+import type { AgentMessage, Delivery } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
@@ -97,6 +97,7 @@ import {
   isChannelAwaitingReply,
   isDeliverySubmitted,
   isDeliveryUnresolved,
+  isFailedUntyped,
   sendGate,
 } from '../core/contracts.js';
 import { RouteLine, useDeliveryRoute } from './delivery-route.js';
@@ -212,7 +213,7 @@ function useMarkSeen(entry: CatalogEntry | undefined) {
   }, [sessionId, attention, sequence]);
 }
 type StripState =
-  'waiting' | 'held' | 'queued' | 'sending' | 'unconfirmed' | 'failed' | 'delivered' | 'received';
+  'waiting' | 'queued' | 'sending' | 'unconfirmed' | 'failed' | 'delivered' | 'received';
 /** Flashes "Response received" when the number of answered channel deliveries grows, i.e. only when a reply lands. */
 function useReceivedFlash(replied: number): boolean {
   const previous = useRef(replied);
@@ -331,7 +332,10 @@ export function SessionWorkspace({
       },
     }));
   const [terminalFocus, setTerminalFocus] = useState(true);
+  /** Why the terminal was shown for a declined Send; cleared when the user picks a view or sends again. */
+  const [terminalNotice, setTerminalNotice] = useState<string>();
   const chooseLiveView = (view: LiveView) => {
+    setTerminalNotice(undefined);
     setApprovalView(null);
     setTerminalFocus(true);
     setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
@@ -343,6 +347,15 @@ export function SessionWorkspace({
   // The approval poll keeps its first callback, so it reads the current view through a ref.
   const liveViewNow = useRef(liveView);
   liveViewNow.current = liveView;
+  /** The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with why. */
+  const showTerminalFor = (delivery: Delivery | undefined) => {
+    if (!delivery?.openTerminal || !launchId) return;
+    if (!showsTerminal(liveViewNow.current)) chooseLiveView('split');
+    else setTerminalFocus(true);
+    setTerminalNotice(
+      `Not sent: ${delivery.reason ?? 'the terminal needs you'}. Your message is still in Gloss; press Send again when the terminal is ready.`,
+    );
+  };
   useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => {
     const { view, returnTo } = approvalSwitch(liveViewNow.current);
     if (!returnTo) return;
@@ -648,8 +661,6 @@ export function SessionWorkspace({
     composerAttempt &&
     snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
   const composerSendBlocked =
-    // A held message is still the composer's: Don't send releases it; Send would only re-post it.
-    composerDelivery?.state === 'held' ||
     unsupportedFiles ||
     (!text.trim() && !images.length) ||
     uploading ||
@@ -665,6 +676,7 @@ export function SessionWorkspace({
   };
   const sendComposerNow = async () => {
     if (composerSendBlocked) return;
+    setTerminalNotice(undefined);
     const prior =
       composerAttempt &&
       snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
@@ -686,6 +698,9 @@ export function SessionWorkspace({
       // The server picks the route; the client never names a transport.
       const result = await call({ type: 'send-composer', ...attempt });
       apply(result);
+      showTerminalFor(
+        result.snapshot.deliveries.find((d) => d.draftId === `composer-${attempt.requestId}`),
+      );
     } catch (e) {
       setError(errorMessage(e, 'Delivery uncertain; text preserved'));
     } finally {
@@ -699,7 +714,7 @@ export function SessionWorkspace({
   const newerSendBlocks =
     !!composerDelivery &&
     !isChannelAwaitingReply(composerDelivery) &&
-    ['failed', 'held', 'unconfirmed', 'queued', 'sending'].includes(composerDelivery.state);
+    ['failed', 'unconfirmed', 'queued', 'sending'].includes(composerDelivery.state);
   const stripState: StripState | undefined =
     awaitingClaudeReplies > 0 && !newerSendBlocks
       ? 'waiting'
@@ -708,19 +723,17 @@ export function SessionWorkspace({
           ? received
             ? 'received'
             : undefined
-          : composerDelivery.state === 'held'
-            ? 'held'
-            : composerDelivery.state === 'unconfirmed'
-              ? 'unconfirmed'
-              : composerDelivery.state === 'queued'
-                ? 'queued'
-                : composerDelivery.state === 'sending'
-                  ? 'sending'
-                  : composerDelivery.state === 'failed'
-                    ? 'failed'
-                    : received
-                      ? 'received'
-                      : 'delivered'
+          : composerDelivery.state === 'unconfirmed'
+            ? 'unconfirmed'
+            : composerDelivery.state === 'queued'
+              ? 'queued'
+              : composerDelivery.state === 'sending'
+                ? 'sending'
+                : composerDelivery.state === 'failed'
+                  ? 'failed'
+                  : received
+                    ? 'received'
+                    : 'delivered'
         : received
           ? 'received'
           : undefined;
@@ -729,27 +742,24 @@ export function SessionWorkspace({
   const stripText =
     stripState === 'waiting'
       ? waitingText
-      : stripState === 'held'
-        ? 'Waiting for the terminal' + stripReason
-        : stripState === 'unconfirmed'
-          ? (isClaude ? 'Awaiting Claude confirmation' : 'Delivery uncertain') + stripReason
-          : stripState === 'queued'
-            ? 'Queued' + stripReason
-            : stripState === 'sending'
-              ? 'Sending' + stripReason
-              : stripState === 'failed'
-                ? 'Failed' + stripReason
-                : stripState === 'received'
-                  ? 'Response received'
-                  : 'Delivered' + stripReason;
+      : stripState === 'unconfirmed'
+        ? (isClaude ? 'Awaiting Claude confirmation' : 'Delivery uncertain') + stripReason
+        : stripState === 'queued'
+          ? 'Queued' + stripReason
+          : stripState === 'sending'
+            ? 'Sending' + stripReason
+            : stripState === 'failed'
+              ? (composerDelivery && isFailedUntyped(composerDelivery) ? 'Not sent' : 'Failed') +
+                stripReason
+              : stripState === 'received'
+                ? 'Response received'
+                : 'Delivered' + stripReason;
   const stripFading = useFading(stripState);
-  const releaseComposer = async (held = false) => {
+  const releaseComposer = async () => {
     if (
       !composerAttempt ||
       !window.confirm(
-        held
-          ? 'Gloss hasn’t typed this message yet. Don’t send it? Your text stays in the composer.'
-          : 'The previous message may still arrive. Release the composer without resending? Sending the same text again could duplicate it.',
+        'The previous message may still arrive. Release the composer without resending? Sending the same text again could duplicate it.',
       )
     )
       return;
@@ -1025,6 +1035,7 @@ export function SessionWorkspace({
   };
   const sendReview = async () => {
     if (!review || preparing || !routeReady) return;
+    setTerminalNotice(undefined);
     setPreparing(true);
     setReviewError('');
     pendingInputClear.current.set(`${review.draft.id}:${review.draft.revision}`, text);
@@ -1037,6 +1048,12 @@ export function SessionWorkspace({
       });
       if (!belongsHere(result)) return;
       const accepted = apply(result);
+      // Newest first: a retry claims a later revision, and an older declined delivery keeps its in-memory flag.
+      showTerminalFor(
+        result.snapshot.deliveries.findLast(
+          (d) => d.draftId === review.draft.id && d.revision >= review.draft.revision,
+        ),
+      );
       const sent = result.snapshot.deliveries.some(
         (d) =>
           d.draftId === review.draft.id &&
@@ -1107,6 +1124,11 @@ export function SessionWorkspace({
       />
       {launchId && entry?.attentionNotice && (
         <small className="live-attention-notice">{entry.attentionNotice}</small>
+      )}
+      {launchId && terminalNotice && (
+        <small className="live-attention-notice" role="status">
+          {terminalNotice}
+        </small>
       )}
     </>
   );
@@ -1324,11 +1346,6 @@ export function SessionWorkspace({
                 <small>The previous message may still arrive. Releasing does not resend it.</small>
               </>
             )}
-          {composerDelivery?.state === 'held' && (
-            <button type="button" onClick={() => void releaseComposer(true)}>
-              Don’t send
-            </button>
-          )}
         </ComposerStatus>
       )}
       <form
@@ -1640,7 +1657,6 @@ export function SessionWorkspace({
               <ResetInstructionDialog
                 open={resetOpen}
                 pending={Boolean(delivery && isDeliveryUnresolved(delivery))}
-                held={delivery?.state === 'held'}
                 busy={preparing}
                 error={resetError}
                 close={() => setResetOpen(false)}

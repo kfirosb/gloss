@@ -1,6 +1,11 @@
 import { AttachmentCards } from './attachment-cards.js';
 import { useEffect, useRef, useState } from 'react';
-import { isDeliveryUnresolved, type Draft, type Delivery } from '../core/contracts.js';
+import {
+  isDeliveryUnresolved,
+  isFailedUntyped,
+  type Draft,
+  type Delivery,
+} from '../core/contracts.js';
 import { RichText } from './rich-text.js';
 import { providerLabel } from './provider-label.js';
 export interface InstructionReview {
@@ -48,11 +53,10 @@ export function InstructionReviewDialog({
     : delivery
       ? {
           sending: 'Sending',
-          held: 'Waiting for the terminal',
           queued: 'Queued',
           unconfirmed:
             review.draft.target.agent === 'claude' ? 'Awaiting Claude confirmation' : 'Unconfirmed',
-          failed: 'Failed',
+          failed: isFailedUntyped(delivery) ? 'Not sent' : 'Failed',
           sent: 'Sent',
         }[delivery.state]
       : blocked

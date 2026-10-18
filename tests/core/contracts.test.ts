@@ -4,6 +4,7 @@ import {
   isAwaitingEvidence,
   isDeliveryTransport,
   isDeliveryUnresolved,
+  isFailedUntyped,
   sendGate,
 } from '../../src/core/contracts.js';
 
@@ -44,9 +45,13 @@ it('gates sends by coding state and route: a terminal send is checked at Send, s
   expect(sendGate('working', { sendWhileBusy: true })).toBe('send');
   expect(canSendWhileWorking({ sendWhileBusy: false, tmuxSendWhileBusy: true }, 'tmux')).toBe(true);
 });
-it('treats a held delivery as unresolved but with no native evidence to look for', () => {
-  expect(isDeliveryUnresolved({ state: 'held' })).toBe(true);
-  expect(isAwaitingEvidence({ state: 'held' })).toBe(false);
+it('reads only a failed terminal send as untyped', () => {
+  expect(isFailedUntyped({ state: 'failed', transport: 'tmux' })).toBe(true);
+  expect(isFailedUntyped({ state: 'failed', transport: 'channel' })).toBe(false);
+  expect(isFailedUntyped({ state: 'failed' })).toBe(false);
+  expect(isFailedUntyped({ state: 'unconfirmed', transport: 'tmux' })).toBe(false);
+});
+it('treats sending, queued and unconfirmed as unresolved and awaiting evidence', () => {
   for (const state of ['sending', 'queued', 'unconfirmed'] as const) {
     expect(isDeliveryUnresolved({ state })).toBe(true);
     expect(isAwaitingEvidence({ state })).toBe(true);
