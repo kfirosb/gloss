@@ -1,5 +1,6 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
 import { parseClaudeActivity } from './activity.js';
+import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -295,7 +296,12 @@ export function peerTag(requestId: string): string {
 const PEER_MARKER = new RegExp(
   `^\\[(?:gloss:([0-9a-f]{${PEER_TAG_HEX_CHARS}})|Language Assistant delivery: (${REQUEST_ID_SOURCE}))\\]\\n`,
 );
-export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {
+export function parseClaudeRecord(
+  record: JsonRecord,
+  offset: number,
+  sessionRef: string,
+  depth = 0,
+): Parsed {
   if (record.sessionId !== undefined && record.sessionId !== sessionRef)
     throw new Error('Transcript identity mismatch');
   // A channel message that arrives during a running turn is queued into it as an attachment.
@@ -312,7 +318,7 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
   const origin = recordOf(record.origin);
   if (record.sessionId !== sessionRef || typeof record.uuid !== 'string' || !message)
     throw new Error('Malformed Claude message');
-  const activity = parseClaudeActivity(record, offset);
+  const activity = parseClaudeActivity(record, offset, depth);
   const carried = activity.length ? { activity } : {};
   if (record.type === 'assistant' && message.stop_reason !== 'end_turn') return carried;
   const peer = record.type === 'user' && origin?.kind === 'peer';
@@ -762,6 +768,19 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       });
+      connection.activity = {
+        async *subagent(taskId, signal) {
+          const file = await findSubagentFile(subagentsDir(path, target.sessionRef), taskId);
+          if (!file) {
+            yield { kind: 'gap', reason: 'Subagent transcript not found yet' };
+            return;
+          }
+          yield* streamSubagent(file.path, target.sessionRef, file.meta.spawnDepth, signal);
+        },
+        async outputPath() {
+          throw new Error('Output unavailable');
+        },
+      };
       connection.reconcileDelivery = async (delivery) => {
         if (
           delivery.target.agent !== target.agent ||

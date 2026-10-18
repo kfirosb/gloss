@@ -383,6 +383,36 @@ async function sessionRoute(
       return true;
     }
   }
+  const subagent = /^activity\/subagents\/([^/]+)\/events$/.exec(route);
+  if (subagent && req.method === 'GET') {
+    const controller = new AbortController();
+    const cancel = () => controller.abort(new Error('Client closed subagent stream'));
+    res.once('close', cancel);
+    try {
+      // Validation errors surface here, before any SSE headers are written.
+      const stream = await app.sessions.subagentActivity(
+        id,
+        decodeURIComponent(subagent[1]!),
+        controller.signal,
+      );
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      for await (const event of stream) {
+        if (controller.signal.aborted) break;
+        res.write('data: ' + JSON.stringify(event) + '\n\n');
+      }
+      res.end();
+    } catch (error) {
+      if (!res.headersSent) throw error;
+      res.end();
+    } finally {
+      res.off('close', cancel);
+    }
+    return true;
+  }
   return attachmentRoute(app, req, res, route, id);
 }
 async function launchRoute(

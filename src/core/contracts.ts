@@ -135,6 +135,11 @@ export interface CodingConnection {
     channelGeneration?: string;
   }>;
   detach(): Promise<void>;
+  /** Claude-only: on-demand activity detail that is not part of the main event stream. */
+  activity?: {
+    subagent(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
+    outputPath(taskId: string): Promise<string>;
+  };
 }
 export interface SendContext {
   panelSessionId: string;

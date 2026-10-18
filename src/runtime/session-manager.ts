@@ -18,6 +18,7 @@ import type { Action } from './protocol.js';
 import type { FileRegistry } from '../core/file-references.js';
 import { readProjectMetadata } from './project-metadata.js';
 import { validateSummarySource } from '../core/response-summaries.js';
+import type { ActivityEvent } from '../core/activity-contracts.js';
 import type { SummarySource, ResponseSummary } from '../core/summary-contracts.js';
 
 export interface SessionManager {
@@ -29,6 +30,11 @@ export interface SessionManager {
     signal: AbortSignal,
   ): Promise<{ path: string; mode: 'summary' | 'translation'; text: string }>;
   summarizeResponse(sessionId: string, source: SummarySource): Promise<ResponseSummary>;
+  subagentActivity(
+    sessionId: string,
+    taskId: string,
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<ActivityEvent>>;
   updateSessionTitle(id: string, title: string): void;
   list(): SessionRecord[];
   /** Deletes a closed session's saved history. Throws code 'session-open' while a workflow is connected or opening; a cached workflow that is disconnected, or whose session the catalog reports closed (catalogClosed), is closed and dropped. */
@@ -96,6 +102,9 @@ export function createSessionManager(options: {
       if (current.version !== source.version || current.text !== source.text)
         throw new Error('File changed; reopen the preview');
       return { path, mode, text };
+    },
+    async subagentActivity(id, taskId, signal) {
+      return (await manager.ensure(id)).subagentActivity(taskId, signal);
     },
     async summarizeResponse(id, source) {
       validateSummarySource(source);

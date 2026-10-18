@@ -44,6 +44,7 @@ import {
   type LanguageSettings,
 } from './language-settings.js';
 import { translateMessageResult } from './translations.js';
+import type { ActivityEvent } from './activity-contracts.js';
 import { applyActivityEvent, emptyActivity } from './activity.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
 
@@ -87,6 +88,7 @@ export interface Workflow {
   refreshLanguageSettings(): void;
   translateMessage(sourceId: string): Promise<void>;
   translateActivityReport(taskId: string): Promise<void>;
+  subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
   prepareDirect(indices: number[], expected?: { id: string; revision: number }): Promise<Draft>;
   sendReview(
     id: string,
@@ -1478,6 +1480,15 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Message unavailable for translation');
       if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
       translateIfNeeded(message);
+    },
+
+    subagentActivity(taskId, signal) {
+      requireOpen();
+      const activity = connection?.activity;
+      if (!activity) throw new Error('Activity unavailable');
+      if (!state.activity?.tasks.some((task) => task.id === taskId))
+        throw new Error('Unknown task');
+      return activity.subagent(taskId, signal);
     },
 
     async translateActivityReport(taskId) {
