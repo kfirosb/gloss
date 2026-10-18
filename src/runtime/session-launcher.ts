@@ -9,7 +9,11 @@ import type { SessionManager } from './session-manager.js';
 import { sessionNameFor, type Tmux } from './tmux.js';
 import type { LaunchSettings } from '../core/launch-settings.js';
 import { uuid } from '../agents/shared.js';
-import { glossOwnsSession, MOVE_IN_GLOSS_REASON } from '../agents/claude/move.js';
+import {
+  glossOwnsSession,
+  MOVE_IN_GLOSS_REASON,
+  type GlossLaunches,
+} from '../agents/claude/move.js';
 
 import {
   CLAUDE_SETUP_PROMPT,
@@ -149,6 +153,21 @@ export function owningLaunches(
               s.target.agent === agent &&
               s.target.sessionRef === sessionRef,
           ))),
+  );
+}
+
+/** The Claude launches owning a session, with whether each ended one's tmux pane still runs (live ones aren't asked). */
+export function claudeOwners(
+  sessionRef: string,
+  launches: readonly LaunchRecord[],
+  sessions: readonly { id: string; target: Target }[],
+  paneAlive: (launchId: string) => Promise<boolean>,
+): Promise<GlossLaunches['owners']> {
+  return Promise.all(
+    owningLaunches('claude', sessionRef, launches, sessions).map(async (launch) => ({
+      state: launch.state,
+      paneAlive: launch.state === 'ended' && (await paneAlive(launch.id)),
+    })),
   );
 }
 
@@ -521,13 +540,11 @@ export function createSessionLauncher(options: {
   }
   /** Spec 5 / C1: a Claude launch owns the session (directly or through its panel) unless it ended and its pane is gone. */
   async function requireNotInGloss(tmux: Tmux, sessionRef: string) {
-    const owners = await Promise.all(
-      owningLaunches('claude', sessionRef, options.store.listLaunches(), options.panels()).map(
-        async (launch) => ({
-          state: launch.state,
-          paneAlive: launch.state === 'ended' && (await tmux.hasSession(sessionNameFor(launch.id))),
-        }),
-      ),
+    const owners = await claudeOwners(
+      sessionRef,
+      options.store.listLaunches(),
+      options.panels(),
+      (launchId) => tmux.hasSession(sessionNameFor(launchId)),
     );
     if (glossOwnsSession({ owners })) throw new Error(MOVE_IN_GLOSS_REASON);
   }

@@ -24,6 +24,9 @@ export const MOVE_WAIT_ENDED_REASON =
   'The session closed or restarted before it finished, so Gloss didn’t move it.';
 export const MOVE_RESUME_EXITED_REASON = 'Claude closed as soon as Gloss reopened the session.';
 export const MOVE_RESUME_OTHER_REASON = 'Claude opened a different session instead of this one.';
+export const MOVE_ALREADY_MOVING_REASON = 'Gloss is already moving this session.';
+export const MOVE_ALREADY_WAITING_REASON =
+  'Gloss is already waiting to move this session when it finishes. Cancel that first.';
 
 /** A record whose process can be identified across pid reuse. */
 export type VerifiedRecord = ClaudeSessionRecord & { procStart: string };

@@ -38,6 +38,7 @@ import { isClaudeExecutable, readProcess } from './process-probe.js';
 import {
   isTerminalRecord,
   pidRunsSession,
+  projectSessionRecords,
   readSessionRecords,
   type ClaudeSessionRecord,
 } from './session-records.js';
@@ -428,18 +429,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   };
   async function exact(target: Target): Promise<ClaudeSessionRecord> {
     validateTarget(target, 'claude');
-    const project = await projectIdentity(target.projectId);
-    const matches = (await readSessionRecords(config)).filter(
-      (r) => r.sessionId === target.sessionRef,
-    );
-    const projectMatches: ClaudeSessionRecord[] = [];
-    for (const record of matches) {
-      try {
-        if ((await projectIdentity(record.cwd)) === project) projectMatches.push(record);
-      } catch {
-        /* missing project */
-      }
-    }
+    const projectMatches = await projectSessionRecords(config, target.sessionRef, target.projectId);
     if (!projectMatches.length) throw new Error('Session project identity mismatch');
     if (projectMatches.length === 1) return projectMatches[0]!;
     const ranked = await Promise.all(

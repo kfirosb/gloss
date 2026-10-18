@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { recordOf } from '../../core/json-record.js';
+import { projectIdentity } from '../shared.js';
 
 /** One Claude `sessions/<pid>.json` record, as far as Gloss reads it. */
 export interface ClaudeSessionRecord {
@@ -103,6 +104,27 @@ export async function readSessionRecords(config: string): Promise<ClaudeSessionR
     if (record) records.push(record);
   }
   return records;
+}
+/**
+ * This session's records whose folder is the project `projectId`, compared by real path; a record whose folder is gone
+ * matches nothing. Throws when `projectId` itself does not resolve.
+ */
+export async function projectSessionRecords(
+  config: string,
+  sessionRef: string,
+  projectId: string,
+): Promise<ClaudeSessionRecord[]> {
+  const project = await projectIdentity(projectId);
+  const matches: ClaudeSessionRecord[] = [];
+  for (const record of await readSessionRecords(config)) {
+    if (record.sessionId !== sessionRef) continue;
+    try {
+      if ((await projectIdentity(record.cwd)) === project) matches.push(record);
+    } catch {
+      /* missing project */
+    }
+  }
+  return matches;
 }
 /**
  * Whether the process `pid` runs session `sessionRef` now, by Claude's own record for it, `sessions/<pid>.json`.
