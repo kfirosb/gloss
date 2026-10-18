@@ -15,6 +15,7 @@ import {
   INPUT_UNREADABLE_REASON,
   nextStashStep,
   notReadyReason,
+  withStashNote,
   type StashStart,
 } from './tmux-stash.js';
 
@@ -66,6 +67,8 @@ export const PASTE_SETTLE_POLL_MS = 50;
 export const KEY_SETTLE_MIN_MS = 100;
 /** How long Gloss waits after a Ctrl+S for the input to settle in the expected state, in milliseconds. */
 export const KEYS_SETTLE_MS = 2_000;
+/** How often the input window is read meanwhile, in milliseconds. */
+export const KEYS_SETTLE_POLL_MS = 50;
 
 export const NO_INPUT_BOX_REASON = 'The terminal isn’t showing Claude’s input box';
 export const SCROLLED_REASON = 'The terminal is scrolled back; return it to the prompt';
@@ -197,7 +200,7 @@ async function settleAfterStash(
 ): Promise<{ step: 'paste' | 'press-again' | 'timeout'; last: InputWindow | undefined }> {
   await clock.sleep(KEY_SETTLE_MIN_MS);
   const deadline = clock.now() + KEYS_SETTLE_MS;
-  const maxPolls = Math.ceil(KEYS_SETTLE_MS / PASTE_SETTLE_POLL_MS);
+  const maxPolls = Math.ceil(KEYS_SETTLE_MS / KEYS_SETTLE_POLL_MS);
   let previous: string | undefined;
   for (let polls = 0; ; polls += 1) {
     const read = await readWindowOf(terminal);
@@ -208,25 +211,26 @@ async function settleAfterStash(
     previous = read?.key;
     if (clock.now() >= deadline || polls >= maxPolls)
       return { step: 'timeout', last: read?.window };
-    await clock.sleep(PASTE_SETTLE_POLL_MS);
+    await clock.sleep(KEYS_SETTLE_POLL_MS);
   }
 }
 /**
  * Spec 2.6: sets Claude's input aside with Ctrl+S (once, or twice when the first press brought an older stash back)
  * and checks the cursor sits right after `❯` on an empty box. The window is read before any press: unreadable, nothing
- * is pressed. Presses nothing else, and never more than twice.
+ * is pressed. Presses nothing else, and never more than twice. `last` is the last readable window, for the reason of a
+ * later refusal.
  */
 async function stashForSend(
   terminal: GlossTerminal,
   clock: TypingClock,
-): Promise<{ ready: true } | { ready: false; reason: string }> {
+): Promise<{ ready: true; last: InputWindow } | { ready: false; reason: string }> {
   const before = await readWindowOf(terminal);
   if (!before?.window.readable) return { ready: false, reason: INPUT_UNREADABLE_REASON };
   const start: StashStart = {
     stashed: before.window.stashed,
     emptyAtPrompt: before.window.emptyAtPrompt,
   };
-  let last: InputWindow | undefined = before.window;
+  let last: InputWindow = before.window;
   for (const presses of [1, 2] as const) {
     try {
       await terminal.pressStash();
@@ -234,8 +238,9 @@ async function stashForSend(
       return { ready: false, reason: notReadyReason(last) };
     }
     const settled = await settleAfterStash(terminal, clock, start, presses);
-    last = settled.last ?? last;
-    if (settled.step === 'paste') return { ready: true };
+    // An unparsable last poll must not hide the marker an earlier read showed.
+    if (settled.last?.readable) last = settled.last;
+    if (settled.step === 'paste') return { ready: true, last };
     if (settled.step === 'timeout') break;
   }
   return { ready: false, reason: notReadyReason(last) };
@@ -293,11 +298,12 @@ export async function typeIntoTerminal(input: {
   };
   const stash = await stashForSend(terminal, clock);
   if (!stash.ready) return refuse(stash.reason);
-  if (!(await runsSession())) return refuse(SESSION_SWITCHED_REASON);
+  // The user's draft may now be in Claude's stash: say so whenever the settled window shows the marker.
+  if (!(await runsSession())) return refuse(withStashNote(SESSION_SWITCHED_REASON, stash.last));
   try {
     input.onTyping({ nativeAfterRevision });
   } catch {
-    return refuse(PASTE_PREPARE_REASON);
+    return refuse(withStashNote(PASTE_PREPARE_REASON, stash.last));
   }
   try {
     await terminal.pasteBuffer(buffer);

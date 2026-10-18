@@ -10,6 +10,9 @@ import type { FileReference } from '../../src/core/file-references.js';
 import { createTmux } from '../../src/runtime/tmux.js';
 import {
   COMMAND_PREFIX_REASON,
+  KEY_SETTLE_MIN_MS,
+  KEYS_SETTLE_MS,
+  KEYS_SETTLE_POLL_MS,
   NO_INPUT_BOX_REASON,
   OTHER_MODE_REASON,
   PASTE_PREPARE_REASON,
@@ -20,8 +23,6 @@ import {
   TERMINAL_READ_REASON,
   TYPING_UNCERTAIN_REASON,
   UNKNOWN_VERSION_REASON,
-  KEY_SETTLE_MIN_MS,
-  KEYS_SETTLE_MS,
   UNSAFE_TEXT_REASON,
   assignTypedMessages,
   checkAtSend,
@@ -222,7 +223,7 @@ describe('typing into the terminal', () => {
     // The first two are the stash settle.
     expect(sleeps).toEqual([
       KEY_SETTLE_MIN_MS,
-      PASTE_SETTLE_POLL_MS,
+      KEYS_SETTLE_POLL_MS,
       PASTE_SETTLE_POLL_MS,
       PASTE_SETTLE_POLL_MS,
       PASTE_SETTLE_POLL_MS,
@@ -236,7 +237,7 @@ describe('typing into the terminal', () => {
       nativeAfterRevision: 1234,
     });
     expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(
-      KEY_SETTLE_MIN_MS + PASTE_SETTLE_POLL_MS + PASTE_SETTLE_MS,
+      KEY_SETTLE_MIN_MS + KEYS_SETTLE_POLL_MS + PASTE_SETTLE_MS,
     );
     expect(log.calls.filter((call) => call === 'enter')).toHaveLength(1);
     expect(log.calls.at(-1)).toBe('enter');
@@ -312,6 +313,21 @@ describe('typing into the terminal', () => {
       ...STASH_TURN,
       'delete:gloss-delivery-1',
     ]);
+  });
+  it('says the text is set aside when typing-started cannot be recorded after Ctrl+S stashed it', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', {
+      afterStash: ['stash-stashed'],
+    });
+    const result = await send(terminal, 'hello', () => {
+      throw new Error('disk full');
+    });
+    expect(result).toEqual({
+      state: 'failed',
+      reason: `${PASTE_PREPARE_REASON}. ${STASHED_TEXT_NOTE}`,
+      openTerminal: true,
+    });
+    expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
   });
   it('fails cleanly when the buffer cannot be loaded, and is uncertain when the paste breaks', async () => {
     let typed = false;
@@ -463,8 +479,33 @@ describe('typing into the terminal', () => {
   });
   it('pastes nothing when Ctrl+S cannot be pressed', async () => {
     const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', { fail: 'stash' });
-    expect(await send(terminal, 'hello')).toMatchObject({ state: 'failed', openTerminal: true });
+    expect(await send(terminal, 'hello')).toEqual({
+      state: 'failed',
+      reason: INPUT_NOT_READY_REASON,
+      openTerminal: true,
+    });
     expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+  });
+  it('keeps the note that the text is set aside when the reads after Ctrl+S cannot be parsed', async () => {
+    const fixture = fixtureTerminal('2.1.302', 'stash-replaced');
+    let pressed = false;
+    // Synthetic: after the press the rows read back as text that is not Claude's input window.
+    const garbled: GlossTerminal = {
+      ...fixture.terminal,
+      captureRows: async (start, end) =>
+        pressed ? 'not an input window' : fixture.terminal.captureRows(start, end),
+      pressStash: async () => {
+        await fixture.terminal.pressStash();
+        pressed = true;
+      },
+    };
+    expect(await send(garbled, 'hello')).toEqual({
+      state: 'failed',
+      reason: `${INPUT_NOT_READY_REASON}. ${STASHED_TEXT_NOTE}`,
+      openTerminal: true,
+    });
+    expect(fixture.log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
   });
   it('types nothing when the pane switched to another session while Ctrl+S settled', async () => {
     const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', {
@@ -483,7 +524,7 @@ describe('typing into the terminal', () => {
     );
     expect(result).toEqual({
       state: 'failed',
-      reason: SESSION_SWITCHED_REASON,
+      reason: `${SESSION_SWITCHED_REASON}. ${STASHED_TEXT_NOTE}`,
       openTerminal: true,
     });
     expect(typed).toBe(false);
