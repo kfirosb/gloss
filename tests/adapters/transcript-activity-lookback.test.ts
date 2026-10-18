@@ -54,7 +54,9 @@ it('replays unresolved task starts from before the live tail window, in order', 
     },
   });
   await writeFile(path, early + filler + late);
-  const transcript = new Transcript(path, (r, o) => parseClaudeRecord(r, o, 's'));
+  const transcript = new Transcript(path, (r, o) => parseClaudeRecord(r, o, 's'), {
+    activityLookback: true,
+  });
   await transcript.initialize();
   const initial = transcript.takeInitial();
   const activity = initial.flatMap((e) => (e.type === 'activity' ? [e.event] : []));
@@ -79,7 +81,9 @@ it('reports an incomplete lookback as an activity gap', async () => {
     }),
   ).join('');
   await writeFile(path, filler);
-  const transcript = new Transcript(path, (r, o) => parseClaudeRecord(r, o, 's'));
+  const transcript = new Transcript(path, (r, o) => parseClaudeRecord(r, o, 's'), {
+    activityLookback: true,
+  });
   await transcript.initialize();
   const gaps = transcript
     .takeInitial()

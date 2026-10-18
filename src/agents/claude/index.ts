@@ -478,7 +478,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       const transcript = new Transcript(
         path,
         (record, offset) => parseClaudeRecord(record, offset, target.sessionRef),
-        options.pageSize,
+        {
+          ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
+          activityLookback: true,
+        },
       );
       const stateDir = options.stateDir ?? join(homedir(), '.language-assistant');
       const channelRegistry =

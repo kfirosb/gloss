@@ -185,6 +185,13 @@ const MAX_SCAN = 8;
 const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
   delay(ms, undefined, { signal }).catch(() => undefined);
 
+export interface TranscriptOptions {
+  /** Messages per history page. */
+  pageSize?: number;
+  /** Scan the range before the live tail for activity on attach; only Claude transcripts carry activity. */
+  activityLookback?: boolean;
+}
+
 /** Versioned append-only JSONL reader. Positions are byte offsets, not JS character offsets. */
 export class Transcript {
   private identity = '';
@@ -202,11 +209,18 @@ export class Transcript {
   get caughtUp(): boolean {
     return !this.broken && this.fullyRead && this.pending.length === 0;
   }
+  private readonly pageSize: number;
+  private readonly activityLookbackEnabled: boolean;
+  /** `options` may still be the history page size alone. */
   constructor(
     readonly path: string,
     readonly parse: RecordParser,
-    private readonly pageSize = 100,
-  ) {}
+    options: number | TranscriptOptions = {},
+  ) {
+    const resolved = typeof options === 'number' ? { pageSize: options } : options;
+    this.pageSize = resolved.pageSize ?? 100;
+    this.activityLookbackEnabled = resolved.activityLookback === true;
+  }
   private failure(reason: string): never {
     this.broken = true;
     this.state = 'disconnected';
@@ -253,7 +267,8 @@ export class Transcript {
     } finally {
       await file.close();
     }
-    if (this.pendingStart > 0) this.initial.push(...(await this.activityLookback()));
+    if (this.activityLookbackEnabled && this.pendingStart > 0)
+      this.initial.push(...(await this.activityLookback()));
     this.initial.push(...(await this.poll()));
   }
   /** Best effort: a failed lookback must not stop the live tail from attaching. */

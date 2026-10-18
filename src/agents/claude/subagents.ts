@@ -92,8 +92,10 @@ export async function* streamSubagent(
   signal: AbortSignal,
   pollMs = 1000,
 ): AsyncGenerator<ActivityEvent> {
-  const transcript = new Transcript(path, (record, offset) =>
-    parseClaudeRecord(record, offset, sessionRef, depth),
+  const transcript = new Transcript(
+    path,
+    (record, offset) => parseClaudeRecord(record, offset, sessionRef, depth),
+    { activityLookback: true },
   );
   try {
     await transcript.initialize();
