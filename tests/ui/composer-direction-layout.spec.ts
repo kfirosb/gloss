@@ -213,7 +213,7 @@ test('inserted references display left-to-right and Discuss first sends them wit
   await expect(input).toHaveValue(`תסתכל על ${LRM}@File 1 `);
   await page
     .getByRole('dialog', { name: 'Files' })
-    .getByRole('button', { name: 'Close files', exact: true })
+    .getByRole('button', { name: 'Close file preview', exact: true })
     .click();
   await page.getByRole('button', { name: 'Discuss first', exact: true }).click();
   await expect

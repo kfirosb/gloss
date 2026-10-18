@@ -16,9 +16,9 @@ import './files-window.css';
 const SPLIT_KEY_STEP = 20;
 
 const readViewport = (): Viewport => ({ width: innerWidth, height: innerHeight });
-/** The agent column the default window centres over; the whole viewport when it is absent. */
-const readAgentColumn = (): ViewportArea | undefined => {
-  const rect = document.querySelector('.session-column')?.getBoundingClientRect();
+/** The agent area beside the Files column that the default window centres over; the whole viewport when absent. */
+const readAgentArea = (): ViewportArea | undefined => {
+  const rect = document.querySelector('.session-column main.app')?.getBoundingClientRect();
   return rect && { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 };
 const splitLimits = (paneWidth: number) => ({
@@ -103,12 +103,12 @@ export function FilesWindow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
-  const [agentColumn, setAgentColumn] = useState(readAgentColumn);
+  const [agentArea, setAgentArea] = useState(readAgentArea);
   const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const resize = () => {
       setViewport(readViewport());
-      setAgentColumn(readAgentColumn());
+      setAgentArea(readAgentArea());
     };
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
@@ -117,7 +117,7 @@ export function FilesWindow({
   // Stored geometry is unclamped; fit it to the live viewport every render.
   const fitted = geometry
     ? clampFilesWindow(geometry, viewport)
-    : defaultFilesWindow(viewport, agentColumn);
+    : defaultFilesWindow(viewport, agentArea);
   // clampFilesWindow limits the split to the collapsed width; expanded, the stored split is limited by the pane shown.
   const base = expanded && geometry ? { ...fitted, split: geometry.split } : fitted;
   const { shown, surface } = useGeometryDrag(base, onGeometry);
@@ -188,8 +188,8 @@ export function FilesWindow({
           type="button"
           className="files-window-close"
           onClick={onClose}
-          aria-label="Close files"
-          title="Close files"
+          aria-label="Close file preview"
+          title="Close file preview"
         >
           ×
         </button>

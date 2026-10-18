@@ -84,7 +84,7 @@ for (const [width, height] of [
     // Closing the popup leaves the Files column open for the search below.
     await page
       .getByRole('dialog', { name: 'Files' })
-      .getByRole('button', { name: 'Close files', exact: true })
+      .getByRole('button', { name: 'Close file preview', exact: true })
       .click();
     await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
     await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
@@ -166,7 +166,7 @@ test('failed Attach is visible and preserves text; successful delayed Attach pre
   fail = false;
   await preview.getByRole('button', { name: 'Attach file', exact: true }).click();
   await expect.poll(() => Boolean(release)).toBe(true);
-  await page.getByRole('button', { name: 'Close files' }).click();
+  await page.getByRole('button', { name: 'Close file preview' }).click();
   await input.fill('New wording @notebook');
   release!();
   await expect(input).toHaveValue('New wording @notebook \u200E@File 1 ');
@@ -327,7 +327,7 @@ test('late preview and attachment responses stay with their originating session'
   await expect.poll(() => Boolean(attachRelease)).toBe(true);
   await page
     .getByRole('dialog', { name: 'Files' })
-    .getByRole('button', { name: 'Close files' })
+    .getByRole('button', { name: 'Close file preview' })
     .click();
   await selectSession(page, 'B');
   await input.fill('B draft');
@@ -344,7 +344,7 @@ test('late preview and attachment responses stay with their originating session'
   await expect.poll(() => Boolean(previewRelease)).toBe(true);
   await page
     .getByRole('dialog', { name: 'Files' })
-    .getByRole('button', { name: 'Close files' })
+    .getByRole('button', { name: 'Close file preview' })
     .click();
   await selectSession(page, 'B');
   previewRelease!();

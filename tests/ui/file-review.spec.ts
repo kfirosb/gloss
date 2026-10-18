@@ -61,7 +61,7 @@ test('file review provides a cached TL;DR and translation with original availabl
   expect(modes).toEqual(['summary', 'translation']);
   await dialog.screenshot({ path: '/tmp/file-review-summary.png' });
   // The link opened the Files column too; closing the popup leaves it showing the file.
-  await dialog.getByRole('button', { name: 'Close files' }).click();
+  await dialog.getByRole('button', { name: 'Close file preview' }).click();
   await expect(dialog).toHaveCount(0);
   const row = page.locator('.revealed-file .file-tree-row');
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(32);

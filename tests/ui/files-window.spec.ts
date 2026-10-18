@@ -60,20 +60,22 @@ test('Files opens the column; a file opens the popup, which moves, expands, and 
   await expect(win.locator('.files-window-list')).toBeVisible();
 
   const before = (await win.boundingBox())!;
-  // The default 900x620 window is centred over the agent column, not the whole viewport.
-  const agentColumn = (await page.locator('.session-column').boundingBox())!;
-  expect(Math.round(before.x)).toBe(Math.round(agentColumn.x + (agentColumn.width - 900) / 2));
-  expect(Math.round(before.y)).toBe(Math.round(agentColumn.y + (agentColumn.height - 620) / 2));
+  // The default window is centred over the agent area beside the column, narrowed to fit it.
+  const agentArea = (await page.locator('main.app').boundingBox())!;
+  const defaultWidth = Math.min(900, Math.round(agentArea.width));
+  expect(Math.round(before.width)).toBe(defaultWidth);
+  expect(Math.round(before.x)).toBe(Math.round(agentArea.x + (agentArea.width - defaultWidth) / 2));
+  expect(Math.round(before.y)).toBe(Math.round(agentArea.y + (agentArea.height - 620) / 2));
   const title = (await win.locator('.files-window-title').boundingBox())!;
-  // It sits at y=90 in an 800px viewport and stays fully inside it, so 80px down is the room it has.
+  // It sits about 130px down an 800px viewport and stays fully inside it, so 40px down is within its room.
   const start = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(start.x - 150, start.y + 80, { steps: 5 });
+  await page.mouse.move(start.x - 150, start.y + 40, { steps: 5 });
   await page.mouse.up();
   const moved = (await win.boundingBox())!;
   expect(Math.round(moved.x - before.x)).toBe(-150);
-  expect(Math.round(moved.y - before.y)).toBe(80);
+  expect(Math.round(moved.y - before.y)).toBe(40);
 
   const expand = win.getByRole('button', { name: 'Expand', exact: true });
   await expect(expand).toHaveAttribute('aria-pressed', 'false');
@@ -164,8 +166,17 @@ test('closing the Files column closes the popup and forgets its file', async ({ 
   const filesButton = page.getByRole('button', { name: 'Files', exact: true });
   const win = await openFilePopup(page);
   await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
-  // The default popup covers the column's header and the Files button, so both are pressed from the keyboard.
-  await fileColumn(page).getByRole('button', { name: 'Close files', exact: true }).press('Enter');
+  // The default popup sits beside the column, so the column's × is clickable with the mouse.
+  const close = fileColumn(page).getByRole('button', { name: 'Close files', exact: true });
+  const box = (await close.boundingBox())!;
+  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  expect(
+    await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.getAttribute('aria-label'),
+      centre,
+    ),
+  ).toBe('Close files');
+  await page.mouse.click(centre.x, centre.y);
   await expect(win).toHaveCount(0);
   await expect(fileColumn(page)).toHaveCount(0);
   await expect(filesButton).toBeFocused();
@@ -176,10 +187,10 @@ test('closing the Files column closes the popup and forgets its file', async ({ 
   await expect(fileColumn(page)).toBeVisible();
   await expect(win).toHaveCount(0);
 
-  // The Files button closes both too.
+  // The Files button closes both too, and the popup does not cover it.
   await fileColumn(page).getByRole('button', { name: 'Preview b.md', exact: true }).click();
   await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
-  await filesButton.press('Enter');
+  await filesButton.click();
   await expect(win).toHaveCount(0);
   await expect(fileColumn(page)).toHaveCount(0);
   await expect(filesButton).toBeFocused();

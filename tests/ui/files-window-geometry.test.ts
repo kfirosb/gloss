@@ -28,13 +28,20 @@ it('centres the default window over a given area and keeps it inside the viewpor
       { left: 300, top: 0, width: 980, height: 800 },
     ),
   ).toEqual({ x: 340, y: 90, width: 900, height: 620, split: 270 });
-  // An area narrower than the window still yields a window fully inside the viewport.
+  // An area narrower than the default narrows the window to fit it, beside the docked Files column.
+  expect(
+    defaultFilesWindow(
+      { width: 1280, height: 800 },
+      { left: 550, top: 80, width: 730, height: 720 },
+    ),
+  ).toEqual({ x: 550, y: 130, width: 730, height: 620, split: 270 });
+  // Below the minimum size the window keeps the minimum and stays fully inside the viewport.
   expect(
     defaultFilesWindow(
       { width: 1000, height: 800 },
-      { left: 600, top: 100, width: 400, height: 700 },
+      { left: 600, top: 100, width: 400, height: 300 },
     ),
-  ).toMatchObject({ x: 100, y: 140, width: 900, height: 620 });
+  ).toMatchObject({ x: 520, y: 90, width: 480, height: 320 });
 });
 it('pulls an off-screen window fully into view', () => {
   expect(
