@@ -27,6 +27,8 @@ import {
 
 import { MIGRATIONS } from './migrations.js';
 
+import { MAX_FILE_REVIEW_CACHE_ROWS } from '../core/content-policy.js';
+import { fileReviewCacheKey, type FileReviewKey } from '../core/file-review-contracts.js';
 import { summaryCacheKey, type SummaryKey } from '../core/summary-contracts.js';
 import { orderAgentMessages } from '../core/contracts.js';
 import type { SeenStore } from '../core/session-catalog.js';
@@ -235,6 +237,23 @@ export class SqliteStore
     this.database
       .prepare('INSERT OR REPLACE INTO response_summaries(cache_key,text) VALUES (?,?)')
       .run(summaryCacheKey(key), text);
+  }
+  getFileReview(key: FileReviewKey): string | undefined {
+    const row = this.database
+      .prepare('SELECT text FROM file_reviews WHERE cache_key = ?')
+      .get(fileReviewCacheKey(key)) as Row | undefined;
+    return row ? String(row.text) : undefined;
+  }
+  putFileReview(key: FileReviewKey, text: string): void {
+    // INSERT OR REPLACE assigns a fresh rowid, so rowid breaks created_at ties newest-first.
+    this.database
+      .prepare('INSERT OR REPLACE INTO file_reviews(cache_key,text,created_at) VALUES (?,?,?)')
+      .run(fileReviewCacheKey(key), text, Date.now());
+    this.database
+      .prepare(
+        'DELETE FROM file_reviews WHERE cache_key NOT IN (SELECT cache_key FROM file_reviews ORDER BY created_at DESC, rowid DESC LIMIT ?)',
+      )
+      .run(MAX_FILE_REVIEW_CACHE_ROWS);
   }
   private readonly database: DatabaseSync;
 

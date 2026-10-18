@@ -243,6 +243,8 @@ export interface ConversationStore {
   releaseComposerAttempt(conversationId: string, requestId: string): void;
   getSummary(key: import('./summary-contracts.js').SummaryKey): string | undefined;
   putSummary(key: import('./summary-contracts.js').SummaryKey, text: string): void;
+  getFileReview(key: import('./file-review-contracts.js').FileReviewKey): string | undefined;
+  putFileReview(key: import('./file-review-contracts.js').FileReviewKey, text: string): void;
   load(id: string): ConversationSnapshot | undefined;
   save(snapshot: ConversationSnapshot): void;
   claimDelivery(delivery: Delivery): boolean;

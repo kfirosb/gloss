@@ -188,4 +188,8 @@ export const MIGRATIONS = [
     version: 24,
     sql: 'CREATE TABLE language_spend (scope TEXT NOT NULL, provider TEXT NOT NULL, usd REAL, input_tokens INTEGER NOT NULL, cached_input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL, PRIMARY KEY (scope, provider));',
   },
+  {
+    version: 25,
+    sql: 'CREATE TABLE file_reviews (cache_key TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);',
+  },
 ] as const;
