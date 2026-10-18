@@ -17,6 +17,7 @@ import {
   MOVE_RESUME_EXITED_REASON,
   MOVE_RESUME_OTHER_REASON,
   MOVE_RESUME_STILL_OPEN_REASON,
+  MOVE_RESUME_UNCONFIRMED_REASON,
   MOVE_UNVERIFIED_REASON,
   MOVE_WAIT_ENDED_REASON,
   MOVE_WORKING_REASON,
@@ -25,6 +26,7 @@ import {
   MOVE_CLOSE_TIMEOUT_MS,
   MOVE_RESUME_CHECK_MS,
   MOVE_WAIT_POLL_MS,
+  MOVE_WAIT_UNREADABLE_POLLS,
   createClaudeMove,
   parseMoveRequest,
   type ClaudeMoveOptions,
@@ -71,6 +73,11 @@ async function setup(
       | 'no-domain'
       | 'record-later';
     endFails?: boolean;
+    /** tmux never answers: the pane check or End never settles. */
+    paneHangs?: boolean;
+    endHangs?: boolean;
+    /** `kill` fails with this code after it is logged; ESRCH means the process was already gone. */
+    termThrows?: 'ESRCH' | 'EPERM';
     launches?: LaunchRecord[];
     alivePanes?: string[];
     outsideParent?: number;
@@ -120,7 +127,13 @@ async function setup(
   const logs: string[] = [];
   const launches: LaunchRecord[] = [...(options.launches ?? [])];
   const alivePanes = new Set(options.alivePanes ?? []);
-  const hooks: { onPrepare?: () => void | Promise<void> } = {};
+  const hooks: {
+    onPrepare?: () => void | Promise<void>;
+    /** Runs before each injected sleep resolves; `ms` tells which loop is sleeping. */
+    onSleep?: (ms: number) => void | Promise<void>;
+    onProbe?: (pid: number) => void;
+  } = {};
+  const never = new Promise<never>(() => {});
   const launch: LaunchRecord = {
     id: 'L',
     agent: 'claude',
@@ -182,6 +195,7 @@ async function setup(
       events.push('end');
       ends.push(launchId);
       if (options.endFails) throw new Error('Session is still running');
+      if (options.endHangs) await never;
       const ended = launches.find((l) => l.id === launchId);
       if (ended) ended.state = 'ended';
       alivePanes.delete(launchId);
@@ -193,21 +207,30 @@ async function setup(
     uid: 501,
     launcher,
     panels: () => [],
-    paneAlive: async (launchId) => alivePanes.has(launchId),
-    probe: async (pid) => live.get(pid),
+    paneAlive: async (launchId) => (options.paneHangs ? never : alivePanes.has(launchId)),
+    probe: async (pid) => {
+      hooks.onProbe?.(pid);
+      return live.get(pid);
+    },
     processExists: (pid) => live.has(pid),
     terminate: (pid, signal) => {
       events.push(signal);
       signals.push([pid, signal]);
       signalledAt.push(clock);
+      if (options.termThrows === 'EPERM')
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
       if (options.onTerm === 'ignore') return;
       live.delete(pid);
       if (options.onTerm !== 'keep-record') rmSync(recordPath(pid), { force: true });
+      if (options.termThrows === 'ESRCH')
+        throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
     },
     now: () => clock,
-    sleep: async (ms) => {
-      clock += ms;
+    // A bounded wait that its work beat is aborted, and then no time passes.
+    sleep: async (ms, signal) => {
+      await hooks.onSleep?.(ms);
       await tick();
+      if (!signal?.aborted) clock += ms;
     },
     log: (message) => logs.push(message),
   });
@@ -227,6 +250,7 @@ async function setup(
     logs,
     hooks,
     launches,
+    recordDir: join(config, 'sessions'),
     write,
     live,
     project,
@@ -511,7 +535,72 @@ it('a stale record at the pane pid from an earlier process is not taken for anot
   await vi.waitFor(() => expect(f.now()).toBeGreaterThanOrEqual(resumedAt + MOVE_RESUME_CHECK_MS));
   for (let i = 0; i < 5; i++) await tick();
   expect(f.ends).toEqual([]);
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
   expect(await f.service.status(f.target)).toEqual({ state: 'in-gloss' });
+});
+
+it('Gloss quitting during the last re-read before SIGTERM sends nothing', async () => {
+  const f = await setup();
+  let armed = false;
+  let probes = 0;
+  f.hooks.onPrepare = () => {
+    armed = true;
+  };
+  // After prepare: the candidate's ps, then the pid's own ps; the record re-read follows the second.
+  f.hooks.onProbe = () => {
+    if (armed && ++probes === 2) f.service.close();
+  };
+  await f.service.act(f.target, { action: 'move', expected: f.expected });
+  // Closed at the second probe; the status the press returns probes once more.
+  expect(probes).toBe(3);
+  expect(f.signals).toEqual([]);
+  expect(f.resumes).toEqual([]);
+});
+
+it('a tmux that never answers during the reopen check ends the move as failed; a later press is accepted', async () => {
+  for (const variant of [
+    { resume: 'record-later', paneHangs: true },
+    { resume: 'other-session', endHangs: true },
+  ] as const) {
+    const f = await setup(variant);
+    await f.service.act(f.target, { action: 'move', expected: f.expected });
+    await vi.waitFor(async () =>
+      expect((await f.service.status(f.target)).failure).toEqual(
+        variant.resume === 'record-later'
+          ? { reason: MOVE_RESUME_UNCONFIRMED_REASON }
+          : {
+              reason: `${MOVE_RESUME_OTHER_REASON} ${MOVE_RESUME_STILL_OPEN_REASON}`,
+              manual: manual(f.project),
+            },
+      ),
+    );
+    // No longer in flight: the press is answered, not refused as already moving.
+    await vi.waitFor(async () =>
+      expect(
+        (await f.service.act(f.target, { action: 'move', expected: f.expected })).failure?.reason,
+      ).not.toBe(MOVE_ALREADY_MOVING_REASON),
+    );
+    expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+    expect(f.resumes).toHaveLength(1);
+  }
+});
+
+it('a kill that finds the process already gone (ESRCH) goes on to reopen', async () => {
+  const f = await setup({ termThrows: 'ESRCH' });
+  expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+    state: 'in-gloss',
+  });
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+  expect(f.resumes).toHaveLength(1);
+});
+
+it('a kill refused for another reason (EPERM) closes nothing and reopens nothing', async () => {
+  const f = await setup({ termThrows: 'EPERM' });
+  expect((await f.service.act(f.target, { action: 'move', expected: f.expected })).failure).toEqual(
+    { reason: MOVE_NOT_CLOSED_REASON },
+  );
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+  expect(f.resumes).toEqual([]);
 });
 
 it('"Move when it finishes" waits for idle, then moves once', async () => {
@@ -566,6 +655,66 @@ it('a wait that turns idle while a Move is already running does not move again',
   await vi.waitFor(() => expect(f.resumes).toHaveLength(1));
   expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
   expect(f.prepares).toHaveLength(1);
+});
+
+it('"Move when it finishes" retries a record caught half-written while its process runs', async () => {
+  const torn = await setup({ record: { status: 'busy' } });
+  let waits = 0;
+  torn.hooks.onSleep = async (ms) => {
+    if (ms !== MOVE_WAIT_POLL_MS) return;
+    waits++;
+    // Unreadable for two polls, one fewer than the limit, then idle.
+    if (waits === 1) await writeFile(join(torn.recordDir, `${OUTSIDE_PID}.json`), '{"sessionId":');
+    if (waits === 3) await torn.write(OUTSIDE_PID, { status: 'idle' });
+  };
+  await torn.service.act(torn.target, { action: 'when-idle', expected: torn.expected });
+  await vi.waitFor(() => expect(torn.resumes).toHaveLength(1));
+  expect(torn.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+
+  const unreadable = await setup({ record: { status: 'busy' } });
+  let polls = 0;
+  unreadable.hooks.onSleep = async (ms) => {
+    if (ms !== MOVE_WAIT_POLL_MS) return;
+    if (++polls === 1)
+      await writeFile(join(unreadable.recordDir, `${OUTSIDE_PID}.json`), 'not json');
+  };
+  await unreadable.service.act(unreadable.target, {
+    action: 'when-idle',
+    expected: unreadable.expected,
+  });
+  await vi.waitFor(async () =>
+    expect((await unreadable.service.status(unreadable.target)).failure).toEqual({
+      reason: MOVE_WAIT_ENDED_REASON,
+    }),
+  );
+  expect(polls).toBe(MOVE_WAIT_UNREADABLE_POLLS);
+  expect(unreadable.signals).toEqual([]);
+});
+
+it('"Move when it finishes" ends at once on a record for another session, or when the process is gone', async () => {
+  const other = await setup({ record: { status: 'busy' } });
+  let polls = 0;
+  other.hooks.onSleep = async (ms) => {
+    if (ms === MOVE_WAIT_POLL_MS && ++polls === 1)
+      await other.write(OUTSIDE_PID, { sessionId: OTHER, status: 'idle' });
+  };
+  await other.service.act(other.target, { action: 'when-idle', expected: other.expected });
+  await vi.waitFor(async () =>
+    expect((await other.service.status(other.target)).failure).toEqual({
+      reason: MOVE_WAIT_ENDED_REASON,
+    }),
+  );
+  expect(polls).toBe(1);
+  const gone = await setup({ record: { status: 'busy' } });
+  await gone.service.act(gone.target, { action: 'when-idle', expected: gone.expected });
+  // Its record stays behind (ruling I1); the process is what counts.
+  gone.live.delete(OUTSIDE_PID);
+  await vi.waitFor(async () =>
+    expect((await gone.service.status(gone.target)).failure).toEqual({
+      reason: MOVE_WAIT_ENDED_REASON,
+    }),
+  );
+  expect([...other.signals, ...gone.signals]).toEqual([]);
 });
 
 it('"Move when it finishes" ends without signalling when the session restarts, is cancelled, or Gloss quits', async () => {

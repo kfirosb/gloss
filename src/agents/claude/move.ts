@@ -26,6 +26,8 @@ export const MOVE_RESUME_EXITED_REASON = 'Claude closed as soon as Gloss reopene
 export const MOVE_RESUME_OTHER_REASON = 'Claude opened a different session instead of this one.';
 export const MOVE_RESUME_STILL_OPEN_REASON =
   'Gloss couldn’t close the terminal it opened, so it is still open; end it from Gloss.';
+export const MOVE_RESUME_UNCONFIRMED_REASON =
+  'Gloss couldn’t confirm that the session reopened; look at its terminal in Gloss before trying again.';
 export const MOVE_ALREADY_MOVING_REASON = 'Gloss is already moving this session.';
 export const MOVE_ALREADY_WAITING_REASON =
   'Gloss is already waiting to move this session when it finishes. Cancel that first.';

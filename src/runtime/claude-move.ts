@@ -18,6 +18,7 @@ import {
   MOVE_RESUME_EXITED_REASON,
   MOVE_RESUME_OTHER_REASON,
   MOVE_RESUME_STILL_OPEN_REASON,
+  MOVE_RESUME_UNCONFIRMED_REASON,
   MOVE_WAIT_ENDED_REASON,
   glossHoldsSession,
   glossOwnsSession,
@@ -54,6 +55,11 @@ const MOVE_RESUME_POLL_MS = 250;
 const MOVE_PROBE_TIMEOUT_MS = 2000;
 /** Longest `procStart` a request may carry, in characters; `ps -o lstart=` prints 24. */
 const MAX_PROC_START_CHARS = 64;
+/**
+ * A record that can't be read while its process still runs is retried for this many consecutive "Move when it
+ * finishes" polls (a write caught half-way) before the wait ends.
+ */
+export const MOVE_WAIT_UNREADABLE_POLLS = 3;
 /** pid 1 is launchd; no Claude session runs there, so it is never signalled. */
 const MIN_SIGNALLED_PID = 2;
 
@@ -96,7 +102,8 @@ export interface ClaudeMoveOptions {
   uid?: number | undefined;
   /** Monotonic milliseconds. */
   now?: (() => number) | undefined;
-  sleep?: ((ms: number) => Promise<void>) | undefined;
+  /** Resolves after `ms`, or early when `signal` aborts. */
+  sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
   /** Diagnostics that change nothing, such as a record Claude left behind. */
   log?: ((message: string) => void) | undefined;
 }
@@ -149,7 +156,9 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
   const exists = options.processExists ?? pidExists;
   const uid = 'uid' in options ? options.uid : process.getuid?.();
   const now = options.now ?? (() => performance.now());
-  const sleep = options.sleep ?? ((ms: number) => delay(ms));
+  const sleep =
+    options.sleep ??
+    ((ms: number, signal?: AbortSignal) => delay(ms, undefined, { signal }).catch(() => undefined));
   const log = options.log ?? ((message: string) => console.warn(message));
   const failures = new Map<string, ClaudeMoveFailure>();
   /** Sessions with a move in flight, from the press until the reopen returns. */
@@ -233,6 +242,8 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
       record?.cwd !== before.cwd
     )
       return notClosed(MOVE_CHANGED_REASON);
+    // The last check before the signal, with no await after it: Gloss quitting meanwhile sends nothing.
+    if (stopped()) return notClosed(MOVE_CHANGED_REASON);
     try {
       terminate(before.pid, 'SIGTERM');
     } catch (error) {
@@ -274,11 +285,20 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
    */
   async function checkResume(ref: string, launch: LaunchRecord, folder: string) {
     const deadline = now() + MOVE_RESUME_CHECK_MS;
+    /** Waits for `work` no longer than the check has left, so a hung tmux can't keep the move in flight. */
+    const bounded = <T>(work: Promise<T>): Promise<{ value: T } | undefined> => {
+      const timer = new AbortController();
+      return Promise.race([
+        work.then((value) => ({ value })),
+        sleep(Math.max(0, deadline - now()), timer.signal).then(() => undefined),
+      ]).finally(() => timer.abort());
+    };
     const fail = async (reason: string) => {
       const manual = manualResume(ref, folder);
       failures.set(ref, { reason, manual });
       try {
-        await options.launcher.end(launch.id);
+        if (!(await bounded(options.launcher.end(launch.id))))
+          throw new Error('End did not finish in time');
       } catch (error) {
         failures.set(ref, { reason: `${reason} ${MOVE_RESUME_STILL_OPEN_REASON}`, manual });
         log(`Ending a reopened Claude launch failed: ${errorText(error)}`);
@@ -291,8 +311,15 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
         if (record.sessionId !== ref) await fail(MOVE_RESUME_OTHER_REASON);
         return;
       }
-      if (!(await options.paneAlive(launch.id).catch(() => true))) {
-        if (!stopped()) await fail(MOVE_RESUME_EXITED_REASON);
+      const pane = await bounded(options.paneAlive(launch.id).catch(() => true));
+      if (stopped()) return;
+      if (!pane) {
+        // tmux didn't answer: the pane may be fine, so it is neither ended nor offered a second resume.
+        failures.set(ref, { reason: MOVE_RESUME_UNCONFIRMED_REASON });
+        return;
+      }
+      if (!pane.value) {
+        await fail(MOVE_RESUME_EXITED_REASON);
         return;
       }
       await sleep(MOVE_RESUME_POLL_MS);
@@ -351,23 +378,30 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
     const stop = new AbortController();
     waiters.set(ref, stop);
     const ended = () => stop.signal.aborted || stopped() || waiters.get(ref) !== stop;
+    const endWait = () => {
+      waiters.delete(ref);
+      failures.set(ref, { reason: MOVE_WAIT_ENDED_REASON });
+    };
+    let unreadable = 0;
     void (async () => {
       while (!ended()) {
         await sleep(MOVE_WAIT_POLL_MS);
         if (ended()) return;
+        if (!exists(record.pid)) return endWait();
         const current = await readSessionRecord(sessionRecordPath(config, record.pid));
         // I3: re-checked after every await; a Cancel, a quit or a newer wait may have come meanwhile.
         if (ended()) return;
+        if (!current) {
+          if (++unreadable >= MOVE_WAIT_UNREADABLE_POLLS || !exists(record.pid)) endWait();
+          continue;
+        }
+        unreadable = 0;
         if (
-          !current ||
           current.pid !== record.pid ||
           trustedProcStart(current) !== record.procStart ||
           current.sessionId !== record.sessionId
-        ) {
-          waiters.delete(ref);
-          failures.set(ref, { reason: MOVE_WAIT_ENDED_REASON });
-          return;
-        }
+        )
+          return endWait();
         if (!sameIdleProcess(record, current)) continue;
         // The wait becomes the move in one step, so no other press can start one in between.
         waiters.delete(ref);
