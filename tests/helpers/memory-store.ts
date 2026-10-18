@@ -1,8 +1,10 @@
-import type {
-  ConversationSnapshot,
-  ConversationStore,
-  Delivery,
-  TranslationKey,
+import {
+  CHECKING_TERMINAL_REASON,
+  NOT_TYPED_AT_RESTART_REASON,
+  type ConversationSnapshot,
+  type ConversationStore,
+  type Delivery,
+  type TranslationKey,
 } from '../../src/core/contracts.js';
 
 const copy = <T>(value: T): T => structuredClone(value);
@@ -78,6 +80,16 @@ export class MemoryConversationStore implements ConversationStore {
   recoverInFlightDeliveries() {
     let recovered = 0;
     for (const delivery of this.deliveries.values()) {
+      if (
+        delivery.state === 'sending' &&
+        delivery.transport === 'tmux' &&
+        delivery.reason === CHECKING_TERMINAL_REASON
+      ) {
+        delivery.state = 'failed';
+        delivery.reason = NOT_TYPED_AT_RESTART_REASON;
+        recovered += 1;
+        continue;
+      }
       if (delivery.state === 'sending') {
         delivery.state = 'unconfirmed';
         delivery.reason = 'Delivery was interrupted before confirmation';

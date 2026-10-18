@@ -13,10 +13,9 @@ import {
   type FileReference,
 } from './file-references.js';
 import {
-  DIALOG_OPEN_REASON,
+  CHECKING_TERMINAL_REASON,
   REQUEST_ID_PATTERN,
   TYPING_STARTED_REASON,
-  WORKING_HOLD_REASON,
   isAwaitingEvidence,
   isDeliverySubmitted,
   isDeliveryTransport,
@@ -69,8 +68,6 @@ export interface WorkflowDependencies {
   createId?: (prefix: 'draft' | 'delivery') => string;
   /** Account-level quota observations from the live agent's own transcript; never part of the conversation. */
   onUsage?: (usage: import('./usage.js').ProviderUsage) => void;
-  /** How often a held message is checked again besides every status change, in milliseconds. Tests shorten it. */
-  heldRecheckMs?: number;
 }
 
 export interface Workflow {
@@ -124,11 +121,6 @@ export interface Workflow {
 
 /** Remembered channel request IDs, enough to deduplicate recent native echoes. */
 const SEEN_CHANNEL_LIMIT = 1000;
-/** Default re-check interval for held messages, in milliseconds. */
-const HELD_RECHECK_MS = 2000;
-const CHECKING_TERMINAL_REASON = 'Checking the terminal';
-const EARLIER_HELD_REASON = 'Waiting for an earlier message to reach the terminal';
-const RELEASED_BEFORE_SENDING_REASON = 'Not sent: released before Gloss typed it';
 const NOT_CONNECTED_REASON = 'Claude is not connected';
 const ROUTE_UNAVAILABLE_REASON =
   'Gloss couldn’t check how to reach this session; it will check again';
@@ -431,8 +423,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     deps.store.updateDelivery(copy(delivery));
     clearSubmittedDraft(delivery);
   };
-  const holdReason = () =>
-    state.codingState === 'working' ? WORKING_HOLD_REASON : DIALOG_OPEN_REASON;
   /**
    * Claude needs a route; other agents have one transport. Throws the route's reason when there is none. An explicit
    * transport only names the route the session offers; it never skips the route order or the Desktop exclusion.
@@ -451,178 +441,109 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       throw new Error(ROUTE_MISMATCH_REASON);
     return route.transport;
   };
-  /** Cancels a message nothing was sent for yet, so no later check, nor one running now, can type or send it. */
-  const cancelHeld = (delivery: Delivery) => {
-    delivery.state = 'failed';
-    delivery.reason = RELEASED_BEFORE_SENDING_REASON;
-    deps.store.updateDelivery(copy(delivery));
-  };
-  /** Abandoning a review draft cancels its held messages; one whose typing started is never touched. */
-  const cancelHeldFor = (draftId: string) => {
-    for (const delivery of state.deliveries)
-      if (delivery.draftId === draftId && delivery.state === 'held') cancelHeld(delivery);
-  };
-  const sameTargetHeld = (target: Target) =>
-    state.deliveries.find((item) => item.state === 'held' && sameTarget(item.target, target));
-  /** Deliveries handed to the agent whose send has not returned yet. A held one among them is being checked. */
-  const dispatching = new Set<string>();
-  let heldTimer: NodeJS.Timeout | undefined;
-  let heldTail: Promise<void> = Promise.resolve();
-  const stopHeldRecheck = () => {
-    if (heldTimer) clearInterval(heldTimer);
-    heldTimer = undefined;
-  };
-  const startHeldRecheck = () => {
-    if (heldTimer || closed) return;
-    heldTimer = setInterval(() => void retryHeld(), deps.heldRecheckMs ?? HELD_RECHECK_MS);
-    heldTimer.unref();
+  /**
+   * A review is sent only while the session is idle, except on the terminal route: there the check at Send shows the
+   * terminal for an open dialog or approval prompt (spec 2.4). Returns the transport the send must take, so a route
+   * that changes before it goes out is refused rather than skipping this rule.
+   */
+  const reviewTransport = async (
+    target: Target,
+    explicit: DeliveryTransport | undefined,
+  ): Promise<DeliveryTransport | undefined> => {
+    if (state.codingState === 'idle') return explicit;
+    const active = connection;
+    if (
+      active &&
+      (state.codingState === 'dialog-open' || state.codingState === 'approval-required') &&
+      (await resolveTransport(target, explicit, active)) === 'tmux'
+    )
+      return 'tmux';
+    throw new Error('Blocked: agent is working or unavailable');
   };
   /**
-   * Hands a claimed delivery to the agent once; nothing is ever resent. A terminal send stays `held`, in memory and on
-   * disk, until its adapter reports typing, so a check that finds the terminal unchanged changes nothing, Don't send
-   * stays available during it, and a crash before typing retries it once. Any other transport is persisted as
-   * `sending` before the write, so a crash during it is recovered as unconfirmed.
+   * Hands a claimed delivery to the agent once; nothing is ever resent. A terminal send reports typing through
+   * `onTyping`, which stores TYPING_STARTED_REASON before the paste; until then it carries CHECKING_TERMINAL_REASON, so
+   * a stop before typing is recovered as not sent and one after it as unconfirmed.
    */
   const dispatchClaimed = async (delivery: Delivery, active: CodingConnection): Promise<void> => {
     const terminal = delivery.transport === 'tmux';
-    let stored = JSON.stringify(delivery);
     let typingStarted = false;
-    dispatching.add(delivery.id);
-    try {
-      if (!terminal && delivery.state !== 'sending') {
-        const sending: Delivery = { ...copy(delivery), state: 'sending' };
-        delete sending.reason;
-        deps.store.updateDelivery(sending);
-        delivery.state = 'sending';
-        delete delivery.reason;
-        stored = JSON.stringify(delivery);
-        publish(false);
-      }
-      const onTyping = ({ nativeAfterRevision }: { nativeAfterRevision: number }): undefined => {
-        // Don't send was pressed during the check: refusing here means the adapter types nothing.
-        if (delivery.state !== 'held') throw new Error(RELEASED_BEFORE_SENDING_REASON);
-        const typing: Delivery = {
-          ...copy(delivery),
-          state: 'sending',
-          reason: TYPING_STARTED_REASON,
-          nativeAfterRevision,
-        };
-        deps.store.updateDelivery(typing);
-        Object.assign(delivery, typing);
-        typingStarted = true;
-        stored = JSON.stringify(delivery);
-        publish(false);
-        return undefined;
+    const onTyping = ({ nativeAfterRevision }: { nativeAfterRevision: number }): undefined => {
+      const typing: Delivery = {
+        ...copy(delivery),
+        state: 'sending',
+        reason: TYPING_STARTED_REASON,
+        nativeAfterRevision,
       };
-      try {
-        const result = await active.send(
-          delivery.id,
-          delivery.englishText,
-          delivery.attachments,
-          delivery.transport
-            ? {
-                panelSessionId: state.id,
-                transport: delivery.transport,
-                earlier: earlierFor(delivery),
-                ...(terminal ? { onTyping } : {}),
-              }
-            : undefined,
-        );
-        // Released while it was checked; nothing was typed, and the release already stored that.
-        if (terminal && !typingStarted && delivery.state === 'failed') return;
-        if (result.channelGeneration) delivery.channelGeneration = result.channelGeneration;
-        if (result.nativeMessageId) delivery.nativeMessageId = result.nativeMessageId;
-        if (result.nativeAfterRevision !== undefined)
-          delivery.nativeAfterRevision = result.nativeAfterRevision;
-        if (typingStarted && (result.state === 'held' || result.state === 'failed')) {
-          // Once typing started the text may be in the terminal: never claim it was held or not sent.
-          delivery.state = 'unconfirmed';
-          delivery.reason = TYPING_STARTED_REASON;
-        } else if (
-          // Native acceptance can arrive before the transport finishes. Never downgrade it.
-          delivery.state !== 'sent' &&
-          !(
-            delivery.state === 'queued' &&
-            (result.state === 'sending' || result.state === 'unconfirmed')
-          )
-        ) {
-          delivery.state = result.state;
-          if (result.reason !== undefined) delivery.reason = result.reason;
-          else delete delivery.reason;
-          if (
-            delivery.state === 'sending' ||
-            (delivery.state === 'sent' && active.capabilities.acknowledgement === 'none')
-          ) {
-            delivery.state = 'unconfirmed';
-            delivery.reason ??= 'The adapter cannot confirm delivery';
-          }
-        }
-      } catch (error) {
-        if (terminal && !typingStarted && delivery.state === 'failed') return;
-        if (terminal && !typingStarted) {
-          // The adapter types only after typing-started is stored, so a throw before it typed nothing.
-          delivery.state = 'failed';
-          delivery.reason = NOT_TYPED_REASON;
-        } else if (delivery.state !== 'sent' && delivery.state !== 'queued') {
-          delivery.state = 'unconfirmed';
-          delivery.reason = error instanceof Error ? error.message : 'Delivery outcome is unknown';
-        }
-      }
-      if (delivery.state !== 'sent' && delivery.state !== 'held') {
-        try {
-          const evidence = await confirmEvidence(active, delivery);
-          if (evidence) markSent(delivery, evidence);
-        } catch {
-          /* Preserve uncertainty. */
-        }
-      }
-      if (JSON.stringify(delivery) !== stored) {
-        deps.store.updateDelivery(copy(delivery));
-        clearSubmittedDraft(delivery);
-        publish();
-      }
-      if (delivery.state === 'held') startHeldRecheck();
-    } finally {
-      dispatching.delete(delivery.id);
-    }
-  };
-  /**
-   * Sends held messages in claim order once their gate opens; stops at the first one still held or being checked.
-   * Serialized. Only a change of state or reason is stored and broadcast.
-   */
-  const retryHeld = (): Promise<void> => {
-    heldTail = heldTail
-      .then(async () => {
-        for (;;) {
-          const active = connection;
-          if (closed || !active) return;
-          const next = sameTargetHeld(active.target);
-          if (!next) {
-            stopHeldRecheck();
-            return;
-          }
-          // Its first send is still checking the terminal; that send re-checks when it ends.
-          if (dispatching.has(next.id)) return;
-          if (sendGate(state.codingState, active.capabilities, next.transport) !== 'send') {
-            // A reason from an earlier check (unsent text) no longer describes a session that is gone.
-            const reason =
-              state.codingState === 'disconnected' ? NOT_CONNECTED_REASON : holdReason();
-            if (reason !== next.reason) {
-              next.reason = reason;
-              deps.store.updateDelivery(copy(next));
-              publish(false);
+      deps.store.updateDelivery(typing);
+      Object.assign(delivery, typing);
+      typingStarted = true;
+      publish(false);
+      return undefined;
+    };
+    try {
+      const result = await active.send(
+        delivery.id,
+        delivery.englishText,
+        delivery.attachments,
+        delivery.transport
+          ? {
+              panelSessionId: state.id,
+              transport: delivery.transport,
+              earlier: earlierFor(delivery),
+              ...(terminal ? { onTyping } : {}),
             }
-            startHeldRecheck();
-            return;
-          }
-          await dispatchClaimed(next, active);
-          if (next.state === 'held') return;
+          : undefined,
+      );
+      if (result.channelGeneration) delivery.channelGeneration = result.channelGeneration;
+      if (result.nativeMessageId) delivery.nativeMessageId = result.nativeMessageId;
+      if (result.nativeAfterRevision !== undefined)
+        delivery.nativeAfterRevision = result.nativeAfterRevision;
+      if (typingStarted && result.state === 'failed') {
+        // Once typing started the text may be in the terminal: never claim it was not sent.
+        delivery.state = 'unconfirmed';
+        delivery.reason = TYPING_STARTED_REASON;
+      } else if (
+        // Native acceptance can arrive before the transport finishes. Never downgrade it.
+        delivery.state !== 'sent' &&
+        !(
+          delivery.state === 'queued' &&
+          (result.state === 'sending' || result.state === 'unconfirmed')
+        )
+      ) {
+        delivery.state = result.state;
+        if (result.reason !== undefined) delivery.reason = result.reason;
+        else delete delivery.reason;
+        if (result.openTerminal && result.state === 'failed') delivery.openTerminal = true;
+        if (
+          delivery.state === 'sending' ||
+          (delivery.state === 'sent' && active.capabilities.acknowledgement === 'none')
+        ) {
+          delivery.state = 'unconfirmed';
+          delivery.reason ??= 'The adapter cannot confirm delivery';
         }
-      })
-      .catch(() => {
-        /* A failed check leaves the message held for the next one. */
-      });
-    return heldTail;
+      }
+    } catch (error) {
+      if (terminal && !typingStarted) {
+        // The adapter types only after typing-started is stored, so a throw before it typed nothing.
+        delivery.state = 'failed';
+        delivery.reason = NOT_TYPED_REASON;
+      } else if (delivery.state !== 'sent' && delivery.state !== 'queued') {
+        delivery.state = 'unconfirmed';
+        delivery.reason = error instanceof Error ? error.message : 'Delivery outcome is unknown';
+      }
+    }
+    if (delivery.state !== 'sent') {
+      try {
+        const evidence = await confirmEvidence(active, delivery);
+        if (evidence) markSent(delivery, evidence);
+      } catch {
+        /* Preserve uncertainty. */
+      }
+    }
+    deps.store.updateDelivery(copy(delivery));
+    clearSubmittedDraft(delivery);
+    publish();
   };
 
   const reconcilePending = async (active: CodingConnection) => {
@@ -674,7 +595,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       state.codingState = event.state;
       publish();
       await reconcilePending(active);
-      void retryHeld();
       return;
     }
     if (event.type === 'message') {
@@ -898,7 +818,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       for (const message of state.codingMessages) translateIfNeeded(copy(message));
       eventAbort = new AbortController();
       void watchEvents(attached, eventAbort.signal);
-      void retryHeld();
     },
 
     ingestSourceMessage(message) {
@@ -1025,9 +944,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const delivery = state.deliveries.find((d) => d.draftId === id);
       if (composerOperation || delivery?.state === 'sending')
         throw new Error('Delivery is still in progress');
-      if (!delivery || !['unconfirmed', 'queued', 'failed', 'held'].includes(delivery.state))
+      if (!delivery || !['unconfirmed', 'queued', 'failed'].includes(delivery.state))
         throw new Error('Delivery cannot be released');
-      if (delivery.state === 'held') cancelHeld(delivery);
       deps.store.releaseComposerAttempt(state.id, requestId);
       delete state.composerDraft;
       publish(false);
@@ -1036,10 +954,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     async checkComposer(requestId) {
       requireOpen();
       const prior = state.deliveries.find((d) => d.draftId === `composer-${requestId}`);
-      if (prior?.state === 'held') {
-        await retryHeld();
-        return;
-      }
       if (
         !prior ||
         prior.state === 'sent' ||
@@ -1074,7 +988,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (prior) {
         if (
           prior.state !== 'sent' &&
-          prior.state !== 'held' &&
           connection?.reconcileDelivery &&
           state.target &&
           sameTarget(prior.target, state.target)
@@ -1206,17 +1119,21 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Prepared instruction changed; reopen the review');
       }
       const prior = state.deliveries.find((d) => d.draftId === id && d.revision === revision);
-      if (prior && (prior.target.agent === 'claude' || prior.state !== 'failed'))
-        return copy(prior);
+      // A failed Claude review is never sent again through another route, except a terminal one: a failed terminal
+      // send never typed anything.
+      const retryable =
+        prior?.state === 'failed' &&
+        (prior.target.agent !== 'claude' || prior.transport === 'tmux');
+      if (prior && !retryable) return copy(prior);
       if (
         typeof localizedText !== 'string' ||
         !localizedText.trim() ||
         localizedText.length > MAX_TEXT_CHARS
       )
         throw new Error(`A nonempty review of at most ${MAX_TEXT_CHARS} characters is required`);
-      if (state.codingState !== 'idle') throw new Error('Blocked: agent is working or unavailable');
       reviewOperation = true;
       try {
+        const sendTransport = await reviewTransport(current.target, transport);
         let englishText = current.englishText;
         if (localizedText !== current.localizedText) {
           const version = languageContextVersion;
@@ -1255,7 +1172,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         };
         state.currentDraft = next;
         publish();
-        return await this.send(next.id, next.revision, transport);
+        return await this.send(next.id, next.revision, sendTransport);
       } finally {
         reviewOperation = false;
       }
@@ -1492,8 +1409,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Instruction changed; reopen it before resetting');
       delete state.currentDraft;
       reviews.delete(id);
-      // Reset detaches the review and cancels a message still held; it never cancels or forgets one already handed over.
-      cancelHeldFor(id);
+      // Reset detaches the review, never cancels or forgets a native delivery.
       publish();
     },
 
@@ -1501,7 +1417,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireOpen();
       if (!state.currentDraft || state.currentDraft.id !== id) throw new Error('Draft not found');
       delete state.currentDraft;
-      cancelHeldFor(id);
       publish();
     },
 
@@ -1526,8 +1441,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         );
       const deliveryConnection = connection;
       const deliveryTransport = await resolveTransport(draft.target, transport, deliveryConnection);
-      const gate = sendGate(state.codingState, deliveryConnection.capabilities, deliveryTransport);
-      if (gate === 'block')
+      if (
+        sendGate(state.codingState, deliveryConnection.capabilities, deliveryTransport) === 'block'
+      )
         throw new Error(
           state.codingState === 'approval-required'
             ? 'Agent approval is required'
@@ -1550,9 +1466,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           : state.composerDraft?.id !== id || state.composerDraft.revision !== revision
       )
         throw new Error('Draft changed');
-      // A send waits behind an earlier held one, so messages reach the session in the order they were sent.
-      const behind = sameTargetHeld(draft.target) !== undefined;
-      const holdNow = gate === 'hold' || behind;
       const delivery: Delivery = {
         id: createId('delivery'),
         draftId: draft.id,
@@ -1567,13 +1480,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
                 : {}),
             }
           : {}),
-        // A terminal send is stored as held until its adapter reports typing, so a crash before typing retries it once.
-        state: holdNow || deliveryTransport === 'tmux' ? 'held' : 'sending',
-        ...(holdNow
-          ? { reason: behind ? EARLIER_HELD_REASON : holdReason() }
-          : deliveryTransport === 'tmux'
-            ? { reason: CHECKING_TERMINAL_REASON }
-            : {}),
+        state: 'sending',
+        // Replaced by TYPING_STARTED_REASON just before the paste; at startup it shows nothing was typed.
+        ...(deliveryTransport === 'tmux' ? { reason: CHECKING_TERMINAL_REASON } : {}),
         ...(deliveryTransport ? { transport: deliveryTransport } : {}),
       };
       if (!deps.store.claimDelivery(copy(delivery))) {
@@ -1586,13 +1495,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       }
       state.deliveries.push(delivery);
       publish();
-      if (holdNow) {
-        startHeldRecheck();
-        return copy(delivery);
-      }
       await dispatchClaimed(delivery, deliveryConnection);
-      // Messages that waited behind this one go now instead of at the next re-check.
-      if (delivery.state !== 'held' && sameTargetHeld(delivery.target)) void retryHeld();
       return copy(delivery);
     },
 
@@ -1672,7 +1575,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       summaries.close();
       if (closed) return;
       closed = true;
-      stopHeldRecheck();
       connectionGeneration += 1;
       eventAbort?.abort();
       for (const abort of activeLanguageOperations) abort.abort();

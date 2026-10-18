@@ -17,7 +17,7 @@ it('lets peer sends through while working only for agents that queue peer messag
   );
 });
 
-it('gates sends by coding state and route: a terminal send waits for dialogs, channel and peer do not', () => {
+it('gates sends by coding state and route: a terminal send is checked at Send, so a dialog does not stop it', () => {
   const claude = {
     sendWhileBusy: false,
     channelSendWhileBusy: true,
@@ -27,8 +27,8 @@ it('gates sends by coding state and route: a terminal send waits for dialogs, ch
   const cases = [
     ['idle', 'tmux', 'send'],
     ['working', 'tmux', 'send'],
-    ['dialog-open', 'tmux', 'hold'],
-    ['approval-required', 'tmux', 'hold'],
+    ['dialog-open', 'tmux', 'send'],
+    ['approval-required', 'tmux', 'send'],
     ['disconnected', 'tmux', 'block'],
     ['dialog-open', 'channel', 'send'],
     ['dialog-open', 'peer', 'send'],
@@ -39,7 +39,7 @@ it('gates sends by coding state and route: a terminal send waits for dialogs, ch
   ] as const;
   for (const [state, transport, gate] of cases)
     expect(sendGate(state, claude, transport), `${state} ${transport}`).toBe(gate);
-  expect(sendGate('working', { sendWhileBusy: false }, 'tmux')).toBe('hold');
+  expect(sendGate('working', { sendWhileBusy: false }, 'tmux')).toBe('block');
   expect(sendGate('working', { sendWhileBusy: false })).toBe('block');
   expect(sendGate('working', { sendWhileBusy: true })).toBe('send');
   expect(canSendWhileWorking({ sendWhileBusy: false, tmuxSendWhileBusy: true }, 'tmux')).toBe(true);

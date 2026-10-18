@@ -468,15 +468,16 @@ it('offers no route, without failing, once the session record is gone', async ()
     reason: SESSION_GONE_REASON,
   });
 });
-it('holds while Claude’s record says a dialog is open, without touching the terminal', async () => {
+it('opens the terminal and types nothing while Claude’s record says a dialog is open', async () => {
   const h = await claudeSession({ status: 'busy', waitingFor: 'dialog open' });
   const { terminal, log } = fixtureTerminal('2.1.301', 'empty');
   const connection = await connect(h, terminal);
   expect(await connection.send('delivery-1', 'Hi', [], tmux)).toEqual({
-    state: 'held',
+    state: 'failed',
     reason: DIALOG_OPEN_REASON,
+    openTerminal: true,
   });
-  expect(log.calls).toEqual([]);
+  expect(log.calls).toEqual(['capture', 'cursor']);
 });
 it('reports unconfirmed after the wait and confirms later from the transcript, never typing again', async () => {
   const h = await claudeSession();

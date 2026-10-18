@@ -4,12 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import {
-  DIALOG_OPEN_REASON,
-  WORKING_HOLD_REASON,
-  orderAgentMessages,
-  sendGate,
-} from '../core/contracts.js';
+import { orderAgentMessages, sendGate } from '../core/contracts.js';
 import type {
   AgentCapabilities,
   AgentEvent,
@@ -626,11 +621,6 @@ export async function transcriptConnection(spec: {
         return {
           state: 'failed',
           reason: 'Agent is disconnected, busy, or requires native approval',
-        };
-      if (gate === 'hold')
-        return {
-          state: 'held',
-          reason: lastState === 'working' ? WORKING_HOLD_REASON : DIALOG_OPEN_REASON,
         };
       if (detached || stop.signal.aborted)
         return { state: 'failed', reason: 'Connection detached' };

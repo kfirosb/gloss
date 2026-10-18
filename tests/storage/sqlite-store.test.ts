@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ConversationSnapshot, Delivery } from '../../src/core/contracts.js';
+import {
+  CHECKING_TERMINAL_REASON,
+  NOT_TYPED_AT_RESTART_REASON,
+  TYPING_STARTED_REASON,
+  type ConversationSnapshot,
+  type Delivery,
+} from '../../src/core/contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 
 const directories: string[] = [];
@@ -366,22 +372,42 @@ it('repairs inherited reply images without changing original images or prepared 
   reopened.close();
 });
 
-it('keeps a held terminal delivery across reopen and leaves it held on recovery', () => {
+it('recovers a terminal send stopped before typing, and a held row from a pre-release build, as not sent', () => {
   const path = databasePath();
   const store = new SqliteStore(path);
   store.save(snapshot());
-  const held: Delivery = {
+  const checking: Delivery = {
     ...delivery,
-    state: 'held',
-    reason: 'Checking the terminal',
+    state: 'sending',
+    reason: CHECKING_TERMINAL_REASON,
+    transport: 'tmux',
+  };
+  const held: Delivery = { ...delivery, id: 'delivery-held', revision: 3, transport: 'tmux' };
+  const typing: Delivery = {
+    ...delivery,
+    id: 'delivery-typing',
+    revision: 4,
+    reason: TYPING_STARTED_REASON,
     transport: 'tmux',
     nativeAfterRevision: 10,
   };
-  expect(store.claimDelivery(held)).toBe(true);
+  for (const item of [checking, held, typing]) expect(store.claimDelivery(item)).toBe(true);
   store.close();
+  // Only builds of plan 2 before 2026-10-17 wrote `held`; the type no longer has it.
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE deliveries SET state = 'held' WHERE id = ?").run(held.id);
+  raw.close();
   const reopened = new SqliteStore(path);
-  expect(reopened.recoverInFlightDeliveries()).toBe(0);
-  expect(reopened.getDelivery(held.draftId, held.revision)).toEqual(held);
-  expect(reopened.load('conversation-1')?.deliveries).toContainEqual(held);
+  expect(reopened.recoverInFlightDeliveries()).toBe(3);
+  for (const revision of [2, 3])
+    expect(reopened.getDelivery('draft-1', revision)).toMatchObject({
+      state: 'failed',
+      reason: NOT_TYPED_AT_RESTART_REASON,
+    });
+  expect(reopened.getDelivery('draft-1', 4)).toMatchObject({
+    state: 'unconfirmed',
+    reason: TYPING_STARTED_REASON,
+    nativeAfterRevision: 10,
+  });
   reopened.close();
 });

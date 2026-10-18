@@ -27,7 +27,11 @@ export interface DeliveryEvidence {
   nativeMessageId: string;
 }
 export const DIALOG_OPEN_REASON = 'A dialog is open in the terminal';
-export const WORKING_HOLD_REASON = 'Waiting for Claude to finish';
+/** Stored on a terminal send from its claim until typing starts; at startup it means nothing was typed. */
+export const CHECKING_TERMINAL_REASON = 'Checking the terminal';
+/** A terminal send Gloss stopped (quit or crash) before typing started. */
+export const NOT_TYPED_AT_RESTART_REASON =
+  'Gloss stopped before typing this message; nothing was sent';
 /** Persisted just before a terminal paste; a delivery with this reason is never typed again. */
 export const TYPING_STARTED_REASON = 'Typing started in the terminal; Gloss will not type it again';
 
@@ -71,6 +75,11 @@ export interface Delivery {
   englishText: string;
   state: DeliveryState;
   reason?: string;
+  /**
+   * A terminal send Gloss did not type because the terminal needs the user (spec 2.1); the UI shows the terminal.
+   * Kept in memory only, so it describes the Send that just returned. Never stored.
+   */
+  openTerminal?: true;
 }
 /** The channel accepted the handoff; Claude's matching reply is still pending. */
 export function isChannelAwaitingReply(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
@@ -126,10 +135,11 @@ export function canSendWhileWorking(
     (transport === 'tmux' && capabilities?.tmuxSendWhileBusy),
   );
 }
-export type SendGate = 'send' | 'hold' | 'block';
+export type SendGate = 'send' | 'block';
 /**
- * Whether a send may go out in this coding state. A terminal send waits ("hold") while a dialog or approval prompt is
- * open, because typing would answer it; channel and peer messages queue inside Claude, so a dialog does not stop them.
+ * Whether a send may go out in this coding state. A terminal send is checked against the screen when it is sent, so
+ * an open dialog or approval prompt shows the terminal there instead of blocking here; channel and peer messages
+ * queue inside Claude, so a dialog does not stop them either.
  */
 export function sendGate(
   state: CodingState,
@@ -138,10 +148,8 @@ export function sendGate(
 ): SendGate {
   if (state === 'disconnected') return 'block';
   if (state === 'idle') return 'send';
-  if (transport === 'tmux') {
-    if (state === 'approval-required' || state === 'dialog-open') return 'hold';
-    return canSendWhileWorking(capabilities, transport) ? 'send' : 'hold';
-  }
+  if (transport === 'tmux' && (state === 'approval-required' || state === 'dialog-open'))
+    return 'send';
   if (state === 'approval-required') return 'block';
   return canSendWhileWorking(capabilities, transport) ? 'send' : 'block';
 }
