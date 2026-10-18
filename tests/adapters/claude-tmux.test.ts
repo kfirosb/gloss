@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { appendFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,7 +17,7 @@ import {
 } from '../../src/agents/claude/tmux-delivery.js';
 import { DIALOG_OPEN_REASON, type Delivery, type SendContext } from '../../src/core/contracts.js';
 import { harness } from './agent-harness.js';
-import { fixtureTerminal } from './tmux-fixtures.js';
+import { CAPTURED_QUEUED, FIXTURE_DIR, fixtureTerminal } from './tmux-fixtures.js';
 
 type Harness = Awaited<ReturnType<typeof harness>>;
 const cleanups: (() => Promise<void>)[] = [];
@@ -206,6 +206,21 @@ it('types into the terminal, reports typing-started first, and confirms by the t
     'capture',
     'enter',
   ]);
+});
+/** Stands in for Claude folding the typed message into a running tool call: the captured 2.1.302 records. */
+const recordQueued = (h: Harness) => async () => {
+  const captured = await readFile(join(FIXTURE_DIR, CAPTURED_QUEUED.file), 'utf8');
+  await appendFile(h.transcript, captured.replaceAll(CAPTURED_QUEUED.sessionId, h.sessionRef));
+};
+it('confirms a message Claude took into a running tool call by its queued_command record', async () => {
+  const h = await claudeSession({ status: 'busy', version: '2.1.302' });
+  const { terminal } = fixtureTerminal('2.1.301', 'empty', { onEnter: recordQueued(h) });
+  const connection = await connect(h, terminal);
+  const result = await connection.send('delivery-1', CAPTURED_QUEUED.prompt, [], tmux);
+  expect(result).toMatchObject({
+    state: 'sent',
+    nativeMessageId: 'transcript:' + CAPTURED_QUEUED.recordId,
+  });
 });
 it('types nothing when the send cannot record that typing started', async () => {
   const h = await claudeSession();

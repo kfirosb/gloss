@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../src/core/contracts.js';
 import { recordOf } from '../../src/core/json-record.js';
-import { claudeMessage, parseClaudeRecord } from '../../src/agents/claude/index.js';
+import {
+  claudeMessage,
+  parseClaudeRecord,
+  parseTypedEvidence,
+} from '../../src/agents/claude/index.js';
 import type { FileReference } from '../../src/core/file-references.js';
 import { createTmux } from '../../src/runtime/tmux.js';
 import {
@@ -44,6 +48,7 @@ import {
 import {
   CAPTURED,
   CAPTURED_LONG,
+  CAPTURED_QUEUED,
   CAPTURED_STASH,
   FIXTURE_DIR,
   FIXTURE_VERSIONS,
@@ -897,3 +902,93 @@ describe.each(STASH_FIXTURE_VERSIONS)(
     });
   },
 );
+
+describe('a message Claude folded into a running tool call (captured Claude 2.1.302)', () => {
+  const records = readFileSync(join(FIXTURE_DIR, CAPTURED_QUEUED.file), 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .flatMap((line, offset) => {
+      const record = recordOf(JSON.parse(line));
+      return record && typeof record.sessionId === 'string'
+        ? [{ record, offset, sessionRef: record.sessionId }]
+        : [];
+    });
+  const evidence = records.flatMap(({ record, offset, sessionRef }) => {
+    const message = parseTypedEvidence(record, offset, sessionRef).message;
+    return message ? [message] : [];
+  });
+  const send = { id: 'send', body: CAPTURED_QUEUED.prompt, after: -1 };
+  it('has no user record for it, so the conversation view reads it as before', () => {
+    const shown = records.flatMap(
+      ({ record, offset, sessionRef }) =>
+        parseClaudeRecord(record, offset, sessionRef).message ?? [],
+    );
+    expect(
+      shown.some((m) => m.role === 'user' && sameTypedText(m.text, CAPTURED_QUEUED.prompt)),
+    ).toBe(false);
+  });
+  it('confirms the send by its queued_command record', () => {
+    expect([...assignTypedMessages([send], evidence)]).toEqual([
+      ['send', CAPTURED_QUEUED.recordId],
+    ]);
+  });
+  it('gives the record to one send only: the first of two identical sends', () => {
+    const second = { id: 'second', body: CAPTURED_QUEUED.prompt, after: -1 };
+    expect([...assignTypedMessages([send, second], evidence)]).toEqual([
+      ['send', CAPTURED_QUEUED.recordId],
+    ]);
+  });
+  it('does not confirm another text, a send pasted after the record, or a send whose record is taken', () => {
+    const queued = evidence.find((m) => m.sourceId === CAPTURED_QUEUED.recordId);
+    expect(queued).toBeDefined();
+    expect(assignTypedMessages([{ ...send, body: 'Case six d, reply ok' }], evidence).size).toBe(0);
+    expect(assignTypedMessages([{ ...send, after: queued?.revision ?? 0 }], evidence).size).toBe(0);
+    expect(assignTypedMessages([send], evidence, new Set([CAPTURED_QUEUED.recordId])).size).toBe(0);
+  });
+  // Synthetic records (not captured): queued prompts that are not a person's typing.
+  it('does not take a channel, peer or other queued prompt as typing (synthetic)', () => {
+    const marked =
+      '<channel source="language-assistant" request_id="delivery-q1">\nFix it\n</channel>';
+    const queued = (prompt: string, origin: unknown, type = 'queued_command') => ({
+      type: 'attachment',
+      uuid: 'synthetic-queued',
+      sessionId: 's',
+      attachment: { type, prompt, origin },
+    });
+    const confirms = (record: ReturnType<typeof queued>, body: string) =>
+      assignTypedMessages(
+        [{ id: 'a', body, after: -1 }],
+        [parseTypedEvidence(record, 0, 's').message ?? []].flat(),
+      ).size > 0;
+    expect(confirms(queued('Fix it', { kind: 'human' }), 'Fix it')).toBe(true);
+    expect(
+      parseTypedEvidence(queued(marked, { kind: 'channel', server: 'language-assistant' }), 0, 's'),
+    ).toEqual({
+      channelSeen: 'delivery-q1',
+    });
+    expect(
+      confirms(queued(marked, { kind: 'channel', server: 'language-assistant' }), marked),
+    ).toBe(false);
+    expect(confirms(queued(marked, { kind: 'human' }), marked)).toBe(false);
+    expect(confirms(queued('Fix it', { kind: 'peer' }), 'Fix it')).toBe(false);
+    expect(confirms(queued('Fix it', undefined), 'Fix it')).toBe(false);
+    expect(confirms(queued('Fix it', { kind: 'human' }, 'other_attachment'), 'Fix it')).toBe(false);
+    expect(() => parseTypedEvidence(queued('Fix it', { kind: 'human' }), 0, 'other')).toThrow();
+  });
+  it('unwraps one whole pasted-content wrapper in a queued prompt, as in a user record (synthetic)', () => {
+    const record = {
+      type: 'attachment',
+      uuid: 'synthetic-queued',
+      sessionId: 's',
+      attachment: {
+        type: 'queued_command',
+        prompt: '\n\n<pasted_content id="aa11">\nFix it\nnow\n</pasted_content id="aa11">\n',
+        origin: { kind: 'human' },
+      },
+    };
+    const message = parseTypedEvidence(record, 0, 's').message;
+    expect(
+      message && [...assignTypedMessages([{ id: 'a', body: 'Fix it\nnow', after: -1 }], [message])],
+    ).toEqual([['a', 'synthetic-queued']]);
+  });
+});

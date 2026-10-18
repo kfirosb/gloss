@@ -415,6 +415,38 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
     ...(deliveryId ? { delivery: deliveryId } : {}),
   };
 }
+/**
+ * What can confirm a message typed into Gloss's terminal: the user records the conversation shows, and, from Claude
+ * 2.1.302 (tests/fixtures/tmux-screens/claude-queued-tool-2.1.302.jsonl), a prompt a person typed while Claude ran a
+ * tool call. Claude folds that prompt into the running turn as a `queued_command` attachment and writes no user
+ * record for it. Only terminal confirmation reads this; the conversation view reads `parseClaudeRecord`.
+ */
+export function parseTypedEvidence(record: JsonRecord, offset: number, sessionRef: string): Parsed {
+  const parsed = parseClaudeRecord(record, offset, sessionRef);
+  if (record.type !== 'attachment' || parsed.channelSeen) return parsed;
+  const attachment = recordOf(record.attachment);
+  const prompt = attachment?.prompt;
+  if (
+    attachment?.type !== 'queued_command' ||
+    recordOf(attachment.origin)?.kind !== 'human' ||
+    typeof prompt !== 'string' ||
+    // A channel message's wrapper is never a person's typing, whatever origin the record names.
+    CHANNEL_REQUEST_MARKER.test(prompt) ||
+    record.sessionId !== sessionRef ||
+    typeof record.uuid !== 'string'
+  )
+    return parsed;
+  return {
+    message: {
+      sourceId: record.uuid,
+      revision: offset + 1,
+      role: 'user',
+      text: prompt,
+      complete: true,
+      ...(typeof record.timestamp === 'string' ? { timestamp: record.timestamp } : {}),
+    },
+  };
+}
 export function claudeMessage(text: string, attachments: Attachment[] = []): string {
   if (!attachments.length) return text;
   if (attachments.every(isFileReference)) return `${text}\n\n${attachmentManifest(attachments)}`;
@@ -540,6 +572,12 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       const transcript = new Transcript(
         path,
         (record, offset) => parseClaudeRecord(record, offset, target.sessionRef),
+        options.pageSize,
+      );
+      /** The same transcript read for terminal confirmation only, where a queued prompt also counts. */
+      const typedEvidence = new Transcript(
+        path,
+        (record, offset) => parseTypedEvidence(record, offset, target.sessionRef),
         options.pageSize,
       );
       const stateDir = options.stateDir ?? join(homedir(), '.language-assistant');
@@ -759,7 +797,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           send,
         ];
         const messages = await typedMessagesAfter(
-          (cursor) => transcript.history(cursor),
+          (cursor) => typedEvidence.history(cursor),
           Math.min(...sends.map((item) => item.after)),
         );
         return assignTypedMessages(sends, messages, taken).get(send.id);

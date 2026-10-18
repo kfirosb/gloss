@@ -58,6 +58,17 @@ export const CAPTURED_LONG = {
   /** The scratch project the references point into, as the scrubbed transcript names it. */
   project: (version: string) => `/fixture/home/project-long-${version.replaceAll('.', '-')}`,
 } as const;
+/**
+ * `claude-queued-tool-2.1.302.jsonl`: from a disposable 2.1.302 session (plan 2b manual case 6c), a message typed
+ * while Claude ran `Bash(sleep 12 && echo done)`. Claude folded it into the running turn: two queue-operation
+ * records, the tool result, one `queued_command` attachment and the answer, and no user record for it.
+ */
+export const CAPTURED_QUEUED = {
+  file: 'claude-queued-tool-2.1.302.jsonl',
+  prompt: 'Case six c, reply ok',
+  recordId: 'b2bb2ee6-e356-4eb8-9611-6ae065bf9480',
+  sessionId: '71794311-5bc3-45ea-bd47-3446ed594b22',
+} as const;
 /** Versions with the stash captures (the capture script's `stash` mode); 2.1.296 is the screen reader's floor. */
 export const STASH_FIXTURE_VERSIONS = ['2.1.296', '2.1.302'] as const;
 /** The texts the capture script's `stash` mode typed; keep them identical to its constants. */
