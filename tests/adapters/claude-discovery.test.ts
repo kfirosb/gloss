@@ -171,9 +171,11 @@ it.runIf(process.platform === 'darwin')(
       '/tmp/s105.sock': [],
       '/tmp/s106.sock': [{ pid: 106, command: 'claude.exe' }],
     };
-    const runner: ProcessRunner = async function* (executable, args) {
+    const psTimeouts: (number | undefined)[] = [];
+    const runner: ProcessRunner = async function* (executable, args, _input, _signal, options) {
       if (executable === '/usr/sbin/lsof')
         for (const line of ownerLines(owners, lsofPaths(args))) yield { type: 'line', line };
+      if (executable === '/bin/ps') psTimeouts.push(options?.timeoutMs);
       if (executable === '/bin/ps' && args[1] === '104')
         yield {
           type: 'line',
@@ -186,6 +188,8 @@ it.runIf(process.platform === 'darwin')(
       new AbortController().signal,
     );
     expect(scan.complete).toBe(true);
+    // The socketless session's `ps` check keeps its 3 s bound: a loaded Mac can be slow to answer.
+    expect(psTimeouts).toEqual([3000]);
     expect(scan.candidates[0]?.sessionTitle).toBe('Video editor');
     expect(scan.candidates[1]?.sessionTitle).toBeUndefined();
     expect(

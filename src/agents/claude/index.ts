@@ -110,12 +110,19 @@ async function liveClaude(
   if (messagingSocketPath) return liveness.check({ ...record, messagingSocketPath });
   return (await psOwnsPid(record, runner)) ? 'alive' : 'not-alive';
 }
+/** How long the `ps` check of a session without a messaging socket may run, in milliseconds. */
+const SOCKETLESS_PS_TIMEOUT_MS = 3000;
 async function psOwnsPid(
   record: ClaudeSessionRecord,
   runner: ClaudeAdapterOptions['runner'],
 ): Promise<boolean> {
   if (process.platform !== 'darwin') return false;
-  const live = await readProcess(record.pid, new AbortController().signal, runner);
+  const live = await readProcess(
+    record.pid,
+    new AbortController().signal,
+    SOCKETLESS_PS_TIMEOUT_MS,
+    runner,
+  );
   return live?.pid === record.pid && isClaudeExecutable(live.command, record.version);
 }
 /** A session's messaging socket can be written: with own-child credentials, or directly on a Unix platform. */

@@ -355,6 +355,22 @@ describe('experimental native Claude channel registry', () => {
     expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(record);
   });
 
+  // npm and Homebrew installs run as `claude.exe`; it binds exactly like `claude` or the versioned binary.
+  it.each([
+    {
+      command: '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe',
+      binds: true,
+    },
+    { command: '/usr/local/bin/claude', binds: true },
+    { command: '/usr/local/bin/node', binds: false },
+  ])('binds the Claude ancestor running as $command: $binds', async ({ command, binds }) => {
+    const f = await fixture();
+    f.table.get(200)!.command = command;
+    const registration = createChannelRegistry(f.options).registerChannel();
+    if (binds) expect((await registration).claudePid).toBe(200);
+    else await expect(registration).rejects.toThrow();
+  });
+
   it('creates the private state root and distinct credentials for each registration', async () => {
     const f = await fixture();
     await rm(join(f.dir, 'state'), { recursive: true });

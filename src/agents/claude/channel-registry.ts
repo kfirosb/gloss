@@ -34,6 +34,8 @@ export interface ChannelRegistryOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 const MAX_RECORD = 65_536;
+/** How long one `ps` identity probe may run, in milliseconds; ancestry runs up to 17 of them per binding. */
+const IDENTITY_PS_TIMEOUT_MS = 1000;
 const positivePid = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 const validPort = (value: unknown): value is number => positivePid(value) && value <= 65535;
@@ -126,7 +128,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     if (!positivePid(pid) || signal.aborted) return undefined;
     let value: ChannelProcess | undefined;
     if (options.probe) value = await options.probe(pid, signal);
-    else value = await readProcess(pid, signal, options.runner);
+    else value = await readProcess(pid, signal, IDENTITY_PS_TIMEOUT_MS, options.runner);
     return value &&
       value.pid === pid &&
       value.uid === uid() &&

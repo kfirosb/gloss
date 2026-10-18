@@ -95,6 +95,7 @@ it('reads one process with ps in UTC and the C locale, and rejects anything but 
     await readProcess(
       4242,
       signal,
+      2500,
       runner([
         ' 4242     1   501 Sat Oct 18 10:00:00 2026 /Users/x/.local/share/claude/versions/2.1.302',
       ]),
@@ -108,9 +109,10 @@ it('reads one process with ps in UTC and the C locale, and rejects anything but 
   });
   expect(calls[0]?.args).toEqual(['-p', '4242', '-o', 'pid=,ppid=,uid=,lstart=,comm=']);
   expect(calls[0]?.options?.env).toMatchObject({ TZ: 'UTC', LC_ALL: 'C' });
-  expect(await readProcess(4242, signal, runner([], 1))).toBeUndefined();
-  expect(await readProcess(4242, signal, runner(['a', 'b']))).toBeUndefined();
-  expect(await readProcess(4242, signal, runner(['not ps output']))).toBeUndefined();
+  expect(calls[0]?.options?.timeoutMs).toBe(2500);
+  expect(await readProcess(4242, signal, 2500, runner([], 1))).toBeUndefined();
+  expect(await readProcess(4242, signal, 2500, runner(['a', 'b']))).toBeUndefined();
+  expect(await readProcess(4242, signal, 2500, runner(['not ps output']))).toBeUndefined();
 });
 
 it('quotes a folder for a shown shell command', () => {

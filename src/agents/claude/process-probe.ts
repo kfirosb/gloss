@@ -9,8 +9,6 @@ export interface ProcessInfo {
   startedAt: string;
   command: string;
 }
-/** How long one `ps` call may run, in milliseconds. */
-const PS_TIMEOUT_MS = 1000;
 /** Bound on one `ps` call's output and on each line, in bytes; one process is one short line. */
 const PS_MAX_OUTPUT_BYTES = 4096;
 /** Bound on one `ps` call's diagnostics, in bytes. */
@@ -25,16 +23,20 @@ export function isClaudeExecutable(command: string, version: string): boolean {
   const name = basename(command);
   return name === 'claude' || name === 'claude.exe' || name === version;
 }
-/** Reads one process with `ps`; undefined when it does not exist or the output is not exactly one well-formed line. */
+/**
+ * Reads one process with `ps`; undefined when it does not exist, `ps` takes longer than `timeoutMs` milliseconds, or
+ * the output is not exactly one well-formed line. Each caller names its own timeout: a busy Mac can be slow to answer.
+ */
 export async function readProcess(
   pid: number,
   signal: AbortSignal,
+  timeoutMs: number,
   runner: ProcessRunner = runProcess,
 ): Promise<ProcessInfo | undefined> {
   const result = await collectProcess(
     runner('/bin/ps', ['-p', String(pid), '-o', 'pid=,ppid=,uid=,lstart=,comm='], '', signal, {
       env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' },
-      timeoutMs: PS_TIMEOUT_MS,
+      timeoutMs,
       maxOutputBytes: PS_MAX_OUTPUT_BYTES,
       maxLineBytes: PS_MAX_OUTPUT_BYTES,
       maxDiagnosticBytes: PS_MAX_DIAGNOSTIC_BYTES,
