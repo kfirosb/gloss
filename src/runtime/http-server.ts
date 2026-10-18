@@ -1,4 +1,5 @@
 import { MAX_UPLOAD_REQUEST_BYTES } from '../core/content-policy.js';
+import { parseMoveRequest } from './claude-move.js';
 import { MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { URL } from 'node:url';
@@ -187,6 +188,17 @@ async function sessionRoute(
     res.setHeader('cache-control', 'no-store');
     respond(res, 200, await app.claudeRoute(id));
     return true;
+  }
+  if (route === 'claude-move') {
+    res.setHeader('cache-control', 'no-store');
+    if (req.method === 'GET' && app.claudeMoveStatus) {
+      respond(res, 200, await app.claudeMoveStatus(id));
+      return true;
+    }
+    if (req.method === 'POST' && app.moveClaude) {
+      respond(res, 200, await app.moveClaude(id, parseMoveRequest(await readBody(req, 512))));
+      return true;
+    }
   }
   if (route === 'language') {
     res.setHeader('cache-control', 'no-store');

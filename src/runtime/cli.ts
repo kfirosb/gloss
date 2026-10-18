@@ -118,6 +118,7 @@ export async function launch(args: string[]) {
     attention: launchServices.attention,
     approveLaunchFolder: launchServices.approveFolder,
     endLaunchesInFolder: launchServices.endLaunchesInFolder,
+    claudeMove: launchServices.claudeMove,
     dictation,
     ...(process.env.LANGUAGE_PANEL_CAPABILITY
       ? { capability: process.env.LANGUAGE_PANEL_CAPABILITY }

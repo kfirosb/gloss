@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApplication } from '../../src/runtime/application.js';
 import { startServer } from '../../src/runtime/http-server.js';
+import type { ClaudeMoveService, ClaudeMoveStatus } from '../../src/runtime/claude-move.js';
 import type { PeerSetting } from '../../src/runtime/claude-peer-setting.js';
 import type { RegistrationStatus } from '../../src/runtime/claude-registration.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
@@ -167,4 +168,57 @@ it('reports the delivery route of a Claude session and refuses it for another ag
   claude.route = { transport: null, reason: 'Gloss can’t reach this session yet.' };
   expect(await (await call(url('A'), 'GET')).json()).toEqual(claude.route);
   expect((await call(url('C'), 'GET')).status).toBe(400);
+});
+
+it('reads Move to Gloss status and accepts only exact move requests, only for Claude sessions', async () => {
+  const folder = await root();
+  const project = join(folder, 'project');
+  await mkdir(project);
+  const identity = { pid: 100, procStart: 'Sat Oct 18 10:00:00 2026' };
+  const status = vi.fn(async (): Promise<ClaudeMoveStatus> => ({
+    state: 'ready',
+    process: identity,
+  }));
+  const act = vi.fn(async (): Promise<ClaudeMoveStatus> => ({ state: 'in-gloss' }));
+  const close = vi.fn();
+  const claudeMove: ClaudeMoveService = { status, act, close };
+  const app = createApplication({
+    store: new SqliteStore(':memory:'),
+    agents: [],
+    languageBackends: {},
+    capability: 'cap',
+    attachmentRoot: join(folder, 'uploads'),
+    claudeMove,
+  });
+  clean.push(() => app.close());
+  const target = {
+    agent: 'claude' as const,
+    sessionRef: '11111111-1111-4111-8111-111111111111',
+    projectId: project,
+  };
+  await app.sessions?.register(target, 'A');
+  await app.sessions?.register(
+    { agent: 'codex', sessionRef: '22222222-2222-4222-8222-222222222222', projectId: project },
+    'C',
+  );
+  const server = await startServer(app);
+  clean.push(() => server.close());
+  const url = (id: string) => new URL(`/api/sessions/${id}/claude-move`, server.url).href;
+  expect((await call(url('A'), 'GET', undefined, false)).status).toBe(401);
+  expect((await call(url('missing'), 'GET')).status).toBe(404);
+  expect((await call(url('C'), 'GET')).status).toBe(400);
+  expect(await (await call(url('A'), 'GET')).json()).toEqual({ state: 'ready', process: identity });
+  expect(status).toHaveBeenCalledWith(target);
+  for (const bad of [{}, { action: 'move' }, { action: 'move', ...identity, signal: 'SIGKILL' }])
+    expect((await call(url('A'), 'POST', bad)).status).toBe(400);
+  expect((await call(url('C'), 'POST', { action: 'move', ...identity })).status).toBe(400);
+  expect(act).not.toHaveBeenCalled();
+  expect(await (await call(url('A'), 'POST', { action: 'move', ...identity })).json()).toEqual({
+    state: 'in-gloss',
+  });
+  expect(act).toHaveBeenLastCalledWith(target, { action: 'move', expected: identity });
+  await call(url('A'), 'POST', { action: 'cancel' });
+  expect(act).toHaveBeenLastCalledWith(target, { action: 'cancel' });
+  await app.close();
+  expect(close).toHaveBeenCalled();
 });

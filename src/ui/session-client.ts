@@ -73,6 +73,18 @@ export class SessionClient {
   claudeRoute(signal?: AbortSignal) {
     return sessionRequest<unknown>(this.base + '/claude-route', signal ? { signal } : {});
   }
+  /** Untrusted until read as a ClaudeMoveStatus. */
+  claudeMove(signal?: AbortSignal) {
+    return sessionRequest<unknown>(this.base + '/claude-move', signal ? { signal } : {});
+  }
+  moveClaude(request: import('../runtime/claude-move.js').ClaudeMoveRequest) {
+    return sessionRequest<unknown>(this.base + '/claude-move', {
+      method: 'POST',
+      body: JSON.stringify(
+        request.action === 'cancel' ? request : { action: request.action, ...request.expected },
+      ),
+    });
+  }
   prepareClaudeChannel() {
     return sessionRequest<import('../runtime/claude-channel-setup.js').ChannelSetup>(
       this.base + '/claude-channel',

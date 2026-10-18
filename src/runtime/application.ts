@@ -63,6 +63,7 @@ import {
   type PeerSettingService,
 } from './claude-peer-setting.js';
 import { createClaudeChannelSetup, type ChannelSetupService } from './claude-channel-setup.js';
+import type { ClaudeMoveRequest, ClaudeMoveService, ClaudeMoveStatus } from './claude-move.js';
 import { createClaudeExecutable } from './claude-config.js';
 import {
   createClaudeRegistration,
@@ -90,6 +91,7 @@ export interface ApplicationOptions {
   channelSetup?: ChannelSetupService;
   claudeRegistration?: RegistrationService;
   claudePeerSetting?: PeerSettingService;
+  claudeMove?: ClaudeMoveService;
   capability?: string;
   store: ConversationStore &
     SessionStore &
@@ -179,6 +181,9 @@ export interface Application {
   claudePeerSetting?(id: string): Promise<PeerSetting>;
   allowClaudePeers?(id: string): Promise<PeerSetting>;
   changeClaudeRegistration?(action: 'register' | 'remove'): Promise<RegistrationStatus>;
+  /** Move to Gloss for one Claude session (spec 5). */
+  claudeMoveStatus?(id: string): Promise<ClaudeMoveStatus>;
+  moveClaude?(id: string, request: ClaudeMoveRequest): Promise<ClaudeMoveStatus>;
   uploadImage?(input: { name: string; data: string }, sessionId?: string): Promise<ImageAttachment>;
   readonly files?: FileRegistry;
   readImage?(id: string, sessionId?: string): Promise<ImageAttachment>;
@@ -360,6 +365,13 @@ export function createApplication(options: ApplicationOptions): Application {
     const target = savedTarget(id);
     if (target.agent !== 'claude') throw new Error('Peer settings apply only to Claude sessions.');
     return target.projectId;
+  };
+  const claudeMove = options.claudeMove;
+  const claudeMoveTarget = (id: string) => {
+    const target = savedTarget(id);
+    if (target.agent !== 'claude')
+      throw new Error('Move to Gloss applies only to Claude sessions.');
+    return target;
   };
   const pkg = readPackage();
   const folderStore = options.store as Partial<ConnectedFolderStore>;
@@ -812,6 +824,18 @@ export function createApplication(options: ApplicationOptions): Application {
       requireOpen();
       return claudeRegistration.status();
     },
+    ...(claudeMove
+      ? {
+          async claudeMoveStatus(id: string) {
+            requireOpen();
+            return claudeMove.status(claudeMoveTarget(id));
+          },
+          async moveClaude(id: string, request: ClaudeMoveRequest) {
+            requireOpen();
+            return claudeMove.act(claudeMoveTarget(id), request);
+          },
+        }
+      : {}),
     async changeClaudeRegistration(action) {
       requireOpen();
       return action === 'register' ? claudeRegistration.register() : claudeRegistration.remove();
@@ -958,6 +982,7 @@ export function createApplication(options: ApplicationOptions): Application {
           options.dictation?.close();
           options.attention?.close();
           options.terminals?.close();
+          options.claudeMove?.close();
           options.launcher?.close();
           await catalog.close();
           await sessions.close();
