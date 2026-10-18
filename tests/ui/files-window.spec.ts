@@ -159,15 +159,14 @@ test('an off-screen saved window opens fully inside the viewport', async ({ page
 test('a TL;DR still loading for one file never lands on the next file', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await mockFiles(page);
-  await page.route('**/files/review-status?*', (r) =>
-    r.fulfill({ json: { summary: false, translation: false } }),
-  );
   let heldReview: Route | undefined;
+  let reviewHeld!: () => void;
   const reviewRequested = new Promise<void>((resolve) => {
-    void page.route('**/files/review', (r) => {
-      heldReview = r;
-      resolve();
-    });
+    reviewHeld = resolve;
+  });
+  await page.route('**/files/review', (r) => {
+    heldReview = r;
+    reviewHeld();
   });
   await page.goto('/#capability=test');
   await page.getByRole('button', { name: 'Files', exact: true }).click();
@@ -178,10 +177,21 @@ test('a TL;DR still loading for one file never lands on the next file', async ({
   await preview.getByRole('button', { name: 'TL;DR' }).click();
   await reviewRequested;
 
+  const aborted = page.waitForEvent('requestfailed', (request) =>
+    new URL(request.url()).pathname.endsWith('/files/review'),
+  );
   await win.getByRole('button', { name: 'Preview b.md', exact: true }).click();
   await expect(preview).toContainText('content of b.md');
+  // Switching files unmounts FileReview, which aborts its request: the response is aborted, not delivered.
+  await aborted;
 
-  await heldReview!.fulfill({ json: { path: 'a.md', mode: 'summary', text: 'summary of a' } });
+  // Fulfilling an already-aborted request may be refused by the browser; either way nothing may reach b.md.
+  await heldReview!
+    .fulfill({ json: { path: 'a.md', mode: 'summary', text: 'summary of a' } })
+    .catch(() => undefined);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   await expect(preview).toContainText('content of b.md');
   await expect(preview).not.toContainText('summary of a');
   await expect(preview.getByRole('button', { name: 'Show original' })).toHaveCount(0);
