@@ -1,5 +1,5 @@
 import { recordOf, type JsonRecord } from '../core/json-record.js';
-import { open, realpath } from 'node:fs/promises';
+import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -253,7 +253,24 @@ export class Transcript {
     } finally {
       await file.close();
     }
+    if (this.pendingStart > 0) this.initial.push(...(await this.activityLookback()));
     this.initial.push(...(await this.poll()));
+  }
+  /** Best effort: a failed lookback must not stop the live tail from attaching. */
+  private async activityLookback(): Promise<AgentEvent[]> {
+    const gap: AgentEvent = {
+      type: 'activity',
+      event: { kind: 'gap', reason: 'Older activity is not shown; the lookback is bounded.' },
+    };
+    try {
+      const { events, complete } = await this.lookbackActivity();
+      return [
+        ...(complete ? [] : [gap]),
+        ...events.map((event): AgentEvent => ({ type: 'activity', event })),
+      ];
+    } catch {
+      return [gap];
+    }
   }
   /** History reads old, bounded windows; their failures must not end the live tail. */
   private lookbackFailure(reason: string): never {
@@ -348,6 +365,73 @@ export class Transcript {
       await file.close();
     }
   }
+  /**
+   * Complete-row windows from `end` backward, newest first, at most `maxScans` of them.
+   * `next` is where the following window ends; it is 0 once the file start is reached.
+   */
+  private async *windows(
+    file: FileHandle,
+    end: number,
+    maxScans: number,
+  ): AsyncGenerator<{ rows: { start: number; line: Buffer }[]; start: number; next: number }> {
+    let scans = 0;
+    while (end > 0 && scans++ < maxScans) {
+      const previousEnd = end;
+      let window = CHUNK;
+      let start: number;
+      let chunk: Buffer;
+      let first: number;
+      // A record larger than the normal window can leave only its trailing
+      // newline in view. Expand the lookback until a complete row is present;
+      // returning the same cursor here would make replay loop forever.
+      for (;;) {
+        start = Math.max(0, end - window);
+        chunk = Buffer.alloc(end - start);
+        await file.read(chunk, 0, chunk.length, start);
+        first = start > 0 ? chunk.indexOf(10) + 1 : 0;
+        if (!start || (first > 0 && first < chunk.length)) break;
+        if (window >= CHUNK * MAX_SCAN)
+          this.lookbackFailure('Transcript record exceeds read bound');
+        window *= 2;
+      }
+      const rows: { start: number; line: Buffer }[] = [];
+      let at = first;
+      let newline: number;
+      while ((newline = chunk.indexOf(10, at)) >= 0) {
+        rows.push({ start: start + at, line: chunk.subarray(at, newline) });
+        at = newline + 1;
+      }
+      end = start ? start + first : 0;
+      yield { rows, start, next: end };
+      if (end >= previousEnd) this.lookbackFailure('Transcript history did not advance');
+    }
+  }
+  /**
+   * Activity from the bounded range before the live tail, ascending by position.
+   * Failures reject without marking the live tail broken.
+   */
+  async lookbackActivity(
+    maxScans = MAX_SCAN,
+  ): Promise<{ events: ActivityEvent[]; complete: boolean }> {
+    const { file } = await this.checkedFile();
+    try {
+      const newestFirst: ActivityEvent[][] = [];
+      let complete = this.pendingStart === 0;
+      for await (const window of this.windows(file, this.pendingStart, maxScans)) {
+        const events: ActivityEvent[] = [];
+        for (const row of window.rows)
+          events.push(
+            ...(this.decode(row.line, row.start, (reason) => this.lookbackFailure(reason))
+              .activity ?? []),
+          );
+        newestFirst.push(events);
+        complete = window.start === 0;
+      }
+      return { events: newestFirst.reverse().flat(), complete };
+    } finally {
+      await file.close();
+    }
+  }
   async history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }> {
     const { file, size } = await this.checkedFile();
     try {
@@ -360,37 +444,11 @@ export class Transcript {
         if (!Number.isSafeInteger(end) || end > size) throw new Error('Invalid history cursor');
       }
       const found = new Map<string, AgentMessage>();
-      let scans = 0;
       const revisions = new Map(this.seen);
-      while (end > 0 && scans++ < MAX_SCAN) {
-        const previousEnd = end;
-        let window = CHUNK;
-        let start: number;
-        let chunk: Buffer;
-        let first: number;
-        // A record larger than the normal window can leave only its trailing
-        // newline in view. Expand the lookback until a complete row is present;
-        // returning the same cursor here would make replay loop forever.
-        for (;;) {
-          start = Math.max(0, end - window);
-          chunk = Buffer.alloc(end - start);
-          await file.read(chunk, 0, chunk.length, start);
-          first = start > 0 ? chunk.indexOf(10) + 1 : 0;
-          if (!start || (first > 0 && first < chunk.length)) break;
-          if (window >= CHUNK * MAX_SCAN)
-            this.lookbackFailure('Transcript record exceeds read bound');
-          window *= 2;
-        }
-        const rows: { start: number; line: Buffer }[] = [];
-        let at = first;
-        let newline: number;
-        while ((newline = chunk.indexOf(10, at)) >= 0) {
-          rows.push({ start: start + at, line: chunk.subarray(at, newline) });
-          at = newline + 1;
-        }
+      for await (const window of this.windows(file, end, MAX_SCAN)) {
         // Normalize this bounded window forward before selecting the latest records backward.
         // Otherwise the last identical physical row would invent a newer semantic revision.
-        const normalized = rows.map((row) => {
+        const normalized = window.rows.map((row) => {
           const message = this.decode(row.line, row.start, (reason) =>
             this.lookbackFailure(reason),
           ).message;
@@ -407,9 +465,7 @@ export class Transcript {
           if (found.size >= this.pageSize) break;
         }
         if (found.size >= this.pageSize) break;
-        end = start + first;
-        if (!start) end = 0;
-        if (end >= previousEnd) this.lookbackFailure('Transcript history did not advance');
+        end = window.next;
       }
       return {
         messages: [...found.values()].reverse(),
