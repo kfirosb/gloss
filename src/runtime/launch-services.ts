@@ -12,6 +12,7 @@ import type { OpenSessionCandidate } from '../core/session-catalog.js';
 import {
   createSessionLauncher,
   defaultShell,
+  owningLaunches,
   type LaunchRecord,
   type LaunchStore,
 } from './session-launcher.js';
@@ -119,27 +120,6 @@ export function claimedCodexRefs(
     if (panel?.target.agent === 'codex') claimed.add(panel.target.sessionRef);
   }
   return claimed;
-}
-
-/** Launches of `agent` that own a session, directly or through their registered panel, in any state. */
-function owningLaunches(
-  agent: 'claude' | 'codex',
-  sessionRef: string,
-  launches: readonly LaunchRecord[],
-  sessions: readonly { id: string; target: Target }[],
-): LaunchRecord[] {
-  return launches.filter(
-    (l) =>
-      l.agent === agent &&
-      (l.sessionRef === sessionRef ||
-        (l.panelSessionId !== undefined &&
-          sessions.some(
-            (s) =>
-              s.id === l.panelSessionId &&
-              s.target.agent === agent &&
-              s.target.sessionRef === sessionRef,
-          ))),
-  );
 }
 
 /**
@@ -276,6 +256,7 @@ export function createLaunchServices(options: {
     tmux,
     store: options.store,
     sessions: { register: (...args) => live().sessions!.register(...args) },
+    panels: () => options.store.listSessions(),
     claudeExecutable: createClaudeExecutable(),
     async findCodex(launch, signal): Promise<Target | undefined> {
       // A cached probe from before the launch cannot contain its thread.

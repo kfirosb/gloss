@@ -111,7 +111,7 @@ export function glossHoldsSession(
   );
 }
 /** A launch that is not ended owns the session, and so does an ended one whose pane still runs. */
-function glossOwnsSession(gloss: GlossLaunches): boolean {
+export function glossOwnsSession(gloss: Pick<GlossLaunches, 'owners'>): boolean {
   return gloss.owners.some((launch) => launch.state !== 'ended' || launch.paneAlive);
 }
 /** One record for the session, with what `ps` reports for its pid now (undefined when nothing runs there). */

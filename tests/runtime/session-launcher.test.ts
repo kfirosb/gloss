@@ -15,6 +15,7 @@ import {
 import { splitArgs, type LaunchSettings } from '../../src/core/launch-settings.js';
 import type { Tmux } from '../../src/runtime/tmux.js';
 import type { Target } from '../../src/core/contracts.js';
+import type { SessionRecord } from '../../src/core/session-contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import {
   CLAUDE_SETUP_PROMPT,
@@ -131,6 +132,7 @@ async function setup(
     timeout?: number;
     retryDelaysMs?: number[];
     sleep?: (ms: number) => Promise<void>;
+    panels?: { id: string; target: Target }[];
   } = {},
 ) {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-launch-')));
@@ -146,6 +148,7 @@ async function setup(
     store,
     shell: '/bin/zsh',
     sessions: { register } as any,
+    panels: () => overrides.panels ?? [],
     claudeExecutable: async () => '/bin/claude',
     findCodex: overrides.findCodex
       ? (launch: LaunchRecord, signal: AbortSignal) => overrides.findCodex!(launch.panePid, signal)
@@ -1001,4 +1004,205 @@ it('run reports typed: false with a defined launch when typing into a ready shel
   const result = await launcher.run({ folder, command: 'make' });
   expect(result.typed).toBe(false);
   expect(result.launch).toMatchObject({ agent: 'shell', folder });
+});
+
+const RESUMED = '11111111-1111-4111-8111-111111111111';
+it('resumes an existing Claude session in tmux with the extra arguments and no channel flags, persisted', async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-resume-')));
+  dirs.push(folder);
+  const t = fakeTmux();
+  const path = join(folder, 'state.db');
+  const store = new SqliteStore(path);
+  store.writeLaunchSettings({
+    extraArgs: { claude: ['--add-dir', 'a', 'b'], codex: [] },
+    popup: 'auto',
+    terminalView: 'popup',
+  });
+  const register = vi.fn(async (target: Target): Promise<SessionRecord> => ({
+    id: 'panel-existing',
+    target,
+    canonicalRoot: folder,
+    projectName: 'project',
+    enabled: true,
+  }));
+  const launcher = createSessionLauncher({
+    tmux: async () => t.tmux,
+    store,
+    shell: '/bin/zsh',
+    sessions: { register },
+    panels: () => store.listSessions(),
+    claudeExecutable: async () => '/bin/claude',
+    findCodex: async () => undefined,
+    resolveExecutable: async () => '/bin/codex',
+    knownFolder: async (f: string) => f === folder,
+    sleep: async () => {},
+    identifyTimeoutMs: 20,
+    now: () => 7,
+  });
+  launchers.push(launcher);
+  const record = await launcher.resume(
+    await launcher.prepareResume({ sessionRef: RESUMED, folder }),
+  );
+  const session = [...t.live.values()][0];
+  expect(session?.argv).toEqual(['/bin/claude', '--resume', RESUMED, '--add-dir', 'a', 'b']);
+  expect(session?.argv.join(' ')).not.toMatch(/session-id|mcp-config|dangerously|channels|--$/);
+  expect(session?.env).toEqual({ ELECTRON_RUN_AS_NODE: '' });
+  expect(session?.cwd).toBe(folder);
+  // Identification registers the resumed session's own id; whatever panel that returns becomes the launch's panel.
+  expect(register.mock.calls[0]?.[0]).toEqual({
+    agent: 'claude',
+    sessionRef: RESUMED,
+    projectId: folder,
+  });
+  expect(record).toMatchObject({
+    agent: 'claude',
+    sessionRef: RESUMED,
+    panelSessionId: 'panel-existing',
+    state: 'running',
+  });
+  launcher.close();
+  store.close();
+  const reopened = new SqliteStore(path);
+  try {
+    expect(reopened.listLaunches()).toEqual([
+      expect.objectContaining({
+        id: record.id,
+        sessionRef: RESUMED,
+        panelSessionId: 'panel-existing',
+        state: 'running',
+        createdAt: 7,
+      }),
+    ]);
+  } finally {
+    reopened.close();
+  }
+});
+it('prepareResume refuses a bad id or an unknown folder and starts nothing', async () => {
+  const { launcher, folder, t } = await setup();
+  await expect(launcher.prepareResume({ sessionRef: '--help', folder })).rejects.toThrow(
+    'Invalid session',
+  );
+  await expect(
+    launcher.prepareResume({ sessionRef: RESUMED, folder: '/not-known' }),
+  ).rejects.toThrow('Choose a project folder');
+  expect(t.live.size).toBe(0);
+});
+it('prepareResume fails before anything is started when Claude, tmux or the launcher is unavailable', async () => {
+  const { launcher, folder, t, options } = await setup();
+  const noClaude = createSessionLauncher({
+    ...options,
+    claudeExecutable: async () => {
+      throw new Error('Claude not found');
+    },
+  });
+  launchers.push(noClaude);
+  await expect(noClaude.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'Claude not found',
+  );
+  const noTmux = createSessionLauncher({
+    ...options,
+    tmux: async () => {
+      throw new Error('tmux not found');
+    },
+  });
+  launchers.push(noTmux);
+  await expect(noTmux.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'tmux not found',
+  );
+  launcher.close();
+  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'Session launcher is closed',
+  );
+  expect(t.live.size).toBe(0);
+});
+it('resume refuses a session a Claude launch owns directly, and checks again when it starts', async () => {
+  const { launcher, folder, t } = await setup();
+  const first = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const second = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  await launcher.resume(first);
+  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'This session already runs in Gloss',
+  );
+  // Prepared before the first one started: the start re-checks, so a second pane never opens.
+  await expect(launcher.resume(second)).rejects.toThrow('This session already runs in Gloss');
+  expect(t.live.size).toBe(1);
+});
+it('resume refuses a session a Claude launch owns through its panel', async () => {
+  const { launcher, folder, t, store } = await setup({
+    panels: [{ id: 'panel-1', target: { agent: 'claude', sessionRef: RESUMED, projectId: '/p' } }],
+  });
+  store.putLaunch({
+    id: 'via-panel',
+    agent: 'claude',
+    folder,
+    panePid: 5,
+    panelSessionId: 'panel-1',
+    state: 'running',
+    createdAt: 1,
+  });
+  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'This session already runs in Gloss',
+  );
+  expect(t.live.size).toBe(0);
+});
+it('resume refuses while an ended launch of the session still has its pane, and allows it once the pane is gone', async () => {
+  const { launcher, folder, t, store } = await setup();
+  store.putLaunch({
+    id: 'ended-alive',
+    agent: 'claude',
+    folder,
+    panePid: 5,
+    sessionRef: RESUMED,
+    state: 'ended',
+    reason: 'Session is no longer running',
+    createdAt: 1,
+  });
+  t.live.set('la-ended-alive', { cwd: folder, argv: [], panePid: 5, currentCommand: 'claude' });
+  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
+    'This session already runs in Gloss',
+  );
+  t.live.delete('la-ended-alive');
+  const record = await launcher.resume(
+    await launcher.prepareResume({ sessionRef: RESUMED, folder }),
+  );
+  expect(record).toMatchObject({ sessionRef: RESUMED });
+  expect(t.live.size).toBe(1);
+});
+it('resume ignores other agents and other sessions, and starts only what prepareResume returned', async () => {
+  const { launcher, folder, t, store } = await setup();
+  store.putLaunch({
+    id: 'codex-same-ref',
+    agent: 'codex',
+    folder,
+    panePid: 5,
+    sessionRef: RESUMED,
+    state: 'running',
+    createdAt: 1,
+  });
+  store.putLaunch({
+    id: 'other-claude',
+    agent: 'claude',
+    folder,
+    panePid: 6,
+    sessionRef: '22222222-2222-4222-8222-222222222222',
+    state: 'running',
+    createdAt: 1,
+  });
+  const prepared = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  await expect(launcher.resume({ ...prepared, argv: ['/bin/sh', '-c', 'echo'] })).rejects.toThrow(
+    'Unknown resume',
+  );
+  expect(t.live.size).toBe(0);
+  await launcher.resume(prepared);
+  expect([...t.live.values()].map((s) => s.argv)).toEqual([['/bin/claude', '--resume', RESUMED]]);
+});
+it('two resumes of one session started together open one pane', async () => {
+  const { launcher, folder, t } = await setup();
+  const first = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const second = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const results = await Promise.allSettled([launcher.resume(first), launcher.resume(second)]);
+  expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+  expect(t.live.size).toBe(1);
+  // A preparation is used once, even after its start was refused.
+  await expect(launcher.resume(second)).rejects.toThrow('Unknown resume');
 });
