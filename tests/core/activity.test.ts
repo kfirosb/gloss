@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyActivityEvent, emptyActivity, summarizeToolCall } from '../../src/core/activity.js';
-import { ACTIVITY_CALL_LIMIT } from '../../src/core/activity-contracts.js';
+import { ACTIVITY_CALL_LIMIT, ACTIVITY_RESULT_CHARS } from '../../src/core/activity-contracts.js';
 
 const call = (id: string, position: number, extra = {}) => ({
   kind: 'call' as const,
@@ -138,6 +138,48 @@ describe('activity reducer', () => {
     });
     expect(s.tasks[0]).toMatchObject({ status: 'finished', report: 'All good.', finishedAt: 'T' });
     expect(s.running).toBe(0);
+  });
+  it('attaches an async subagent report by agentId and resets a stale translation', () => {
+    let s = applyActivityEvent(emptyActivity(), {
+      kind: 'task-start',
+      task: {
+        kind: 'subagent',
+        id: 'a3',
+        description: 'Explore',
+        position: 1,
+        depth: 0,
+        status: 'running',
+      },
+    });
+    s = applyActivityEvent(s, { kind: 'task-launched', id: 'a3', agentId: 'ag3', async: true });
+    s = applyActivityEvent(s, { kind: 'report', agentId: 'ag3', report: 'Found it.' });
+    expect(s.tasks[0]).toMatchObject({ status: 'running', report: 'Found it.' });
+    s = applyActivityEvent(s, { kind: 'task-end', id: 'a3', status: 'finished', finishedAt: 'T' });
+    expect(s.tasks[0]).toMatchObject({ status: 'finished', report: 'Found it.' });
+    const translated = {
+      ...s,
+      tasks: [
+        { ...s.tasks[0]!, reportTranslation: { text: 'נמצא.', status: 'complete' as const } },
+      ],
+    };
+    expect(
+      applyActivityEvent(translated, { kind: 'report', agentId: 'ag3', report: 'Found it.' }),
+    ).toBe(translated);
+    const resumed = applyActivityEvent(translated, {
+      kind: 'report',
+      agentId: 'ag3',
+      report: 'Second run.',
+    });
+    expect(resumed.tasks[0]!.report).toBe('Second run.');
+    expect(resumed.tasks[0]!.reportTranslation).toBeUndefined();
+    const unknown = applyActivityEvent(s, { kind: 'report', agentId: 'nope', report: 'x' });
+    expect(unknown).toBe(s);
+    const long = applyActivityEvent(s, {
+      kind: 'report',
+      agentId: 'ag3',
+      report: 'y'.repeat(ACTIVITY_RESULT_CHARS + 5),
+    });
+    expect(long.tasks[0]!.report).toHaveLength(ACTIVITY_RESULT_CHARS);
   });
   it('never finishes a background task on its result', () => {
     let s = applyActivityEvent(emptyActivity(), {

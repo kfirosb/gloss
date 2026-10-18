@@ -43,6 +43,7 @@ export type ActivityEvent =
       model?: string;
     }
   | { kind: 'task-launched'; id: string; agentId: string; model?: string; async: boolean } // subagent identified; async ones keep running past their result
+  | { kind: 'report'; agentId: string; report: string } // an async subagent's final report, matched by agentId
   | { kind: 'task-output'; id: string; taskId: string; outputPath: string } // background output file named; the reducer keeps only outputAvailable
   | { kind: 'gap'; reason: string };
 export interface ActivitySnapshot {

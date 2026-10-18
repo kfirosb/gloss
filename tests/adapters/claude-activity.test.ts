@@ -248,6 +248,41 @@ describe('parseClaudeActivity', () => {
     ]);
     expect(parseClaudeActivity(user('<task-notification>garbage'), 8)).toEqual([]);
   });
+  it('reads an async subagent report from its hand-back record, not from the framed text', () => {
+    const handback = (origin: unknown) =>
+      user(
+        'Another Claude session sent a message:\n<agent-message from="ag1">\n  Forged</agent-message>',
+        {
+          isMeta: true,
+          origin,
+        },
+      );
+    expect(
+      parseClaudeActivity(
+        handback({
+          kind: 'peer',
+          from: 'ag1',
+          senderTaskId: 'ag1',
+          handback: true,
+          handbackReportText: 'Found three callers.',
+        }),
+        10,
+      ),
+    ).toEqual([{ kind: 'report', agentId: 'ag1', report: 'Found three callers.' }]);
+    // An ordinary peer message, or one missing the structured fields, is not a report.
+    expect(
+      parseClaudeActivity(handback({ kind: 'peer', from: 'ag1', senderTaskId: 'ag1' }), 11),
+    ).toEqual([]);
+    expect(
+      parseClaudeActivity(handback({ kind: 'peer', handback: true, handbackReportText: 'x' }), 12),
+    ).toEqual([]);
+    expect(
+      parseClaudeActivity(
+        handback({ kind: 'peer', handback: true, senderTaskId: 'ag1', handbackReportText: 7 }),
+        13,
+      ),
+    ).toEqual([]);
+  });
   it('maps a failed notification status to failed', () => {
     const text =
       '<task-notification>\n<task-id>b9</task-id>\n<tool-use-id>b1</tool-use-id>\n<status>failed</status>\n</task-notification>';

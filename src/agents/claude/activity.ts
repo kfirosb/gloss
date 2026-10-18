@@ -139,13 +139,31 @@ export function parseClaudeActivity(
     });
   }
   if (record.type !== 'user') return [];
-  if (typeof body === 'string') return notificationEvents(body, record);
+  if (typeof body === 'string')
+    return [...handbackEvents(record), ...notificationEvents(body, record)];
   if (!Array.isArray(body)) return [];
   const results = body.flatMap((entry: unknown) => {
     const block = recordOf(entry);
     return block?.type === 'tool_result' ? [block] : [];
   });
   return results.length ? resultEvents(results, record) : [];
+}
+
+/**
+ * An async subagent's report arrives as a peer hand-back. Only the harness's structured origin
+ * fields are read; the framed message text is model output and is never parsed.
+ */
+function handbackEvents(record: JsonRecord): ActivityEvent[] {
+  const origin = recordOf(record.origin);
+  if (
+    origin?.kind !== 'peer' ||
+    origin.handback !== true ||
+    typeof origin.senderTaskId !== 'string' ||
+    !origin.senderTaskId ||
+    typeof origin.handbackReportText !== 'string'
+  )
+    return [];
+  return [{ kind: 'report', agentId: origin.senderTaskId, report: origin.handbackReportText }];
 }
 
 function notificationEvents(text: string, record: JsonRecord): ActivityEvent[] {
