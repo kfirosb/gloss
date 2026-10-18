@@ -1,6 +1,7 @@
 // Browser-safe: the UI folds live subagent streams with this reducer, so it must not import Node modules.
 import {
   ACTIVITY_CALL_LIMIT,
+  ACTIVITY_REPORT_CHARS,
   ACTIVITY_RESULT_CHARS,
   ACTIVITY_TASK_LIMIT,
   type ActivityEvent,
@@ -56,10 +57,8 @@ export function applyActivityEvent(
   switch (event.kind) {
     case 'call': {
       if (state.calls.some((call) => call.id === event.call.id)) return state;
-      return {
-        ...state,
-        calls: insertByPosition(state.calls, event.call, ACTIVITY_CALL_LIMIT),
-      };
+      const call = { ...event.call, input: event.call.input.slice(0, ACTIVITY_RESULT_CHARS) };
+      return { ...state, calls: insertByPosition(state.calls, call, ACTIVITY_CALL_LIMIT) };
     }
     case 'result': {
       const result = { ...event.result, text: event.result.text.slice(0, ACTIVITY_RESULT_CHARS) };
@@ -71,13 +70,19 @@ export function applyActivityEvent(
         calls[index] = { ...existing, result };
         next = { ...state, calls };
       }
+      const finishedAt = event.result.timestamp ? { finishedAt: event.result.timestamp } : {};
       return updateTask(next, event.id, (task) => {
-        if (task.kind !== 'subagent' || task.status !== 'running' || task.async) return undefined;
+        if (task.status !== 'running') return undefined;
+        // A background command or an async subagent keeps running past a successful launch result;
+        // a failed one (denied, invalid input) never started, so nothing else will end it.
+        if (task.kind === 'background')
+          return event.result.failed ? { ...task, status: 'failed', ...finishedAt } : undefined;
+        if (task.async && !event.result.failed) return undefined;
         return {
           ...task,
-          status: result.failed ? 'failed' : 'finished',
-          report: result.text,
-          ...(result.timestamp ? { finishedAt: result.timestamp } : {}),
+          status: event.result.failed ? 'failed' : 'finished',
+          report: event.result.text.slice(0, ACTIVITY_REPORT_CHARS),
+          ...finishedAt,
         };
       });
     }
@@ -106,7 +111,7 @@ export function applyActivityEvent(
             },
       );
     case 'report': {
-      const report = event.report.slice(0, ACTIVITY_RESULT_CHARS);
+      const report = event.report.slice(0, ACTIVITY_REPORT_CHARS);
       const index = state.tasks.findIndex(
         (task) => task.kind === 'subagent' && task.agentId === event.agentId,
       );

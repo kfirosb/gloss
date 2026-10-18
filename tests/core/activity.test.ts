@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { applyActivityEvent, emptyActivity, summarizeToolCall } from '../../src/core/activity.js';
-import { ACTIVITY_CALL_LIMIT, ACTIVITY_RESULT_CHARS } from '../../src/core/activity-contracts.js';
+import {
+  applyActivityEvent,
+  emptyActivity,
+  renderToolInput,
+  summarizeToolCall,
+} from '../../src/core/activity.js';
+import {
+  ACTIVITY_CALL_LIMIT,
+  ACTIVITY_REPORT_CHARS,
+  ACTIVITY_RESULT_CHARS,
+  type ActivityTask,
+} from '../../src/core/activity-contracts.js';
 
 const call = (id: string, position: number, extra = {}) => ({
   kind: 'call' as const,
@@ -177,9 +187,9 @@ describe('activity reducer', () => {
     const long = applyActivityEvent(s, {
       kind: 'report',
       agentId: 'ag3',
-      report: 'y'.repeat(ACTIVITY_RESULT_CHARS + 5),
+      report: 'y'.repeat(ACTIVITY_REPORT_CHARS + 5),
     });
-    expect(long.tasks[0]!.report).toHaveLength(ACTIVITY_RESULT_CHARS);
+    expect(long.tasks[0]!.report).toHaveLength(ACTIVITY_REPORT_CHARS);
   });
   it('never finishes a background task on its result', () => {
     let s = applyActivityEvent(emptyActivity(), {
@@ -200,6 +210,81 @@ describe('activity reducer', () => {
       result: { text: 'Command running in background with ID: x', failed: false },
     });
     expect(s.tasks[0]!.status).toBe('running');
+  });
+  it('keeps at most 2000 characters of a row input and result text', () => {
+    expect(ACTIVITY_RESULT_CHARS).toBe(2000);
+    expect(renderToolInput('Bash', { command: 'x'.repeat(5000) })).toHaveLength(2000);
+    expect(renderToolInput('Read', { file_path: 'y'.repeat(5000) }).length).toBe(2000);
+    let s = applyActivityEvent(emptyActivity(), call('t1', 1, { input: 'z'.repeat(5000) }));
+    s = applyActivityEvent(s, {
+      kind: 'result',
+      id: 't1',
+      result: { text: 'r'.repeat(5000), failed: false },
+    });
+    expect(s.calls[0]!.input).toHaveLength(2000);
+    expect(s.calls[0]!.result!.text).toHaveLength(2000);
+  });
+  it('keeps a synchronous subagent report beyond the row bound', () => {
+    let s = applyActivityEvent(emptyActivity(), {
+      kind: 'task-start',
+      task: {
+        kind: 'subagent',
+        id: 'a4',
+        description: 'R',
+        position: 1,
+        depth: 0,
+        status: 'running',
+      },
+    });
+    s = applyActivityEvent(s, {
+      kind: 'result',
+      id: 'a4',
+      result: { text: 'w'.repeat(ACTIVITY_REPORT_CHARS + 5), failed: false },
+    });
+    expect(s.tasks[0]!.report).toHaveLength(ACTIVITY_REPORT_CHARS);
+  });
+  const running = (kind: ActivityTask['kind'], id: string): ActivityTask => ({
+    kind,
+    id,
+    description: id,
+    command: kind === 'background' ? 'npm run dev' : undefined,
+    position: 1,
+    depth: 0,
+    status: 'running',
+  });
+  it('ends a background command that failed to start as failed', () => {
+    let s = applyActivityEvent(emptyActivity(), {
+      kind: 'task-start',
+      task: running('background', 'b3'),
+    });
+    s = applyActivityEvent(s, {
+      kind: 'result',
+      id: 'b3',
+      result: { text: 'Permission denied', failed: true, timestamp: 'T' },
+    });
+    expect(s.tasks[0]).toMatchObject({ status: 'failed', finishedAt: 'T' });
+    expect(s.tasks[0]!.report).toBeUndefined();
+    expect(s.running).toBe(0);
+  });
+  it('ends an async subagent whose launch result failed, and keeps it running otherwise', () => {
+    let s = applyActivityEvent(emptyActivity(), {
+      kind: 'task-start',
+      task: running('subagent', 'a5'),
+    });
+    s = applyActivityEvent(s, { kind: 'task-launched', id: 'a5', agentId: 'ag5', async: true });
+    const ok = applyActivityEvent(s, {
+      kind: 'result',
+      id: 'a5',
+      result: { text: 'Async agent launched successfully.', failed: false },
+    });
+    expect(ok.tasks[0]!.status).toBe('running');
+    s = applyActivityEvent(s, {
+      kind: 'result',
+      id: 'a5',
+      result: { text: 'Agent type not found', failed: true, timestamp: 'T' },
+    });
+    expect(s.tasks[0]).toMatchObject({ status: 'failed', finishedAt: 'T' });
+    expect(s.running).toBe(0);
   });
   it('records gaps once, bounded to 20', () => {
     let s = applyActivityEvent(emptyActivity(), { kind: 'gap', reason: 'older' });

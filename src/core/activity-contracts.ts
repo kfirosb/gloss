@@ -54,4 +54,7 @@ export interface ActivitySnapshot {
 }
 export const ACTIVITY_CALL_LIMIT = 2000;
 export const ACTIVITY_TASK_LIMIT = 200;
-export const ACTIVITY_RESULT_CHARS = 20_000;
+/** Characters of a timeline row's input and result text kept in the snapshot, which is resent on every change. */
+export const ACTIVITY_RESULT_CHARS = 2000;
+/** Characters of a subagent's final report kept for its card. */
+export const ACTIVITY_REPORT_CHARS = 20_000;
