@@ -2,6 +2,26 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 20. Activity view
+
+Status: implemented on branch `subagents` (not merged); spec [2026-10-18-activity-view-design](superpowers/specs/2026-10-18-activity-view-design.md).
+
+A Claude session gets an Activity tab beside Translated, Original, Split and Terminal. It lists running subagents and background commands (with a live tail of the command's output) and every tool call as a timeline, all derived from the transcript.
+
+- [x] 1. In a connected Claude session, ask Claude to run a long command in the background and spawn a subagent. Within a few seconds the Activity tab shows "2", the view lists both as running, the background card tails the output, and the subagent card shows its tool rows. When each finishes, the cards grey out and the report appears, translated when translation is on.
+- [x] 2. The timeline lists the session's tool calls newest first, with failed commands marked; clicking a row shows the full command and result.
+- [x] 3. The Translated, Original, Split and Terminal views and the translation stream behave exactly as before (existing unit and browser suites pass unchanged).
+- [x] 4. A Codex session shows the Activity tab disabled with a tooltip.
+- [x] 5. Switching sessions while a tail or a subagent read is open leaves no stale rows in the newly selected session and closes the previous session's file reads.
+
+Verification (2026-10-18):
+
+- Unit: `npm run typecheck && npx vitest run`: 1234 passed, 1 skipped (129 files); after the fix below, 1236 passed, 1 skipped.
+- Browser: `PLAYWRIGHT_PORT=4301 npx playwright test` (4291 was held by another worktree): 304/304 in 2.2 min. After the fix: 300/304 in 5.5 min at load average 8.5; the 4 failures (live-terminal, session-switcher, session-tabs, sessions-sidebar, all outside Activity) passed on one rerun together with `activity.spec.ts` (10/10).
+- `npm run build` succeeds with Vite's existing advisory "Some chunks are larger than 500 kB after minification" (main chunk 922.66 kB).
+- Manual, isolated instance (fake `HOME`, built backend on port 4302, throwaway Claude 2.1.302 session in this worktree, driven with Playwright): badge read "Activity2" with both cards running about 2 s after the tool calls; the subagent card showed its Grep and SubagentHandback rows; the background tail stayed empty during `sleep 30`, then showed `done` and `[exited with code 0]`; the badge fell to 1 when the subagent ended and both cards went grey (finished, with durations 7 s and 30 s). A real `ls /nonexistent-gloss-check` row was marked failed at the top of the timeline and expanded to the command and `Exit code 1` output. Switching to a Codex session aborted both open streams at once, showed no Activity rows and a disabled Activity tab titled "Activity is available for Claude sessions"; switching back showed the right cards with tails closed, and a reload kept the correct badge.
+- [x] Fix found by manual acceptance (9d0ea41): Claude 2.1.302 runs subagents async and hands the report back as a peer record, so finished async cards had no report. The report is now read from the hand-back's structured `origin` fields; afterwards both real subagent cards showed their reports translated into Hebrew.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
