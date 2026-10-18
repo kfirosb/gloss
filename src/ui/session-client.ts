@@ -7,6 +7,9 @@ import type {
   FileReference,
 } from '../core/file-references.js';
 import type { Action } from '../runtime/protocol.js';
+import type { OutputTailEvent, OutputWindow } from '../runtime/output-tail.js';
+import type { ActivityEvent } from '../core/activity-contracts.js';
+import { recordOf } from '../core/json-record.js';
 
 import {
   WorkspaceConflict,
@@ -58,6 +61,29 @@ export const changeClaudeRegistration = (action: 'register' | 'remove') =>
     '/api/claude/registration',
     { method: 'POST', body: JSON.stringify({ action }) },
   );
+const isActivityEvent = (value: unknown): value is ActivityEvent =>
+  typeof recordOf(value)?.kind === 'string';
+function isOutputTailEvent(value: unknown): value is OutputTailEvent {
+  const event = recordOf(value);
+  if (event?.kind === 'error') return typeof event.reason === 'string';
+  return (
+    event?.kind === 'chunk' &&
+    typeof event.text === 'string' &&
+    Number.isSafeInteger(event.start) &&
+    Number.isSafeInteger(event.end)
+  );
+}
+/** Opens one authenticated SSE stream and yields only the frames that pass `accept`. */
+async function* serverStream<T>(
+  url: string,
+  signal: AbortSignal,
+  accept: (value: unknown) => value is T,
+): AsyncGenerator<T> {
+  const response = await fetch(url, { headers: authHeaders(), signal });
+  if (!response.ok || !response.body) throw new Error('Activity stream unavailable');
+  for await (const value of readServerEvents<unknown>(response.body, signal))
+    if (accept(value)) yield value;
+}
 export class SessionClient {
   readonly base: string;
   constructor(readonly sessionId: string) {
@@ -250,6 +276,25 @@ export class SessionClient {
       method: 'PUT',
       body: JSON.stringify({ expectedRevision, data }),
     });
+  }
+  /** A running subagent's transcript as activity events, from its first record onwards. */
+  subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent> {
+    const url = this.base + '/activity/subagents/' + encodeURIComponent(taskId) + '/events';
+    return serverStream(url, signal, isActivityEvent);
+  }
+  /** A background command's latest output window, then each appended chunk. */
+  outputTail(taskId: string, signal: AbortSignal): AsyncIterable<OutputTailEvent> {
+    const url = this.base + '/activity/tasks/' + encodeURIComponent(taskId) + '/output';
+    return serverStream(url, signal, isOutputTailEvent);
+  }
+  /** The output window that ends at byte `end`, for showing earlier lines. */
+  outputWindow(taskId: string, end: number) {
+    return sessionRequest<OutputWindow>(
+      this.base + '/activity/tasks/' + encodeURIComponent(taskId) + '/output?end=' + end,
+    );
+  }
+  translateActivityReport(taskId: string) {
+    return this.action({ type: 'translate-activity-report', taskId });
   }
   async subscribe(listener: (value: SessionEnvelope) => void, signal: AbortSignal) {
     while (!signal.aborted) {

@@ -4036,6 +4036,198 @@ button.dictation-finishing .dictation-icon {
   vertical-align: middle;
   background: #e5372b;
 }
+
+.live-view-count {
+  display: inline-block;
+  min-width: 16px;
+  margin-inline-start: 5px;
+  padding: 0 5px;
+  border-radius: 8px;
+  vertical-align: middle;
+  background: #1a7f37;
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+}
+.activity {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  background: light-dark(#eef1f7, var(--dk-bg-eef1f7));
+}
+.activity-tasks,
+.activity-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.activity-label {
+  margin: 4px 0 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: light-dark(#647089, var(--dk-fg-647089));
+}
+.activity-empty,
+.activity-meta {
+  margin: 0;
+  color: light-dark(#647089, var(--dk-fg-647089));
+  font-size: 0.8rem;
+}
+.activity-card {
+  border: 1px solid light-dark(#e0e4ed, var(--dk-bg-e0e4ed));
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: light-dark(#fff, var(--dk-bg-ffffff));
+  overflow-wrap: anywhere;
+}
+.activity-card[data-status='finished'],
+.activity-card[data-status='failed'] {
+  opacity: 0.72;
+}
+.activity-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 8px;
+  width: 100%;
+}
+button.activity-card-head {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.activity-card[data-status='running'] .activity-title b {
+  color: light-dark(#1a7f37, var(--dk-fg-1a7f37));
+}
+.activity-card[data-status='unknown'] .activity-title b {
+  color: light-dark(#8a5a00, var(--dk-fg-8a5a00));
+}
+.activity-title b {
+  font-weight: 600;
+}
+.activity-nested {
+  margin-inline-start: 6px;
+  color: light-dark(#647089, var(--dk-fg-647089));
+  font-size: 0.75rem;
+}
+.activity-head-end {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.activity-button {
+  padding: 1px 8px;
+  font-size: 0.75rem;
+}
+.activity code,
+.activity pre {
+  font-family: ui-monospace, Menlo, monospace;
+}
+.activity code {
+  font-size: 0.75rem;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: light-dark(#f4f5f8, var(--dk-bg-f4f5f8));
+}
+.activity pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #172033;
+  color: #e6e6eb;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.activity-output {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 6px;
+}
+.activity-output pre {
+  align-self: stretch;
+}
+.activity-sub {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed light-dark(#d9deea, var(--dk-bg-d9deea));
+}
+.activity-report {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: light-dark(#edf1ff, var(--dk-bg-edf1ff));
+  white-space: pre-wrap;
+}
+.activity-report[dir='rtl'] {
+  text-align: right;
+}
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-inline-start: 8px;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid light-dark(#d9deea, var(--dk-bg-d9deea));
+}
+.activity-row > button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.activity-row > button:hover,
+.activity-row > button[aria-expanded='true'] {
+  background: light-dark(#f4f5f8, var(--dk-bg-f4f5f8));
+}
+.activity-row time {
+  flex: none;
+  min-width: 38px;
+  color: light-dark(#647089, var(--dk-fg-647089));
+}
+.activity-tool {
+  flex: none;
+  min-width: 42px;
+  font-weight: 600;
+}
+.activity-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.activity-failed {
+  flex: none;
+  color: light-dark(#a8291f, var(--dk-fg-a8291f));
+}
+.activity-detail {
+  margin-inline-start: 50px;
+  padding-bottom: 4px;
+}
 .live-attention-notice {
   color: light-dark(#8a5a00, var(--dk-fg-8a5a00));
   font-size: 0.75rem;

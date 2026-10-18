@@ -50,6 +50,7 @@ import {
 } from './session-client.js';
 import { useWorkspace } from './use-workspace.js';
 
+import { ActivityView } from './activity-view.js';
 import { LiveTerminal } from './live-terminal.js';
 import { ViewRadios } from './live-view-switch.js';
 import { PaneDivider, useWideLayout } from './pane-divider.js';
@@ -57,6 +58,7 @@ import {
   CONVERSATION_VIEWS,
   LIVE_VIEWS,
   LIVE_VIEW_LABELS,
+  NO_ACTIVITY_TOOLTIP,
   NO_TERMINAL_TOOLTIP,
   approvalSwitch,
   historyView,
@@ -311,10 +313,13 @@ export function SessionWorkspace({
   // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
   // A manual choice saves itself and drops this override.
   const [approvalView, setApprovalView] = useState<LiveView | null>(null);
-  // A remembered terminal view falls back to its conversation side while there is no terminal to show.
+  // A remembered terminal view falls back to its conversation side while there is no terminal to show,
+  // and a remembered Activity view does the same for an agent that has no activity to show.
+  const savedView =
+    !isClaude && liveLayout.view === 'activity' ? liveLayout.conversation : liveLayout.view;
   const liveView: LiveView =
     (launchId && approvalView) ||
-    (launchId || !showsTerminal(liveLayout.view) ? liveLayout.view : liveLayout.conversation);
+    (launchId || !showsTerminal(savedView) ? savedView : liveLayout.conversation);
   const conversationView = selectView(liveView, liveLayout.conversation);
   const setLiveLayout = (change: Partial<LiveLayout>) =>
     setPreferences((value) => ({
@@ -1088,6 +1093,16 @@ export function SessionWorkspace({
         value={liveView}
         onChange={chooseLiveView}
         options={LIVE_VIEWS.map((view) => {
+          if (view === 'activity') {
+            const running = snapshot.codingState !== 'disconnected' && snapshot.activity?.running;
+            return {
+              value: view,
+              label: LIVE_VIEW_LABELS[view],
+              disabled: !isClaude,
+              title: isClaude ? undefined : NO_ACTIVITY_TOOLTIP,
+              badge: running ? <span className="live-view-count">{running}</span> : undefined,
+            };
+          }
           const unavailable = showsTerminal(view) && !launchId;
           return {
             value: view,
@@ -1182,7 +1197,16 @@ export function SessionWorkspace({
             }
           />
         )}
-        {liveView !== 'terminal' && (
+        {liveView === 'activity' && (
+          <ActivityView
+            client={client}
+            activity={snapshot.activity}
+            translationOn={needsReplyTranslation(languageSettings)}
+            agentIsClaude={isClaude}
+            disconnected={snapshot.codingState === 'disconnected'}
+          />
+        )}
+        {liveView !== 'terminal' && liveView !== 'activity' && (
           <div className="live-conversation">
             {liveView === 'split' && (
               <ViewRadios
