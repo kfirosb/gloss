@@ -77,8 +77,21 @@ function fakeTmux() {
       if (k.includes('C-c')) live.delete(n);
     },
     async resizeWindow() {},
+    async capturePaneStyled() {
+      return view.screen;
+    },
+    async paneCursor() {
+      return { x: 0, y: 0, inMode: false };
+    },
+    async loadBuffer() {},
+    async pasteBuffer() {},
+    async deleteBuffer() {},
     async scroll() {},
     async exitCopyMode() {},
+    async captureRows() {
+      return '';
+    },
+    async pressStash() {},
     async killSession(n) {
       live.delete(n);
     },
@@ -133,7 +146,7 @@ async function setup(
     store,
     shell: '/bin/zsh',
     sessions: { register } as any,
-    prepareClaude: async () => ({ claude: '/bin/claude', mcpConfigPath: '/cfg/x.json' }),
+    claudeExecutable: async () => '/bin/claude',
     findCodex: overrides.findCodex
       ? (launch: LaunchRecord, signal: AbortSignal) => overrides.findCodex!(launch.panePid, signal)
       : async () => ({ agent: 'codex' as const, sessionRef: 'codex-1', projectId: folder }),
@@ -183,10 +196,6 @@ it('launches Claude with a preassigned identity and immediate panel registration
     '/bin/claude',
     '--session-id',
     record.sessionRef,
-    '--mcp-config',
-    '/cfg/x.json',
-    '--dangerously-load-development-channels',
-    'server:language-assistant',
     '--model',
     'opus 5',
     '--',
@@ -845,10 +854,6 @@ it('passes a first message starting with "-" after `--`, so neither CLI reads it
     '/bin/claude',
     '--session-id',
     claude.sessionRef,
-    '--mcp-config',
-    '/cfg/x.json',
-    '--dangerously-load-development-channels',
-    'server:language-assistant',
     '--add-dir',
     'a',
     'b',
