@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { appendFile, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -221,6 +221,26 @@ it('confirms a message Claude took into a running tool call by its queued_comman
     state: 'sent',
     nativeMessageId: 'transcript:' + CAPTURED_QUEUED.recordId,
   });
+});
+it('does not confirm from a transcript that changed after attach, even by a queued_command record', async () => {
+  const h = await claudeSession();
+  const connection = await connect(h, undefined);
+  const size = (await stat(h.transcript)).size;
+  const delivery = typedDelivery(h, 'delivery-1', CAPTURED_QUEUED.prompt, size);
+  // Before any confirmation read, another file takes the transcript's path, with the queued record Claude would write.
+  const captured = await readFile(join(FIXTURE_DIR, CAPTURED_QUEUED.file), 'utf8');
+  const replacement = h.transcript + '.new';
+  await writeFile(
+    replacement,
+    (await readFile(h.transcript, 'utf8')) +
+      captured.replaceAll(CAPTURED_QUEUED.sessionId, h.sessionRef),
+  );
+  await rename(replacement, h.transcript);
+  // The attach-time transcript notices the change (or its live tail already broke on it), and stays broken.
+  await expect(connection.reconcileDelivery?.(delivery)).rejects.toThrow(
+    /Transcript changed|reattach required/,
+  );
+  await expect(connection.reconcileDelivery?.(delivery)).rejects.toThrow('reattach required');
 });
 it('types nothing when the send cannot record that typing started', async () => {
   const h = await claudeSession();

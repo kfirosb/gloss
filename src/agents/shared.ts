@@ -262,6 +262,7 @@ export class Transcript {
     line: Buffer,
     position: number,
     fail: (reason: string) => never = (reason) => this.failure(reason),
+    parse: RecordParser = this.parse,
   ): Parsed {
     if (!line.toString('utf8').trim()) return {};
     let record: JsonRecord | undefined;
@@ -272,7 +273,7 @@ export class Transcript {
     }
     if (!record) return fail('Malformed transcript record');
     try {
-      return this.parse(record, position);
+      return parse(record, position);
     } catch {
       return fail('Malformed record or transcript identity mismatch');
     }
@@ -346,7 +347,11 @@ export class Transcript {
       await file.close();
     }
   }
-  async history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }> {
+  /** `parse` reads this history with another parser over the same file, identity checks and revisions. */
+  async history(
+    cursor?: string,
+    parse: RecordParser = this.parse,
+  ): Promise<{ messages: AgentMessage[]; next?: string }> {
     const { file, size } = await this.checkedFile();
     try {
       let end = size;
@@ -389,8 +394,11 @@ export class Transcript {
         // Normalize this bounded window forward before selecting the latest records backward.
         // Otherwise the last identical physical row would invent a newer semantic revision.
         const normalized = rows.map((row) => {
-          const message = this.decode(row.line, row.start, (reason) =>
-            this.lookbackFailure(reason),
+          const message = this.decode(
+            row.line,
+            row.start,
+            (reason) => this.lookbackFailure(reason),
+            parse,
           ).message;
           return {
             start: row.start,

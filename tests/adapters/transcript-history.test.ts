@@ -102,3 +102,36 @@ it('keeps live polling after history fails on an excessively large old record', 
   );
   expect(transcript.caughtUp).toBe(true);
 });
+it('reads history with another parser over the same revisions as the live tail', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'transcript-history-'));
+  roots.push(root);
+  const path = join(root, 'session.jsonl');
+  const row = (text: string, id: string) => JSON.stringify({ text, id }) + '\n';
+  const parser = (shown: boolean) => (record: Record<string, unknown>, offset: number) =>
+    typeof record.text === 'string' &&
+    typeof record.id === 'string' &&
+    (shown || record.text !== 'hidden')
+      ? {
+          message: {
+            sourceId: record.id,
+            revision: offset + 1,
+            role: 'user' as const,
+            text: record.text,
+            complete: true,
+          },
+        }
+      : {};
+  await writeFile(path, row('Fix it', 'a'));
+  const transcript = new Transcript(path, parser(false));
+  const live = await transcript.poll();
+  const seen = live.flatMap((event) => (event.type === 'message' ? [event.message] : []));
+  // The same record written again later keeps the revision the live tail gave it.
+  await appendFile(path, row('Fix it', 'a') + row('hidden', 'b'));
+  await transcript.poll();
+  expect((await transcript.history()).messages).toEqual(seen);
+  const other = (await transcript.history(undefined, parser(true))).messages;
+  expect(other.map((m) => [m.sourceId, m.revision])).toEqual([
+    ['a', seen[0]?.revision],
+    ['b', row('Fix it', 'a').length * 2 + 1],
+  ]);
+});

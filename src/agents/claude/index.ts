@@ -574,12 +574,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         (record, offset) => parseClaudeRecord(record, offset, target.sessionRef),
         options.pageSize,
       );
-      /** The same transcript read for terminal confirmation only, where a queued prompt also counts. */
-      const typedEvidence = new Transcript(
-        path,
-        (record, offset) => parseTypedEvidence(record, offset, target.sessionRef),
-        options.pageSize,
-      );
+      /** Reads the transcript for terminal confirmation only, where a queued prompt also counts. */
+      const parseTyped = (record: JsonRecord, offset: number) =>
+        parseTypedEvidence(record, offset, target.sessionRef);
       const stateDir = options.stateDir ?? join(homedir(), '.language-assistant');
       const channelRegistry =
         options.channelRegistry ??
@@ -797,7 +794,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           send,
         ];
         const messages = await typedMessagesAfter(
-          (cursor) => typedEvidence.history(cursor),
+          (cursor) => transcript.history(cursor, parseTyped),
           Math.min(...sends.map((item) => item.after)),
         );
         return assignTypedMessages(sends, messages, taken).get(send.id);
