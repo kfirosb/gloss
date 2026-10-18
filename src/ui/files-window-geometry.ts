@@ -18,12 +18,21 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 const fitSize = (value: number, min: number, available: number) =>
   Math.round(clamp(value, Math.min(min, available), available));
 
-/** Default geometry centred in the viewport; smaller viewports shrink it to fit. */
-export function defaultFilesWindow(viewport: Viewport): FilesWindowGeometry {
+/** A rectangle within the viewport, such as the agent column. */
+export interface ViewportArea extends Viewport {
+  left: number;
+  top: number;
+}
+
+/** Default geometry centred over `area` (the whole viewport when omitted), kept inside the viewport; smaller viewports shrink it to fit. */
+export function defaultFilesWindow(
+  viewport: Viewport,
+  area: ViewportArea = { left: 0, top: 0, ...viewport },
+): FilesWindowGeometry {
   return clampFilesWindow(
     {
-      x: (viewport.width - FILES_WINDOW_DEFAULT.width) / 2,
-      y: (viewport.height - FILES_WINDOW_DEFAULT.height) / 2,
+      x: area.left + (area.width - FILES_WINDOW_DEFAULT.width) / 2,
+      y: area.top + (area.height - FILES_WINDOW_DEFAULT.height) / 2,
       ...FILES_WINDOW_DEFAULT,
     },
     viewport,

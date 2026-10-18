@@ -20,6 +20,22 @@ it('centres the default window and shrinks it to a small viewport', () => {
     height: 400,
   });
 });
+it('centres the default window over a given area and keeps it inside the viewport', () => {
+  // A 980px agent column beside a 300px sessions sidebar.
+  expect(
+    defaultFilesWindow(
+      { width: 1280, height: 800 },
+      { left: 300, top: 0, width: 980, height: 800 },
+    ),
+  ).toEqual({ x: 340, y: 90, width: 900, height: 620, split: 270 });
+  // An area narrower than the window still yields a window fully inside the viewport.
+  expect(
+    defaultFilesWindow(
+      { width: 1000, height: 800 },
+      { left: 600, top: 100, width: 400, height: 700 },
+    ),
+  ).toMatchObject({ x: 100, y: 140, width: 900, height: 620 });
+});
 it('pulls an off-screen window fully into view', () => {
   expect(
     clampFilesWindow(

@@ -533,11 +533,16 @@ export function SessionWorkspace({
   };
   const closeFiles = (returnFocus = true) => {
     setFilesOpen(false);
+    // A reopened window starts without the last attach's outcome.
+    setPreview((current) => current && { ...current, attached: '' });
+    setAttachError('');
     const opener = filesOpener.current;
     filesOpener.current = null;
     if (returnFocus) (opener?.isConnected ? opener : filesToggle.current)?.focus();
   };
   const [revealedFile, setRevealedFile] = useState('');
+  // Attach failures from the preview pane, kept apart from the workspace-wide error.
+  const [attachError, setAttachError] = useState('');
   const [preview, setPreview] = useState<{
     path: string;
     token: typeof mention;
@@ -552,6 +557,7 @@ export function SessionWorkspace({
   }, []);
   const openPreview = (path: string, token: typeof mention = null) => {
     setError('');
+    setAttachError('');
     openFiles();
     setPreview({ path, token });
     setMention(null);
@@ -565,11 +571,13 @@ export function SessionWorkspace({
       setError(errorMessage(error, 'File unavailable'));
     }
   };
-  const attachPath = async (path: string, token: typeof mention = null) => {
+  /** `fromPreview` reports failure in the preview pane; drops report it in the workspace. */
+  const attachPath = async (path: string, token: typeof mention = null, fromPreview = false) => {
     if (uploadLock.current) return;
     uploadLock.current = true;
     setUploading(true);
     setError('');
+    setAttachError('');
     setPreview((current) => (current?.path === path ? { ...current, attached: '' } : current));
     try {
       const file = await client.referenceFile(path);
@@ -609,7 +617,8 @@ export function SessionWorkspace({
         );
       }
     } catch (e) {
-      if (mounted.current) setError(errorMessage(e, 'File unavailable'));
+      if (mounted.current)
+        (fromPreview ? setAttachError : setError)(errorMessage(e, 'File unavailable'));
     } finally {
       uploadLock.current = false;
       if (mounted.current) setUploading(false);
@@ -1696,9 +1705,9 @@ export function SessionWorkspace({
               onSelect={(path) => openPreview(path)}
               onClose={() => closeFiles()}
               busy={uploading}
-              attachError={error}
+              attachError={attachError}
               attached={preview?.attached ?? ''}
-              onAttach={() => preview && void attachPath(preview.path, preview.token)}
+              onAttach={() => preview && void attachPath(preview.path, preview.token, true)}
               geometry={preferences.filesWindow}
               onGeometry={(next) => setPreferences((value) => ({ ...value, filesWindow: next }))}
             />

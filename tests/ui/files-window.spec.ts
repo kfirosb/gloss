@@ -43,15 +43,19 @@ test('files window keeps the list beside the preview, moves, expands, and rememb
   await expect(win.locator('.files-window-list')).toBeVisible();
 
   const before = (await win.boundingBox())!;
+  // The default 900x620 window is centred over the agent column, not the whole viewport.
+  const column = (await page.locator('.session-column').boundingBox())!;
+  expect(Math.round(before.x)).toBe(Math.round(column.x + (column.width - 900) / 2));
+  expect(Math.round(before.y)).toBe(Math.round(column.y + (column.height - 620) / 2));
   const title = (await win.locator('.files-window-title').boundingBox())!;
-  // The default 900x620 window sits at y=90 in an 800px viewport and stays fully inside it, so 80px down is the room it has.
+  // It sits at y=90 in an 800px viewport and stays fully inside it, so 80px down is the room it has.
   const start = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(start.x + 150, start.y + 80, { steps: 5 });
+  await page.mouse.move(start.x - 150, start.y + 80, { steps: 5 });
   await page.mouse.up();
   const moved = (await win.boundingBox())!;
-  expect(Math.round(moved.x - before.x)).toBe(150);
+  expect(Math.round(moved.x - before.x)).toBe(-150);
   expect(Math.round(moved.y - before.y)).toBe(80);
 
   const expand = win.getByRole('button', { name: 'Expand', exact: true });
@@ -199,4 +203,49 @@ test('a TL;DR still loading for one file never lands on the next file', async ({
     'aria-pressed',
     'false',
   );
+});
+
+test('attach outcomes stay in the preview pane and clear when the window closes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  const file = {
+    id: 'file-1',
+    sessionId: 'basic',
+    kind: 'file',
+    index: 1,
+    name: 'a.md',
+    path: '/project/a.md',
+    originalPath: 'a.md',
+    worktreePath: '/project',
+    source: 'worktree',
+    mime: 'text/markdown',
+    size: 20,
+  };
+  let references = 0;
+  await page.route('**/files/reference', (r) =>
+    ++references === 1
+      ? r.fulfill({ status: 400, json: { error: 'Reference failed' } })
+      : r.fulfill({ json: file }),
+  );
+  await page.route('**/files/*/metadata', (r) => r.fulfill({ json: file }));
+  await page.goto('/#capability=test');
+  const filesButton = page.getByRole('button', { name: 'Files', exact: true });
+  await filesButton.click();
+  const win = page.getByRole('dialog', { name: 'Files' });
+  await win.getByRole('button', { name: 'Preview a.md', exact: true }).click();
+  const attach = win.getByRole('button', { name: 'Attach file', exact: true });
+  await attach.click();
+  await expect(win.getByRole('alert')).toHaveText('Reference failed');
+  // Announced once, in the pane, not again as a workspace error.
+  await expect(page.getByRole('alert').filter({ hasText: 'Reference failed' })).toHaveCount(1);
+  await attach.click();
+  await expect(win.getByRole('status')).toHaveText('Attached as File 1');
+  await expect(win.getByRole('alert')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(win).toHaveCount(0);
+  await filesButton.click();
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  await expect(win.getByText('Attached as File 1')).toHaveCount(0);
 });

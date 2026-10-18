@@ -7,6 +7,7 @@ import {
   FILES_WINDOW_MIN,
   type FilesWindowGeometry,
   type Viewport,
+  type ViewportArea,
 } from './files-window-geometry.js';
 import type { SessionClient } from './session-client.js';
 import './files-window.css';
@@ -15,6 +16,11 @@ import './files-window.css';
 const SPLIT_KEY_STEP = 20;
 
 const readViewport = (): Viewport => ({ width: innerWidth, height: innerHeight });
+/** The agent column the default window centres over; the whole viewport when it is absent. */
+const readAgentColumn = (): ViewportArea | undefined => {
+  const rect = document.querySelector('.session-column')?.getBoundingClientRect();
+  return rect && { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+};
 const splitLimits = (paneWidth: number) => ({
   min: FILES_WINDOW_MIN.list,
   max: Math.max(FILES_WINDOW_MIN.list, paneWidth - FILES_WINDOW_MIN.preview),
@@ -97,15 +103,21 @@ export function FilesWindow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
+  const [agentColumn, setAgentColumn] = useState(readAgentColumn);
   const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const resize = () => setViewport(readViewport());
+    const resize = () => {
+      setViewport(readViewport());
+      setAgentColumn(readAgentColumn());
+    };
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
   }, []);
   useEffect(() => closeButton.current?.focus(), []);
   // Stored geometry is unclamped; fit it to the live viewport every render.
-  const fitted = geometry ? clampFilesWindow(geometry, viewport) : defaultFilesWindow(viewport);
+  const fitted = geometry
+    ? clampFilesWindow(geometry, viewport)
+    : defaultFilesWindow(viewport, agentColumn);
   // clampFilesWindow limits the split to the collapsed width; expanded, the stored split is limited by the pane shown.
   const base = expanded && geometry ? { ...fitted, split: geometry.split } : fitted;
   const { shown, surface } = useGeometryDrag(base, onGeometry);

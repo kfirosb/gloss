@@ -605,6 +605,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireCurrentContext(version);
       if (!result || (mode === 'summary' && result.length > MAX_SUMMARY_CHARS))
         throw new Error('Invalid file review output');
+      // Stored before the manager's post-review re-read; keyed by the pre-review version, so a changed file never gets it.
       if (key) deps.store.putFileReview(key, result);
       return result;
     },
