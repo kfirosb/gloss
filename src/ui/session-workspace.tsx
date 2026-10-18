@@ -275,7 +275,7 @@ function ComposerStatus({
       {state === 'waiting' && <span className="attn-spinner" aria-hidden="true" />}
       {state === 'failed' && <span aria-hidden="true">✕</span>}
       {(state === 'delivered' || state === 'received') && <span aria-hidden="true">✓</span>}
-      <span>{text}</span>
+      <span dir="auto">{text}</span>
       {children}
     </div>
   );
@@ -1136,10 +1136,12 @@ export function SessionWorkspace({
         })}
       />
       {launchId && entry?.attentionNotice && (
-        <small className="live-attention-notice">{entry.attentionNotice}</small>
+        <small className="live-attention-notice" dir="auto">
+          {entry.attentionNotice}
+        </small>
       )}
       {launchId && terminalNotice && (
-        <small className="live-attention-notice" role="status">
+        <small className="live-attention-notice" role="status" dir="auto">
           {terminalNotice}
         </small>
       )}
@@ -1337,7 +1339,9 @@ export function SessionWorkspace({
       {stripState && (
         <ComposerStatus state={stripState} text={stripText} fading={stripFading}>
           {stripState !== 'waiting' && awaitingClaudeReplies > 0 && (
-            <small className="status-strip-waiting">{waitingText}</small>
+            <small className="status-strip-waiting" dir="auto">
+              {waitingText}
+            </small>
           )}
           {composerDelivery &&
             ['unconfirmed', 'queued'].includes(composerDelivery.state) &&

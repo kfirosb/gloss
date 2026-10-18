@@ -549,6 +549,16 @@ test('a terminal Send the server declines shows the terminal in Split with the r
   await expect(notice(page)).toHaveText(
     'Your message is still in Gloss; press Send again when the terminal is ready.',
   );
+  // The page is right-to-left (Hebrew); the English reason and notice read left to right, period last.
+  const direction = (element: Element) => getComputedStyle(element).direction;
+  expect(await page.locator('.app').evaluate(direction)).toBe('rtl');
+  expect(await notice(page).evaluate(direction)).toBe('ltr');
+  expect(
+    await page
+      .locator('.status-strip')
+      .getByText('Not sent:', { exact: false })
+      .evaluate(direction),
+  ).toBe('ltr');
   await expect(input).toHaveValue('שלום');
   await expect(send).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Don’t send' })).toHaveCount(0);
