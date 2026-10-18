@@ -65,6 +65,7 @@ export const NO_TYPING_RECORD_REASON =
   'Gloss could not record that typing started; nothing was sent';
 export const SESSION_SWITCHED_REASON =
   'The terminal no longer runs this Claude session; nothing was sent';
+export const OTHER_MODE_REASON = 'The terminal’s input is in shell or vim mode';
 /** C0 controls except tab and line feed, DEL and C1 controls: a terminal acts on them (ESC [201~ ends a bracketed paste). */
 const TERMINAL_CONTROL_CHARACTER = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
 /** Claude reads a leading ! as a shell command, / as a slash command and # as a memory note. */
@@ -95,6 +96,35 @@ export async function checkTerminal(
   // alone, and only a cursor that sits right after the prompt shows that nothing was typed.
   if (box.state !== 'empty' || cursor.x !== box.column || cursor.y !== box.row)
     return { ready: false, reason: UNSENT_TEXT_REASON };
+  return { ready: true };
+}
+
+/** What Gloss reads at Send for step 1. A screen or cursor that could not be read is undefined. */
+export interface TerminalFacts {
+  session: TerminalSession;
+  screen: string | undefined;
+  cursor: PaneCursor | undefined;
+}
+/**
+ * Spec 2.1 step 1, decided once at Send from the record and the full screen: anything that needs the user opens the
+ * terminal. What is written in the box does not matter here; the stash step (2.6) handles it.
+ */
+export function checkAtSend(facts: TerminalFacts): TerminalCheck {
+  const hold = (reason: string): TerminalCheck => ({ ready: false, reason });
+  const activity = claudeActivity(facts.session.status, facts.session.waitingFor);
+  if (activity === 'dialog-open' || activity === 'approval-required')
+    return hold(DIALOG_OPEN_REASON);
+  const markers = markersFor('claude', facts.session.version);
+  if (!markers) return hold(UNKNOWN_VERSION_REASON);
+  const { screen, cursor } = facts;
+  if (screen === undefined || cursor === undefined) return hold(TERMINAL_READ_REASON);
+  if (cursor.inMode) return hold(SCROLLED_REASON);
+  const lines = parseStyledScreen(screen);
+  if (!lines) return hold(NO_INPUT_BOX_REASON);
+  if (classifyScreen(markers, screenText(lines)) !== 'none') return hold(DIALOG_OPEN_REASON);
+  const box = readInputBox(lines);
+  if (box.state === 'missing') return hold(NO_INPUT_BOX_REASON);
+  if (box.state === 'other-mode') return hold(OTHER_MODE_REASON);
   return { ready: true };
 }
 

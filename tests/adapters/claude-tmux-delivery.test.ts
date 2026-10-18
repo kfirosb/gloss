@@ -8,8 +8,11 @@ import { recordOf } from '../../src/core/json-record.js';
 import { claudeMessage, parseClaudeRecord } from '../../src/agents/claude/index.js';
 import type { FileReference } from '../../src/core/file-references.js';
 import { createTmux } from '../../src/runtime/tmux.js';
+import { parseStyledScreen, readInputWindow } from '../../src/agents/claude/tmux-screen.js';
 import {
   COMMAND_PREFIX_REASON,
+  NO_INPUT_BOX_REASON,
+  OTHER_MODE_REASON,
   PASTE_PREPARE_REASON,
   PASTE_SETTLE_MS,
   PASTE_SETTLE_POLL_MS,
@@ -21,6 +24,7 @@ import {
   UNSAFE_TEXT_REASON,
   UNSENT_TEXT_REASON,
   assignTypedMessages,
+  checkAtSend,
   checkTerminal,
   createTypingQueue,
   pasteBufferName,
@@ -28,6 +32,7 @@ import {
   typeIntoTerminal,
   typedMessagesAfter,
   type GlossTerminal,
+  type TerminalFacts,
   type TypingClock,
 } from '../../src/agents/claude/tmux-delivery.js';
 import {
@@ -39,7 +44,10 @@ import {
   LONG_FIXTURE_VERSIONS,
   STASH_FIXTURE_VERSIONS,
   fixtureTerminal,
+  readCursor,
   readRecord,
+  readScreen,
+  readWindow,
 } from './tmux-fixtures.js';
 
 const idle = (version: string) => ({ status: 'idle', version });
@@ -56,6 +64,103 @@ function stepClock() {
   };
   return { clock, sleeps };
 }
+
+const facts = (
+  version: string,
+  state: string,
+  over: Partial<TerminalFacts> = {},
+): TerminalFacts => ({
+  session: idle(version),
+  screen: readScreen(version, state),
+  cursor: readCursor(version, state),
+  ...over,
+});
+describe.each(FIXTURE_VERSIONS)('check at Send on captured Claude %s screens', (version) => {
+  it.each(['empty', 'typed', 'multiline', 'pasted-chip', 'working-typed', 'working-queued'])(
+    'lets %s through: what is in the box is the stash step’s business',
+    (state) => {
+      expect(checkAtSend(facts(version, state, { session: { status: 'busy', version } }))).toEqual({
+        ready: true,
+      });
+    },
+  );
+  it('opens the terminal for shell mode', () => {
+    expect(checkAtSend(facts(version, 'bash'))).toEqual({
+      ready: false,
+      reason: OTHER_MODE_REASON,
+    });
+  });
+  it('opens the terminal for the dialog and the permission prompt, from the record and from the screen alone', () => {
+    for (const state of ['dialog', 'permission'] as const) {
+      expect(checkAtSend(facts(version, state, { session: readRecord(version, state) }))).toEqual({
+        ready: false,
+        reason: DIALOG_OPEN_REASON,
+      });
+      expect(checkAtSend(facts(version, state)).ready).toBe(false);
+    }
+  });
+});
+describe.each(STASH_FIXTURE_VERSIONS)(
+  'check at Send on captured Claude %s stash screens',
+  (version) => {
+    it.each([
+      'stash-empty',
+      'stash-typed',
+      'stash-stashed',
+      'stash-stashed-typed',
+      'stash-working',
+    ])('lets %s through', (state) => {
+      expect(checkAtSend(facts(version, state))).toEqual({ ready: true });
+    });
+    it('leaves the Ctrl+R history picker, where Ctrl+S means something else, to the input window read before any Ctrl+S', () => {
+      // The full screen still shows an empty `❯` box between its rules, so step 1 lets it through; the picker's
+      // cursor sits on the footer row, so the window Gloss reads before its first Ctrl+S cannot be read.
+      expect(checkAtSend(facts(version, 'stash-history'))).toEqual({ ready: true });
+      const w = readWindow(version, 'stash-history');
+      const lines = parseStyledScreen(w.text);
+      expect(lines && readInputWindow(lines, w.cursorRow, w.cursorColumn)).toEqual({
+        readable: false,
+      });
+    });
+  },
+);
+describe('check at Send', () => {
+  it('opens the terminal for a dialog named only in the record, an approval, a scrolled pane, an old or unreadable version and an unread screen', () => {
+    const hold = (reason: string) => ({ ready: false, reason });
+    expect(
+      checkAtSend(
+        facts('2.1.301', 'empty', {
+          session: { status: 'busy', waitingFor: 'dialog open', version: '2.1.301' },
+        }),
+      ),
+    ).toEqual(hold(DIALOG_OPEN_REASON));
+    expect(
+      checkAtSend(
+        facts('2.1.301', 'empty', {
+          session: { status: 'waiting_for_approval', version: '2.1.301' },
+        }),
+      ),
+    ).toEqual(hold(DIALOG_OPEN_REASON));
+    const scrolled = { ...readCursor('2.1.301', 'empty'), inMode: true };
+    expect(checkAtSend(facts('2.1.301', 'empty', { cursor: scrolled }))).toEqual(
+      hold(SCROLLED_REASON),
+    );
+    for (const version of ['2.1.200', 'garbage'])
+      expect(checkAtSend(facts('2.1.301', 'empty', { session: idle(version) }))).toEqual(
+        hold(UNKNOWN_VERSION_REASON),
+      );
+    expect(checkAtSend(facts('2.1.301', 'empty', { screen: undefined }))).toEqual(
+      hold(TERMINAL_READ_REASON),
+    );
+    expect(checkAtSend(facts('2.1.301', 'empty', { cursor: undefined }))).toEqual(
+      hold(TERMINAL_READ_REASON),
+    );
+    // Synthetic: a screen with no input box on it.
+    expect(checkAtSend(facts('2.1.301', 'empty', { screen: 'no box here\n' }))).toEqual(
+      hold(NO_INPUT_BOX_REASON),
+    );
+  });
+});
 
 describe.each(FIXTURE_VERSIONS)('terminal checks on captured Claude %s screens', (version) => {
   it('is ready on an empty input', async () => {
