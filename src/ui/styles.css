@@ -2216,6 +2216,11 @@ pre {
   border-color: light-dark(#8dadd8, var(--dk-bg-8dadd8));
   color: light-dark(#163d70, var(--dk-fg-163d70));
 }
+.file-review-saved {
+  margin-inline-start: 4px;
+  font-size: 11px;
+  opacity: 0.8;
+}
 .file-review-controls [role='status'],
 .file-review-error {
   font-size: 12px;

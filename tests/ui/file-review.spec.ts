@@ -24,6 +24,9 @@ test('file review provides a cached TL;DR and translation with original availabl
       },
     }),
   );
+  await page.route('**/files/review-status?*', (r) =>
+    r.fulfill({ json: { summary: true, translation: false } }),
+  );
   const modes: string[] = [];
   await page.route('**/files/review', (r) => {
     const body = r.request().postDataJSON();
@@ -40,11 +43,17 @@ test('file review provides a cached TL;DR and translation with original availabl
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
   const dialog = page.getByRole('dialog', { name: 'Files' });
-  await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
+  const summaryChip = dialog.getByRole('button', { name: 'TL;DR', exact: true });
+  const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
+  await expect(summaryChip).toHaveAttribute('data-saved', 'true');
+  await expect(summaryChip).toHaveAttribute('title', 'Saved summary — shows instantly');
+  await expect(translateChip).not.toHaveAttribute('data-saved', 'true');
+  await summaryChip.click();
   await expect(dialog.getByLabel('File summary')).toContainText('תקציר התוכנית');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeHidden();
   await dialog.getByRole('button', { name: 'Translate', exact: true }).click();
   await expect(dialog.getByLabel('File translation')).toContainText('תרגום מלא של התוכנית');
+  await expect(translateChip).toHaveAttribute('data-saved', 'true');
   await dialog.getByRole('button', { name: 'Show original', exact: true }).click();
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
