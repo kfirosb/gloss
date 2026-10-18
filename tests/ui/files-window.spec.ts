@@ -92,7 +92,12 @@ test('Files opens the only list; a file opens the popup, which swaps, moves, exp
   await expect(expand).toHaveAttribute('aria-pressed', 'false');
   await expand.click();
   await expect(win).toHaveAttribute('data-expanded', 'true');
-  expect(await win.boundingBox()).toMatchObject({ x: 0, y: 0, width: 1280, height: 800 });
+  // Expanded fills the viewport beside the column, top to bottom.
+  const docked = (await column.boundingBox())!;
+  const expandedBox = (await win.boundingBox())!;
+  expect(Math.abs(expandedBox.x - (docked.x + docked.width))).toBeLessThanOrEqual(1);
+  expect(expandedBox).toMatchObject({ y: 0, height: 800 });
+  expect(Math.round(expandedBox.x + expandedBox.width)).toBe(1280);
   await expect(win.getByRole('button', { name: 'Collapse', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -234,6 +239,114 @@ test('closing the Files column closes the popup and forgets its file', async ({ 
   await expect(win).toHaveCount(0);
   await expect(fileColumn(page)).toHaveCount(0);
   await expect(filesButton).toBeFocused();
+});
+
+test('Escape closes the popup after a swap from the column, but not from the column search', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.goto('/#capability=test');
+  const win = await openFilePopup(page);
+  const column = fileColumn(page);
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  const rowB = column.getByRole('button', { name: 'Preview b.md', exact: true });
+  await rowB.click();
+  await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
+  // Swapping does not move focus: keyboard users keep browsing the column.
+  await expect(rowB).toBeFocused();
+
+  // Escape typed in the column's search box belongs to the input, not to the popup.
+  const search = column.getByRole('textbox', { name: 'Search files' });
+  await search.click();
+  await search.press('Escape');
+  await expect(win).toHaveCount(1);
+
+  await rowB.focus();
+  await page.keyboard.press('Escape');
+  await expect(win).toHaveCount(0);
+  await expect(column).toBeVisible();
+  // Focus returns to the opener kept since the popup opened: the a.md row.
+  await expect(column.getByRole('button', { name: 'Preview a.md', exact: true })).toBeFocused();
+});
+
+test('a moved popup keeps its place across swaps and Expand; expanded it leaves the column uncovered', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.goto('/#capability=test');
+  const win = await openFilePopup(page);
+  const column = fileColumn(page);
+  const title = (await win.locator('.files-window-title').boundingBox())!;
+  const start = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x - 60, start.y + 20, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await win.boundingBox())!;
+
+  await column.getByRole('button', { name: 'Preview b.md', exact: true }).click();
+  await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
+  expect(await win.boundingBox()).toEqual(moved);
+
+  await win.getByRole('button', { name: 'Expand', exact: true }).click();
+  await expect(win).toHaveAttribute('data-expanded', 'true');
+  const box = (await column.boundingBox())!;
+  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const hit = ({ x, y }: { x: number; y: number }) => {
+    const element = document.elementFromPoint(x, y);
+    return element?.closest('.files-window')
+      ? 'popup'
+      : element?.closest('.file-workspace > aside')
+        ? 'column'
+        : 'other';
+  };
+  expect(await page.evaluate(hit, centre)).toBe('column');
+  let popup = (await win.boundingBox())!;
+  expect(Math.abs(popup.x - (box.x + box.width))).toBeLessThanOrEqual(1);
+
+  // Flipped to the right while expanded, the popup ends at the column's left edge.
+  await column.getByRole('button', { name: 'Move files to the right', exact: true }).click();
+  await expect(page.locator('.file-workspace')).toHaveAttribute('data-side', 'right');
+  const right = (await column.boundingBox())!;
+  await expect
+    .poll(async () => {
+      const b = (await win.boundingBox())!;
+      return Math.abs(b.x + b.width - right.x) <= 1 && Math.round(b.x) === 0;
+    })
+    .toBe(true);
+  expect(
+    await page.evaluate(hit, { x: right.x + right.width / 2, y: right.y + right.height / 2 }),
+  ).toBe('column');
+  await column.getByRole('button', { name: 'Move files to the left', exact: true }).click();
+  await expect
+    .poll(async () => Math.round((await win.boundingBox())!.x))
+    .toBe(Math.round(box.x + box.width));
+
+  // Escape from the column's side button still reaches the popup: it collapses to the moved rectangle.
+  await page.keyboard.press('Escape');
+  await expect(win).toHaveAttribute('data-expanded', 'false');
+  popup = (await win.boundingBox())!;
+  expect(popup).toEqual(moved);
+});
+
+test('an expanded popup without the column fills the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.route('**/files/search?*', (r) =>
+    r.fulfill({ json: [{ name: 'a.md', relativePath: 'a.md' }] }),
+  );
+  await page.goto('/#capability=test');
+  const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  await input.fill('@a');
+  await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
+  await input.press('Enter');
+  const win = page.getByRole('dialog', { name: 'File preview' });
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  await expect(fileColumn(page)).toHaveCount(0);
+  await win.getByRole('button', { name: 'Expand', exact: true }).click();
+  expect(await win.boundingBox()).toMatchObject({ x: 0, y: 0, width: 1280, height: 800 });
 });
 
 test('the resize grip changes the popup and the size is remembered', async ({ page }) => {

@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   clampFilesWindow,
   defaultFilesWindow,
+  expandedFilesWindow,
   filesWindowGeometry,
 } from '../../src/ui/files-window-geometry.js';
 
@@ -93,4 +94,20 @@ it('rejects malformed persisted geometry and reads blobs that still carry the ol
     width: 900,
     height: 620,
   });
+});
+it('expands beside the docked Files column, or over the whole viewport without room for it', () => {
+  const viewport = { width: 1280, height: 800 };
+  expect(expandedFilesWindow(viewport)).toEqual({ left: 0, right: 0 });
+  expect(expandedFilesWindow(viewport, { left: 300, right: 550.4, side: 'left' })).toEqual({
+    left: 550,
+    right: 0,
+  });
+  expect(expandedFilesWindow(viewport, { left: 1030, right: 1280, side: 'right' })).toEqual({
+    left: 0,
+    right: 250,
+  });
+  // A floating column on a narrow viewport would leave less than the minimum width beside it.
+  expect(
+    expandedFilesWindow({ width: 390, height: 700 }, { left: 8, right: 298, side: 'left' }),
+  ).toEqual({ left: 0, right: 0 });
 });

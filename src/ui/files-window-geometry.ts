@@ -62,6 +62,34 @@ export function clampFilesWindow(
   };
 }
 
+/** The docked Files column's horizontal extent and the edge it sits on. */
+export interface FilesColumn {
+  left: number;
+  right: number;
+  side: 'left' | 'right';
+}
+/** Left and right insets of the expanded window, in CSS pixels from each viewport edge. */
+export interface ExpandedInsets {
+  left: number;
+  right: number;
+}
+
+/**
+ * Expanded fills the viewport beside the Files column, so the column stays usable. Without a column, or when what
+ * is left beside it is narrower than the minimum window (a narrow viewport, where the column floats), it fills
+ * the whole viewport.
+ */
+export function expandedFilesWindow(viewport: Viewport, column?: FilesColumn): ExpandedInsets {
+  if (!column) return { left: 0, right: 0 };
+  const insets =
+    column.side === 'left'
+      ? { left: Math.round(Math.max(column.right, 0)), right: 0 }
+      : { left: 0, right: Math.round(Math.max(viewport.width - column.left, 0)) };
+  return viewport.width - insets.left - insets.right < FILES_WINDOW_MIN.width
+    ? { left: 0, right: 0 }
+    : insets;
+}
+
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 

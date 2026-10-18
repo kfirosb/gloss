@@ -12,9 +12,11 @@
   background: light-dark(#fff, var(--dk-bg-ffffff));
   direction: ltr;
 }
-/* Expanded covers the whole viewport, the sessions sidebar (z-index 25) included. */
+/* Expanded spans top to bottom over the sessions sidebar (z-index 25); its left and right are set inline so the
+   docked Files column stays uncovered (both 0 when there is no column). */
 .files-window[data-expanded='true'] {
-  inset: 0;
+  top: 0;
+  bottom: 0;
   width: auto;
   height: auto;
   border: 0;

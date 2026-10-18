@@ -4,6 +4,8 @@ import { FilePreviewPane } from './file-browser.js';
 import {
   clampFilesWindow,
   defaultFilesWindow,
+  expandedFilesWindow,
+  type FilesColumn,
   type FilesWindowGeometry,
   type Viewport,
   type ViewportArea,
@@ -12,32 +14,54 @@ import type { SessionClient } from './session-client.js';
 import './files-window.css';
 
 const readViewport = (): Viewport => ({ width: innerWidth, height: innerHeight });
+/** Escape here belongs to the field or to another dialog (a native `<dialog>` or a popover), not to this popup. */
+const ownsEscape = (target: EventTarget | null) =>
+  target instanceof Element &&
+  Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"]:not(.files-window)',
+    ),
+  );
 const AGENT_AREA = '.session-column main.app';
-/** The agent area beside the Files column that the default window centres over; the whole viewport when absent. */
-const readAgentArea = (): ViewportArea | undefined => {
-  const rect = document.querySelector(AGENT_AREA)?.getBoundingClientRect();
-  return rect && { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+const FILES_COLUMN = '.session-column .file-workspace > aside.file-sidebar';
+/** Where the popup sits: the agent area the default centres over, and the docked column Expand leaves uncovered. */
+interface WorkspaceLayout {
+  agentArea?: ViewportArea;
+  column?: FilesColumn;
+}
+const readLayout = (): WorkspaceLayout => {
+  const area = document.querySelector(AGENT_AREA)?.getBoundingClientRect();
+  const aside = document.querySelector(FILES_COLUMN);
+  const column = aside?.getBoundingClientRect();
+  return {
+    ...(area && {
+      agentArea: { left: area.left, top: area.top, width: area.width, height: area.height },
+    }),
+    ...(aside &&
+      column && {
+        column: {
+          left: column.left,
+          right: column.right,
+          side: aside.parentElement?.getAttribute('data-side') === 'right' ? 'right' : 'left',
+        },
+      }),
+  };
 };
-const sameArea = (a: ViewportArea | undefined, b: ViewportArea | undefined) =>
-  a === b ||
-  (!!a &&
-    !!b &&
-    a.left === b.left &&
-    a.top === b.top &&
-    a.width === b.width &&
-    a.height === b.height);
+const sameLayout = (a: WorkspaceLayout, b: WorkspaceLayout) =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * Tracks the agent area. It is re-read after mount, because the Files column may be added in the same commit
- * that mounts the window; when the area resizes (the column opening or closing, the viewport or sidebar changing);
- * and when the column is added, removed or moves to the other side, which can move the area without resizing it.
+ * Tracks the agent area and the Files column. They are re-read after mount, because the column may be added in
+ * the same commit that mounts the window; when the area resizes (the column opening or closing, the viewport or
+ * sidebar changing); and when the column is added, removed or moves to the other side, which can move both
+ * without resizing the area.
  */
-function useAgentArea(): ViewportArea | undefined {
-  const [area, setArea] = useState(readAgentArea);
+function useWorkspaceLayout(): WorkspaceLayout {
+  const [layout, setLayout] = useState(readLayout);
   useLayoutEffect(() => {
     const update = () => {
-      const next = readAgentArea();
-      setArea((current) => (sameArea(current, next) ? current : next));
+      const next = readLayout();
+      setLayout((current) => (sameLayout(current, next) ? current : next));
     };
     update();
     const element = document.querySelector(AGENT_AREA);
@@ -56,7 +80,7 @@ function useAgentArea(): ViewportArea | undefined {
       moved.disconnect();
     };
   }, []);
-  return area;
+  return layout;
 }
 /** Maps the pointer offset since the drag started to the geometry shown for it. */
 type DragApply = (start: FilesWindowGeometry, dx: number, dy: number) => FilesWindowGeometry;
@@ -130,7 +154,7 @@ export function FilesWindow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
-  const agentArea = useAgentArea();
+  const { agentArea, column } = useWorkspaceLayout();
   const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const resize = () => setViewport(readViewport());
@@ -138,6 +162,24 @@ export function FilesWindow({
     return () => window.removeEventListener('resize', resize);
   }, []);
   useEffect(() => closeButton.current?.focus(), []);
+  /** Collapses an expanded popup, otherwise closes it. */
+  const escape = () => {
+    if (expanded) setExpanded(false);
+    else onClose();
+  };
+  const latestEscape = useRef(escape);
+  latestEscape.current = escape;
+  // A file swapped from the column leaves focus on its row, outside this dialog; Escape there still reaches the
+  // popup. Escape inside the dialog is handled (and marked handled) by its own listener first.
+  useEffect(() => {
+    const keydown = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || ownsEscape(e.target)) return;
+      e.preventDefault();
+      latestEscape.current();
+    };
+    document.addEventListener('keydown', keydown);
+    return () => document.removeEventListener('keydown', keydown);
+  }, []);
   // Stored geometry is unclamped; fit it to the live viewport every render.
   const fitted = geometry
     ? clampFilesWindow(geometry, viewport)
@@ -163,14 +205,15 @@ export function FilesWindow({
       dir="ltr"
       data-expanded={expanded}
       style={
-        expanded ? {} : { left: shown.x, top: shown.y, width: shown.width, height: shown.height }
+        expanded
+          ? expandedFilesWindow(viewport, column)
+          : { left: shown.x, top: shown.y, width: shown.width, height: shown.height }
       }
       onKeyDown={(e) => {
         // The preview's own controls may consume Escape first.
         if (e.key !== 'Escape' || e.defaultPrevented) return;
         e.preventDefault();
-        if (expanded) setExpanded(false);
-        else onClose();
+        escape();
       }}
     >
       <div className="files-window-title" {...(expanded ? {} : surface(moveBy))}>

@@ -565,6 +565,8 @@ export function SessionWorkspace({
   // Focus returns here when the popup closes: the column row, the composer for @-mentions, or the link.
   const filesOpener = useRef<HTMLElement | null>(null);
   const showPreview = () => {
+    // Only the first opener is kept: swapping files from the column must not move it, so closing returns focus
+    // to where the user started.
     if (!previewOpen)
       filesOpener.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
