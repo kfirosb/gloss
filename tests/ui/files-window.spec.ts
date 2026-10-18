@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 import { mockSession, basicSnapshot } from './session-fixture.js';
 
 async function mockFiles(page: Page) {
@@ -154,4 +154,39 @@ test('an off-screen saved window opens fully inside the viewport', async ({ page
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(1280);
   expect(box.y + box.height).toBeLessThanOrEqual(800);
+});
+
+test('a TL;DR still loading for one file never lands on the next file', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.route('**/files/review-status?*', (r) =>
+    r.fulfill({ json: { summary: false, translation: false } }),
+  );
+  let heldReview: Route | undefined;
+  const reviewRequested = new Promise<void>((resolve) => {
+    void page.route('**/files/review', (r) => {
+      heldReview = r;
+      resolve();
+    });
+  });
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  const win = page.getByRole('dialog', { name: 'Files' });
+  const preview = win.locator('.files-window-preview');
+  await win.getByRole('button', { name: 'Preview a.md', exact: true }).click();
+  await expect(preview).toContainText('content of a.md');
+  await preview.getByRole('button', { name: 'TL;DR' }).click();
+  await reviewRequested;
+
+  await win.getByRole('button', { name: 'Preview b.md', exact: true }).click();
+  await expect(preview).toContainText('content of b.md');
+
+  await heldReview!.fulfill({ json: { path: 'a.md', mode: 'summary', text: 'summary of a' } });
+  await expect(preview).toContainText('content of b.md');
+  await expect(preview).not.toContainText('summary of a');
+  await expect(preview.getByRole('button', { name: 'Show original' })).toHaveCount(0);
+  await expect(preview.getByRole('button', { name: 'TL;DR' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
 });
