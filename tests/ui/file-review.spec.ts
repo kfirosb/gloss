@@ -39,7 +39,7 @@ test('file review provides a cached TL;DR and translation with original availabl
   });
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
-  const dialog = page.getByRole('dialog', { name: 'File preview' });
+  const dialog = page.getByRole('dialog', { name: 'Files' });
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByLabel('File summary')).toContainText('תקציר התוכנית');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeHidden();
@@ -51,7 +51,8 @@ test('file review provides a cached TL;DR and translation with original availabl
   await expect(dialog.getByLabel('File summary')).toBeVisible();
   expect(modes).toEqual(['summary', 'translation']);
   await dialog.screenshot({ path: '/tmp/file-review-summary.png' });
-  await dialog.getByRole('button', { name: 'Close preview' }).click();
+  await dialog.getByRole('button', { name: 'Close files' }).click();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
   const row = page.locator('.revealed-file .file-tree-row');
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(32);
   await expect(page.locator('.revealed-file > small').last()).toHaveText('docs');
@@ -86,7 +87,7 @@ test('review errors preserve the original and let the user retry', async ({ page
   await input.fill('@plan');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  const dialog = page.getByRole('dialog', { name: 'File preview' });
+  const dialog = page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByRole('alert')).toHaveText('Try again');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();

@@ -12,7 +12,7 @@ async function setup(page: import('@playwright/test').Page, name: string, text: 
   await input.fill('@file');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  return page.getByRole('dialog', { name: 'File preview' });
+  return page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
 }
 for (const [width, height] of [
   [1280, 800],

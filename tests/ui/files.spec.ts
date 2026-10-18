@@ -93,9 +93,9 @@ for (const [width, height] of [
     await input.press('Enter');
     await expect(input).toHaveValue('Use @same');
     await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
-    await expect(page.getByRole('dialog', { name: 'File preview' })).toContainText('Read only');
+    await expect(page.getByRole('dialog', { name: 'Files' })).toContainText('Read only');
     await page.getByRole('button', { name: 'Attach file', exact: true }).click();
-    await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+    await page.getByRole('button', { name: 'Close files', exact: true }).click();
     await expect(input).toHaveValue('Use \u200E@File 2 ');
     await expect(page.locator('.composer .attachment-card')).toHaveCount(2);
     await expect(page.locator('.composer .attachment-card').last()).toContainText('b/same.txt');

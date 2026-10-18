@@ -88,10 +88,10 @@
   color: #7b8794;
   font-style: italic;
 }
-.file-preview .file-toolbar {
+.file-preview-pane .file-toolbar {
   font-size: 13px;
 }
-.file-preview .file-toolbar button {
+.file-preview-pane .file-toolbar button {
   font-size: 12px;
   padding: 6px 10px;
 }

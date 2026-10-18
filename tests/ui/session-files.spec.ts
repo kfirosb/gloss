@@ -154,7 +154,7 @@ test('uploaded A and live-reference B keep independent numbering and layouts thr
   await expect(input).toHaveValue('B @note');
   expect([...f.files.values()].filter((file) => file.sessionId === 'B')).toHaveLength(0);
   await page.getByRole('button', { name: 'Attach file', exact: true }).click();
-  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  await page.getByRole('button', { name: 'Close files', exact: true }).click();
   await expect(input).toHaveValue('B \u200E@File 1 ');
   await page.getByLabel('Panel layout').selectOption('rows');
   for (let round = 0; round < 2; round++)

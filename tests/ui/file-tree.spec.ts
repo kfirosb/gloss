@@ -114,7 +114,7 @@ test('rows stay single line and compact with selection and safe drag identity', 
   });
   expect(JSON.parse(payload)).toEqual({ sessionId: 'basic', relativePath: 'src/notes.txt' });
   await row.click();
-  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  await expect(page.locator('.files-window-preview .file-preview-pane')).toBeVisible();
   await expect(row).toHaveAttribute('aria-current', 'true');
 });
 test('failed child requests retry inline without discarding the root', async ({ page }) => {

@@ -36,12 +36,12 @@ for (const href of ['/project/docs/plan.md:12', 'docs/plan.md', 'file:///project
     });
     await page.goto('/#capability=test');
     await page.getByRole('link', { name: 'תוכנית המימוש מוכנה' }).click();
-    const dialog = page.getByRole('dialog', { name: 'File preview' });
+    const dialog = page.getByRole('dialog', { name: 'Files' });
     await expect(dialog.getByRole('heading', { name: 'Implementation plan' })).toBeVisible();
     expect(context.pages()).toHaveLength(1);
-    await dialog.getByRole('button', { name: 'Close preview' }).click();
+    // The list stays beside the preview, so the revealed row is checked without closing anything.
     await expect(
-      page
+      dialog
         .getByRole('complementary', { name: 'Session files' })
         .getByRole('button', { name: 'Preview plan.md' }),
     ).toHaveAttribute('aria-current', 'true');

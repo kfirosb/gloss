@@ -1771,15 +1771,6 @@ pre {
   overflow-wrap: anywhere;
 }
 
-.file-workspace {
-  display: flex;
-  min-width: 0;
-  direction: ltr;
-}
-.file-workspace > .app {
-  flex: 1;
-  min-width: 0;
-}
 .files-toggle {
   align-self: flex-end;
   padding: 4px 10px;
@@ -1787,16 +1778,11 @@ pre {
   flex: none;
 }
 .file-sidebar {
-  width: 270px;
-  flex: none;
   min-width: 0;
-  height: calc(100dvh - 90px);
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border-right: 1px solid light-dark(#cfd6e5, var(--dk-bg-cfd6e5));
-  background: light-dark(#fff, var(--dk-bg-ffffff));
   overflow: auto;
 }
 .file-sidebar label {
@@ -1864,92 +1850,48 @@ pre {
   display: flex;
   gap: 6px;
 }
-.file-preview {
-  width: min(900px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
-  height: min(720px, calc(100dvh - 24px));
-  max-height: calc(100dvh - 24px);
-  padding: 14px;
-  border: 1px solid light-dark(#bbc5d8, var(--dk-bg-bbc5d8));
-  border-radius: 12px;
-}
-.file-preview[open] {
+.file-preview-pane {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 12px 14px;
 }
-.file-preview::backdrop {
-  background: #17203399;
-}
-.file-preview .preview-content {
+.file-preview-pane .preview-content {
   overflow: auto;
   min-height: 0;
   min-width: 0;
   flex: 1;
 }
-.file-preview pre {
+.file-preview-pane pre {
   white-space: pre;
   overflow-wrap: normal;
   margin: 0;
   min-height: 100%;
 }
-.file-preview img {
+.file-preview-pane img {
   max-width: 100%;
   height: auto;
 }
-.file-preview .preview-path {
+.file-preview-pane .preview-path {
   margin: 0;
   flex: none;
   max-height: 3em;
   overflow: auto;
 }
 @media (max-width: 900px), (max-height: 540px) {
-  .file-sidebar {
-    position: fixed;
-    inset: 8px auto 8px 8px;
-    width: min(330px, calc(100vw - 16px));
-    height: auto;
-    z-index: 20;
-    border: 1px solid light-dark(#bbc5d8, var(--dk-bg-bbc5d8));
-    border-radius: 10px;
-    box-shadow: 0 8px 40px #17203355;
-  }
-  .file-preview {
+  .file-preview-pane {
     padding: 8px;
   }
-}
-/* The sidebar wrapper inherits the viewport space left by the session switcher. */
-#root > .file-workspace {
-  flex: 1;
-  min-height: 0;
-}
-.file-workspace > .app {
-  height: auto;
-  min-height: 0;
-  align-self: stretch;
-  margin: 0 auto;
-}
-.file-sidebar {
-  height: auto;
-  min-height: 0;
 }
 
 /* Compact explorer chrome; the file tree owns its nested row styling. */
 .compact-file-sidebar {
   padding: 8px 6px;
   gap: 8px;
-  width: 250px;
-}
-.compact-file-sidebar .file-toolbar {
-  padding: 0 4px;
-  font-size: 12px;
-}
-.compact-file-sidebar .file-toolbar button {
-  border: 0;
-  background: transparent;
-  padding: 0 5px;
-  font-size: 20px;
-  line-height: 24px;
+  height: 100%;
 }
 .file-search-controls {
   display: flex;
@@ -1987,11 +1929,6 @@ pre {
 .compact-file-sidebar .file-search-results {
   gap: 0;
 }
-@media (max-width: 900px), (max-height: 540px) {
-  .compact-file-sidebar {
-    width: min(290px, calc(100vw - 16px));
-  }
-}
 
 .rich-text strong[dir],
 .rich-text a[dir] {
@@ -2009,12 +1946,6 @@ pre {
 }
 #root:has(.sessions-sidebar) > .session-brand {
   display: none;
-}
-#root:has(.sessions-sidebar) > .file-workspace {
-  grid-column: 2;
-  grid-row: 1;
-  min-width: 0;
-  min-height: 0;
 }
 #root:has(.sessions-sidebar) > :is(p, [role='alert']) {
   grid-column: 2;
@@ -2182,11 +2113,6 @@ pre {
 .sessions-sidebar :is(button, select, summary, input):focus-visible {
   outline: 3px solid light-dark(#69a78a, var(--dk-bg-69a78a));
   outline-offset: 1px;
-}
-@media (max-width: 900px), (max-height: 540px) {
-  .file-sidebar {
-    z-index: 35;
-  }
 }
 @media (max-width: 760px) {
   .sidebar-frame,
@@ -2489,8 +2415,11 @@ pre {
   min-width: 0;
   min-height: 0;
 }
-.session-column > .file-workspace {
+/* The workspace fills the column below the tabs; the Files window floats above it. */
+.session-column > .app {
   flex: 1;
+  width: 100%;
+  height: auto;
   min-height: 0;
 }
 #root:has(.sessions-sidebar) > .session-column {
