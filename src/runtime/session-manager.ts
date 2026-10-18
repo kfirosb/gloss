@@ -113,7 +113,13 @@ export function createSessionManager(options: {
     async fileReviewStatus(id, path, version) {
       requireOpen();
       const record = recordFor(id);
-      if (typeof path !== 'string' || !path || path.length > 4096 || typeof version !== 'string' || !version)
+      if (
+        typeof path !== 'string' ||
+        !path ||
+        path.length > 4096 ||
+        typeof version !== 'string' ||
+        !version
+      )
         throw new Error('Invalid file review request');
       return (await manager.ensure(id)).fileReviewStatus({
         scope: record.canonicalRoot,
