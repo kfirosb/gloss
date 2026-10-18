@@ -24,7 +24,20 @@ async function mockFiles(page: Page) {
   });
 }
 
-test('files window keeps the list beside the preview, moves, expands, and remembers', async ({
+/** The docked column, as opposed to the copy of the list inside the popup. */
+const fileColumn = (page: Page) =>
+  page.locator('.file-workspace').getByRole('complementary', { name: 'Session files' });
+
+/** Opens the Files column and, from it, the popup on one file. */
+async function openFilePopup(page: Page, name = 'a.md') {
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await fileColumn(page)
+    .getByRole('button', { name: `Preview ${name}`, exact: true })
+    .click();
+  return page.getByRole('dialog', { name: 'Files' });
+}
+
+test('Files opens the column; a file opens the popup, which moves, expands, and remembers', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -32,10 +45,14 @@ test('files window keeps the list beside the preview, moves, expands, and rememb
   await page.goto('/#capability=test');
   const filesButton = page.getByRole('button', { name: 'Files', exact: true });
   await filesButton.click();
+  const column = fileColumn(page);
+  await expect(column).toBeVisible();
+  await expect(filesButton).toHaveAttribute('aria-expanded', 'true');
   const win = page.getByRole('dialog', { name: 'Files' });
+  await expect(win).toHaveCount(0);
+  const rowA = column.getByRole('button', { name: 'Preview a.md', exact: true });
+  await rowA.click();
   await expect(win).toHaveAttribute('aria-modal', 'false');
-  await expect(win).toContainText('Select a file to preview');
-  await win.getByRole('button', { name: 'Preview a.md', exact: true }).click();
   await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
   await win.getByRole('button', { name: 'Preview b.md', exact: true }).click();
   await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
@@ -44,9 +61,9 @@ test('files window keeps the list beside the preview, moves, expands, and rememb
 
   const before = (await win.boundingBox())!;
   // The default 900x620 window is centred over the agent column, not the whole viewport.
-  const column = (await page.locator('.session-column').boundingBox())!;
-  expect(Math.round(before.x)).toBe(Math.round(column.x + (column.width - 900) / 2));
-  expect(Math.round(before.y)).toBe(Math.round(column.y + (column.height - 620) / 2));
+  const agentColumn = (await page.locator('.session-column').boundingBox())!;
+  expect(Math.round(before.x)).toBe(Math.round(agentColumn.x + (agentColumn.width - 900) / 2));
+  expect(Math.round(before.y)).toBe(Math.round(agentColumn.y + (agentColumn.height - 620) / 2));
   const title = (await win.locator('.files-window-title').boundingBox())!;
   // It sits at y=90 in an 800px viewport and stays fully inside it, so 80px down is the room it has.
   const start = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
@@ -72,19 +89,100 @@ test('files window keeps the list beside the preview, moves, expands, and rememb
   await expect(win).toHaveAttribute('data-expanded', 'false');
   expect((await win.boundingBox())!).toMatchObject({ x: moved.x, y: moved.y });
   await page.keyboard.press('Escape');
+  // Closing the popup leaves the column open and returns focus to the row that opened it.
   await expect(win).toHaveCount(0);
-  await expect(filesButton).toBeFocused();
+  await expect(column).toBeVisible();
+  await expect(rowA).toBeFocused();
 
-  await filesButton.click();
+  await column.getByRole('button', { name: 'Preview b.md', exact: true }).click();
   await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
   await page.keyboard.press('Escape');
   await expect(win).toHaveCount(0);
+  await column.getByRole('button', { name: 'Close files', exact: true }).click();
+  await expect(column).toHaveCount(0);
+  await expect(filesButton).toBeFocused();
+  await expect(filesButton).toHaveAttribute('aria-expanded', 'false');
+
+  await page.reload();
+  const restored = (await (await openFilePopup(page)).boundingBox())!;
+  expect(Math.round(restored.x)).toBe(Math.round(moved.x));
+  expect(Math.round(restored.y)).toBe(Math.round(moved.y));
+});
+
+test('the Files column moves to the right and stays there after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  const column = fileColumn(page);
+  const app = page.locator('main.app');
+  expect((await column.boundingBox())!.x).toBeLessThan((await app.boundingBox())!.x);
+  await column.getByRole('button', { name: 'Move files to the right', exact: true }).click();
+  await expect(page.locator('.file-workspace')).toHaveAttribute('data-side', 'right');
+  expect((await column.boundingBox())!.x).toBeGreaterThan((await app.boundingBox())!.x);
+  await expect(
+    column.getByRole('button', { name: 'Move files to the left', exact: true }),
+  ).toBeFocused();
 
   await page.reload();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
-  const restored = (await page.getByRole('dialog', { name: 'Files' }).boundingBox())!;
-  expect(Math.round(restored.x)).toBe(Math.round(moved.x));
-  expect(Math.round(restored.y)).toBe(Math.round(moved.y));
+  await expect(page.locator('.file-workspace')).toHaveAttribute('data-side', 'right');
+  expect((await column.boundingBox())!.x).toBeGreaterThan((await app.boundingBox())!.x);
+  await column.getByRole('button', { name: 'Move files to the left', exact: true }).click();
+  expect((await column.boundingBox())!.x).toBeLessThan((await app.boundingBox())!.x);
+});
+
+test('on a narrow viewport the column floats at its edge, under the popup', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 700 });
+  await mockFiles(page);
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  const column = fileColumn(page);
+  expect(Math.round((await column.boundingBox())!.x)).toBe(8);
+  await column.getByRole('button', { name: 'Move files to the right', exact: true }).click();
+  const right = (await column.boundingBox())!;
+  expect(Math.round(right.x + right.width)).toBe(800 - 8);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await column.getByRole('button', { name: 'Preview a.md', exact: true }).click();
+  const win = page.getByRole('dialog', { name: 'Files' });
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  // Where the two overlap, the popup is on top.
+  const point = { x: right.x + right.width / 2, y: right.y + right.height / 2 };
+  expect(
+    await page.evaluate(
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.files-window')),
+      point,
+    ),
+  ).toBe(true);
+});
+
+test('closing the Files column closes the popup and forgets its file', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockFiles(page);
+  await page.goto('/#capability=test');
+  const filesButton = page.getByRole('button', { name: 'Files', exact: true });
+  const win = await openFilePopup(page);
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  // The default popup covers the column's header and the Files button, so both are pressed from the keyboard.
+  await fileColumn(page).getByRole('button', { name: 'Close files', exact: true }).press('Enter');
+  await expect(win).toHaveCount(0);
+  await expect(fileColumn(page)).toHaveCount(0);
+  await expect(filesButton).toBeFocused();
+  await expect(filesButton).toHaveAttribute('aria-expanded', 'false');
+
+  // Reopened, the column comes back alone: the last file does not pop up again.
+  await filesButton.click();
+  await expect(fileColumn(page)).toBeVisible();
+  await expect(win).toHaveCount(0);
+
+  // The Files button closes both too.
+  await fileColumn(page).getByRole('button', { name: 'Preview b.md', exact: true }).click();
+  await expect(win.locator('.files-window-preview')).toContainText('content of b.md');
+  await filesButton.press('Enter');
+  await expect(win).toHaveCount(0);
+  await expect(fileColumn(page)).toHaveCount(0);
+  await expect(filesButton).toBeFocused();
 });
 
 test('split handle and resize grip change the window and the split is keyboard operable', async ({
@@ -93,8 +191,7 @@ test('split handle and resize grip change the window and the split is keyboard o
   await page.setViewportSize({ width: 1280, height: 800 });
   await mockFiles(page);
   await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
-  const win = page.getByRole('dialog', { name: 'Files' });
+  const win = await openFilePopup(page);
   const list = win.locator('.files-window-list');
   const split = win.getByRole('separator');
   await expect(split).toHaveAttribute('aria-orientation', 'vertical');
@@ -152,8 +249,7 @@ test('an off-screen saved window opens fully inside the viewport', async ({ page
     );
   });
   await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
-  const box = (await page.getByRole('dialog', { name: 'Files' }).boundingBox())!;
+  const box = (await (await openFilePopup(page)).boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(1280);
@@ -173,10 +269,8 @@ test('a TL;DR still loading for one file never lands on the next file', async ({
     reviewHeld();
   });
   await page.goto('/#capability=test');
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
-  const win = page.getByRole('dialog', { name: 'Files' });
+  const win = await openFilePopup(page);
   const preview = win.locator('.files-window-preview');
-  await win.getByRole('button', { name: 'Preview a.md', exact: true }).click();
   await expect(preview).toContainText('content of a.md');
   await preview.getByRole('button', { name: 'TL;DR' }).click();
   await reviewRequested;
@@ -205,7 +299,7 @@ test('a TL;DR still loading for one file never lands on the next file', async ({
   );
 });
 
-test('attach outcomes stay in the preview pane and clear when the window closes', async ({
+test('attach outcomes stay in the preview pane and clear when the popup closes', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -231,10 +325,7 @@ test('attach outcomes stay in the preview pane and clear when the window closes'
   );
   await page.route('**/files/*/metadata', (r) => r.fulfill({ json: file }));
   await page.goto('/#capability=test');
-  const filesButton = page.getByRole('button', { name: 'Files', exact: true });
-  await filesButton.click();
-  const win = page.getByRole('dialog', { name: 'Files' });
-  await win.getByRole('button', { name: 'Preview a.md', exact: true }).click();
+  const win = await openFilePopup(page);
   const attach = win.getByRole('button', { name: 'Attach file', exact: true });
   await attach.click();
   await expect(win.getByRole('alert')).toHaveText('Reference failed');
@@ -245,7 +336,7 @@ test('attach outcomes stay in the preview pane and clear when the window closes'
   await expect(win.getByRole('alert')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(win).toHaveCount(0);
-  await filesButton.click();
+  await fileColumn(page).getByRole('button', { name: 'Preview a.md', exact: true }).click();
   await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
   await expect(win.getByText('Attached as File 1')).toHaveCount(0);
 });

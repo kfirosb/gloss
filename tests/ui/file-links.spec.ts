@@ -45,6 +45,12 @@ for (const href of ['/project/docs/plan.md:12', 'docs/plan.md', 'file:///project
         .getByRole('complementary', { name: 'Session files' })
         .getByRole('button', { name: 'Preview plan.md' }),
     ).toHaveAttribute('aria-current', 'true');
+    // The link opens the docked column too, revealing the file there.
+    await expect(
+      page.locator('.file-workspace').locator('.revealed-file').getByRole('button', {
+        name: 'Preview plan.md',
+      }),
+    ).toBeVisible();
   });
 }
 

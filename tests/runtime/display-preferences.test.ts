@@ -37,6 +37,7 @@ it('recovers from unavailable, corrupt and unknown-version preferences', () => {
       sidebarWidth: 300,
       theme: 'dark',
       darkStyle: 'graphite',
+      filesSide: 'left',
     });
   expect(() =>
     writeDisplayPreferences(readDisplayPreferences(), {
@@ -59,6 +60,7 @@ it('persists validated per-session modes and folder state without routing or cap
       sidebarWidth: 300,
       theme: 'dark',
       darkStyle: 'graphite',
+      filesSide: 'left',
     },
     s,
   );
@@ -72,6 +74,7 @@ it('persists validated per-session modes and folder state without routing or cap
     sidebarWidth: 300,
     theme: 'dark',
     darkStyle: 'graphite',
+    filesSide: 'left',
   });
   const bad = storage(
     '{"version":1,"collapsed":"yes","grouping":"no","assistantModes":{"A":"compact","B":"bad"},"capability":"secret"}',
@@ -86,6 +89,7 @@ it('persists validated per-session modes and folder state without routing or cap
     sidebarWidth: 300,
     theme: 'dark',
     darkStyle: 'graphite',
+    filesSide: 'left',
   });
 });
 
@@ -117,6 +121,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     sidebarWidth: 300,
     theme: 'dark',
     darkStyle: 'graphite',
+    filesSide: 'left',
   });
   writeDisplayPreferences(
     {
@@ -129,6 +134,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
       sidebarWidth: 300,
       theme: 'dark',
       darkStyle: 'graphite',
+      filesSide: 'left',
     },
     s,
   );
@@ -142,6 +148,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     sidebarWidth: 300,
     theme: 'dark',
     darkStyle: 'graphite',
+    filesSide: 'left',
   });
 });
 
@@ -159,6 +166,7 @@ it('keeps long-lived tab order beyond 200 keys and prunes only vanished keys, fo
       sidebarWidth: 300,
       theme: 'dark',
       darkStyle: 'graphite',
+      filesSide: 'left',
     },
     s,
   );
@@ -276,4 +284,20 @@ it('round-trips a valid Files window and drops a malformed one without losing ot
   const read = readDisplayPreferences(bad);
   expect(read.filesWindow).toBeUndefined();
   expect(read.collapsed).toBe(true);
+});
+it('defaults the Files column to the left, round-trips the right and drops a malformed side', () => {
+  expect(readDisplayPreferences(storage()).filesSide).toBe('left');
+  expect(
+    readDisplayPreferences(storage(JSON.stringify({ version: 1, collapsed: true }))).filesSide,
+  ).toBe('left');
+  const s = storage();
+  writeDisplayPreferences({ ...readDisplayPreferences(s), filesSide: 'right' }, s);
+  expect(readDisplayPreferences(s).filesSide).toBe('right');
+  for (const side of ['top', 1, null, { side: 'right' }]) {
+    const read = readDisplayPreferences(
+      storage(JSON.stringify({ version: 1, collapsed: true, filesSide: side })),
+    );
+    expect(read.filesSide).toBe('left');
+    expect(read.collapsed).toBe(true);
+  }
 });

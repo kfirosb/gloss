@@ -81,7 +81,12 @@ for (const [width, height] of [
     await expect(preview.getByRole('status')).toHaveText('Attached as File 1');
     await preview.getByRole('button', { name: 'Attach file', exact: true }).click();
     await expect(input).toHaveValue('Keep this \u200E@File 1 ');
-    await page.getByRole('button', { name: 'Close files', exact: true }).click();
+    // Closing the popup leaves the Files column open for the search below.
+    await page
+      .getByRole('dialog', { name: 'Files' })
+      .getByRole('button', { name: 'Close files', exact: true })
+      .click();
+    await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
     await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
     await expect(page.locator('.composer .attachment-card')).not.toContainText('/project');
     await input.evaluate((e) => {
@@ -96,7 +101,6 @@ for (const [width, height] of [
     });
     await expect(input).toHaveValue('Keep this \u200E@File 1 ');
     expect(actions).toEqual([]);
-    await page.getByRole('button', { name: 'Files', exact: true }).click();
     await page.getByLabel('Search mode').selectOption('content');
     await page.getByRole('textbox', { name: 'Search files' }).fill('needle');
     await expect(page.getByText('Bounded content search', { exact: true })).toBeVisible();
@@ -321,7 +325,10 @@ test('late preview and attachment responses stay with their originating session'
   await page.getByRole('button', { name: 'Preview notes.txt' }).click();
   await page.getByRole('button', { name: 'Attach file', exact: true }).click();
   await expect.poll(() => Boolean(attachRelease)).toBe(true);
-  await page.getByRole('button', { name: 'Close files' }).click();
+  await page
+    .getByRole('dialog', { name: 'Files' })
+    .getByRole('button', { name: 'Close files' })
+    .click();
   await selectSession(page, 'B');
   await input.fill('B draft');
   attachRelease!();
@@ -335,7 +342,10 @@ test('late preview and attachment responses stay with their originating session'
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: 'Preview notes.txt' }).click();
   await expect.poll(() => Boolean(previewRelease)).toBe(true);
-  await page.getByRole('button', { name: 'Close files' }).click();
+  await page
+    .getByRole('dialog', { name: 'Files' })
+    .getByRole('button', { name: 'Close files' })
+    .click();
   await selectSession(page, 'B');
   previewRelease!();
   await expect(input).toHaveValue('B draft');

@@ -60,8 +60,9 @@ test('file review provides a cached TL;DR and translation with original availabl
   await expect(dialog.getByLabel('File summary')).toBeVisible();
   expect(modes).toEqual(['summary', 'translation']);
   await dialog.screenshot({ path: '/tmp/file-review-summary.png' });
+  // The link opened the Files column too; closing the popup leaves it showing the file.
   await dialog.getByRole('button', { name: 'Close files' }).click();
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   const row = page.locator('.revealed-file .file-tree-row');
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(32);
   await expect(page.locator('.revealed-file > small').last()).toHaveText('docs');

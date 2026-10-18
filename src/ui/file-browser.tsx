@@ -5,16 +5,25 @@ import { FileReview } from './file-review.js';
 import { FileContentPreview } from './file-content-preview.js';
 import type { LanguageSettings } from '../core/language-settings.js';
 import type { SessionClient } from './session-client.js';
+import type { FilesSide } from './display-preferences.js';
 import { errorMessage } from './error-message.js';
 export const FILE_DRAG_TYPE = 'application/x-session-file';
+/** The docked column's header controls; the Files window's own list has no header. */
+interface FileColumnControls {
+  side: FilesSide;
+  onSide(side: FilesSide): void;
+  onClose(): void;
+}
 export function FileBrowser({
   client,
   onPreview,
   revealedFile = '',
+  column,
 }: {
   revealedFile?: string;
   client: SessionClient;
   onPreview(path: string): void;
+  column?: FileColumnControls;
 }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'name' | 'content'>('name');
@@ -50,6 +59,7 @@ export function FileBrowser({
   }, [client, query, mode]);
   return (
     <aside className="file-sidebar compact-file-sidebar" aria-label="Session files" dir="ltr">
+      {column && <FileColumnHeader {...column} />}
       {revealedFile && (
         <div className="revealed-file file-entries">
           <small>Opened file</small>
@@ -117,6 +127,21 @@ export function FileBrowser({
         </>
       )}
     </aside>
+  );
+}
+function FileColumnHeader({ side, onSide, onClose }: FileColumnControls) {
+  const other: FilesSide = side === 'left' ? 'right' : 'left';
+  const moveLabel = `Move files to the ${other}`;
+  return (
+    <div className="file-toolbar">
+      <strong>Files</strong>
+      <button type="button" onClick={() => onSide(other)} aria-label={moveLabel} title={moveLabel}>
+        ⇄
+      </button>
+      <button type="button" onClick={onClose} aria-label="Close files" title="Close files">
+        ×
+      </button>
+    </div>
   );
 }
 /** Read-only preview of one session file with TL;DR/Translate and Attach; the Files window owns closing. */

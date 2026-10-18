@@ -100,7 +100,8 @@ test('rows stay single line and compact with selection and safe drag identity', 
     }),
   );
   await open(page);
-  const row = page.getByRole('button', { name: 'Preview notes.txt' });
+  // The column's row: once the popup opens, its own list repeats the row.
+  const row = page.locator('.file-workspace').getByRole('button', { name: 'Preview notes.txt' });
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(30);
   await expect(row).toHaveText('notes.txt');
   const long = page.getByRole('button', {
