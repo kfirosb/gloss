@@ -10,6 +10,9 @@
 // filled box, while Claude works, with the @ popup open, and next to the Ctrl+Y hint. Each state also
 // gets a .window.ansi: the rows from one above the cursor to 24 below it. It also saves the plain `typed` screen when
 // that version has none, and the Ctrl+R history picker opened over a stash (`stash-history`).
+// The `narrow` mode sends no message to the model: with a stash present it narrows the pane to each NARROW_WIDTHS
+// width and captures an empty box, a box with text and the Ctrl+Y hint, then each permission mode (Shift+Tab) at the
+// narrowest width, to show what Claude cuts from a footer too long for the pane (`narrow-<width>-…`).
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -49,6 +52,9 @@ const STASH_BUSY_PROMPT = 'Count from 1 to 1000, one number per line.';
 const STASH_MESSAGE = 'Reply with the single word OK.';
 // Rows below the cursor saved in each .window.ansi; Gloss reads at most this many (INPUT_ROWS_BELOW_CURSOR).
 const WINDOW_BELOW = 24;
+// Narrow mode: pane widths, widest first, and how many Shift+Tab presses cycle through the permission modes.
+const NARROW_WIDTHS = [80, 60, 40];
+const MODE_PRESSES = 3;
 // A 1x1 red PNG for the manifest's image reference.
 const RED_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
@@ -60,13 +66,15 @@ const [version, homeArgument, mode] = process.argv.slice(2);
 if (
   !/^\d+\.\d+\.\d+$/.test(version ?? '') ||
   !homeArgument ||
-  (mode && mode !== 'long' && mode !== 'stash')
+  (mode && mode !== 'long' && mode !== 'stash' && mode !== 'narrow')
 )
   throw new Error(
-    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash]',
+    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash|narrow]',
   );
 const long = mode === 'long';
-const stash = mode === 'stash';
+const narrow = mode === 'narrow';
+// Narrow mode drives the stash keys too, in the stash mode's (already trusted) project.
+const stash = mode === 'stash' || narrow;
 const home = await realpath(homeArgument);
 if (!home.startsWith('/private/var/'))
   throw new Error('The fake home must resolve under /private/var');
@@ -170,6 +178,7 @@ async function saveStash(name) {
     cursor: `${x} ${y}`,
     marker: stashShown(screen),
     rowsBelowCursor: lastText - y,
+    footer: screen.split('\n').slice(y + 2, lastText + 1),
   });
 }
 // Presses Ctrl+S and records how long Claude takes to show `ready` (the redraw KEY_SETTLE_MIN_MS rests on).
@@ -461,6 +470,30 @@ async function captureStash() {
     JSON.stringify({ summary, latencies }, null, 2),
   );
 }
+async function captureNarrow() {
+  await ensureStash();
+  for (const width of NARROW_WIDTHS) {
+    await t('resize-window', '-t', '=cap', '-x', String(width));
+    await sleep(700);
+    await emptyBox();
+    await saveStash(`narrow-${width}-stash-empty`);
+    await literal(SECOND_DRAFT);
+    await until((s) => promptLine(s).includes(SECOND_DRAFT), 'second draft typed', 10_000);
+    await saveStash(`narrow-${width}-stash-typed`);
+    await keys('C-u');
+    await until((s) => /Ctrl\+Y/i.test(s), 'Ctrl+Y hint', 10_000);
+    await saveStash(`narrow-${width}-stash-ctrl-y`);
+  }
+  const width = NARROW_WIDTHS.at(-1);
+  await emptyBox();
+  for (let press = 1; press <= MODE_PRESSES; press++) {
+    await keys('BTab');
+    await sleep(700);
+    await saveStash(`narrow-${width}-stash-mode-${press}`);
+  }
+  console.log(JSON.stringify({ version, summary }, null, 2));
+  await writeFile(join(home, `narrow-summary-${version}.json`), JSON.stringify(summary, null, 2));
+}
 async function captureScreens() {
   await checkPanePid();
   await save('empty');
@@ -548,10 +581,16 @@ try {
     await keys('Enter');
   }
   await until(idle, 'input box');
-  await (long ? captureLong() : stash ? captureStash() : captureScreens());
+  await (long
+    ? captureLong()
+    : narrow
+      ? captureNarrow()
+      : stash
+        ? captureStash()
+        : captureScreens());
 } finally {
   const records = await transcriptRecords();
-  if (records.length)
+  if (records.length && !narrow)
     await writeFile(
       join(out, `claude-typed-${long ? 'long-' : stash ? 'stash-' : ''}${version}.jsonl`),
       scrubbedTranscript(records),

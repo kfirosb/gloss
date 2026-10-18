@@ -11,6 +11,7 @@ import {
 } from '../../src/agents/claude/tmux-screen.js';
 import {
   FIXTURE_VERSIONS,
+  NARROW_READINGS,
   STASH_FIXTURE_VERSIONS,
   STASH_READINGS,
   readCursor,
@@ -225,11 +226,40 @@ describe.each(STASH_FIXTURE_VERSIONS)(
       expect(read('stash-at-popup')).toEqual({ readable: false });
     });
     it('never reads a box ready to paste without the marker after Ctrl+S closed the popup', () => {
-      const w = read('stash-at-popup-after');
-      expect(!w.readable || !w.emptyAtPrompt || w.stashed).toBe(true);
+      expect(read('stash-at-popup-after')).toEqual({
+        readable: true,
+        stashed: true,
+        emptyAtPrompt: true,
+      });
     });
     it('cannot read the history picker, whose cursor is on the footer row', () => {
       expect(read('stash-history')).toEqual({ readable: false });
+    });
+  },
+);
+
+describe.each(STASH_FIXTURE_VERSIONS)(
+  'captured Claude %s stash screens on narrow panes',
+  (version) => {
+    const read = (state: string, source?: 'window' | 'screen') => {
+      const w = readWindow(version, state, source);
+      return readInputWindow(parsed(w.text), w.cursorRow, w.cursorColumn);
+    };
+    const states = Object.keys(NARROW_READINGS);
+    it.each(Object.entries(NARROW_READINGS))('reads %s', (state, reading) => {
+      expect(read(state)).toEqual(reading);
+      expect(read(state, 'screen')).toEqual(read(state));
+    });
+    it.each(states)('keeps the stash marker whole on %s, cutting the notices first', (state) => {
+      expect(screenText(parsed(readScreen(version, state)))).toMatch(/· › stashed *$/mu);
+    });
+    it('wraps the marker to the row under the footer, so that row must be blank for a reading', () => {
+      for (const state of states.filter((name) => !NARROW_READINGS[name]?.readable)) {
+        const { y } = readCursor(version, state);
+        const rows = screenText(parsed(readScreen(version, state))).split('\n');
+        expect(rows[y + 2], state).not.toMatch(/stashed/u);
+        expect(rows[y + 3], state).toMatch(/› stashed/u);
+      }
     });
   },
 );

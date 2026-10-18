@@ -67,6 +67,28 @@ export const CAPTURED_STASH = {
   busy: 'Count from 1 to 1000, one number per line.',
   message: 'Reply with the single word OK.',
 } as const;
+/**
+ * The stash screens the capture script's `narrow` mode took at each pane width (`claude-<version>-narrow-<width>-…`),
+ * with a stash present: Claude never cuts `› stashed` but wraps the footer's right side onto a second row, which Gloss
+ * cannot read. Only a footer that still fits on one row reads.
+ */
+type WindowReading =
+  { readable: false } | { readable: true; stashed: boolean; emptyAtPrompt: boolean };
+export const NARROW_READINGS: Readonly<Record<string, WindowReading>> = Object.fromEntries([
+  ...[80, 60, 40].flatMap((width) =>
+    ['stash-empty', 'stash-typed', 'stash-ctrl-y'].map((state): [string, WindowReading] => [
+      `narrow-${width}-${state}`,
+      width === 80 && state === 'stash-typed'
+        ? { readable: true, stashed: true, emptyAtPrompt: false }
+        : { readable: false },
+    ]),
+  ),
+  // Each permission mode (Shift+Tab) at the narrowest width.
+  ...[1, 2, 3].map((press): [string, WindowReading] => [
+    `narrow-40-stash-mode-${press}`,
+    { readable: false },
+  ]),
+]);
 /** What Gloss must read in each captured stash state's input window (Task 1 states with a single right answer). */
 export const STASH_READINGS = {
   'stash-empty': { stashed: false, emptyAtPrompt: true },

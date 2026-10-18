@@ -174,7 +174,10 @@ function isEmptyInput(cells: readonly ScreenCell[]): boolean {
     while (runEnd < input.length && continuesPlaceholder(input, runEnd)) runEnd++;
   return input.slice(runEnd).every((cell) => !visible(cell));
 }
-/** Claude's input box: the `❯` line between the last two rules on the screen. Anything unrecognised is not empty. */
+/**
+ * Claude's input box: the `❯` line between the last two rules on the screen. Vim mode or a prompt other than `❯` is
+ * another mode (even across several rows); anything else unrecognised is not empty.
+ */
 export function readInputBox(lines: readonly ScreenLine[]): InputBox {
   const rules: number[] = [];
   for (let row = lines.length - 1; row >= 0 && rules.length < 2; row--)
@@ -213,7 +216,9 @@ const STASH_MARKER = /›\s*stashed\b/u;
 /**
  * Claude's normal footer row, told by its shape and never by its words (they change with the permission mode and
  * the notices): indented two cells, then a character that does not open a popup row. An `@` popup row is indented
- * four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`.
+ * four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`. A new popup shape needs a capture and an entry here.
+ * A footer too wide for the pane keeps `› stashed` and wraps its right side onto the next row (the `narrow-*`
+ * captures), which the blank-row check under the footer reads as unreadable.
  */
 const isFooterRow = (text: string) => /^ {2}[^\s❯+]/u.test(text);
 export interface ReadableWindow {
