@@ -174,16 +174,26 @@ function isEmptyInput(cells: readonly ScreenCell[]): boolean {
     while (runEnd < input.length && continuesPlaceholder(input, runEnd)) runEnd++;
   return input.slice(runEnd).every((cell) => !visible(cell));
 }
+/** The rows of the last two rules on the screen, which enclose Claude's input box; undefined without a box between. */
+export function inputBoxRules(
+  lines: readonly ScreenLine[],
+): { top: number; bottom: number } | undefined {
+  const rules: number[] = [];
+  for (let row = lines.length - 1; row >= 0 && rules.length < 2; row--)
+    if (isRule(lines[row] ?? [])) rules.push(row);
+  const [bottom, top] = rules;
+  return bottom === undefined || top === undefined || bottom - top < 2
+    ? undefined
+    : { top, bottom };
+}
 /**
  * Claude's input box: the `❯` line between the last two rules on the screen. Vim mode or a prompt other than `❯` is
  * another mode (even across several rows); anything else unrecognised is not empty.
  */
 export function readInputBox(lines: readonly ScreenLine[]): InputBox {
-  const rules: number[] = [];
-  for (let row = lines.length - 1; row >= 0 && rules.length < 2; row--)
-    if (isRule(lines[row] ?? [])) rules.push(row);
-  const [bottom, top] = rules;
-  if (bottom === undefined || top === undefined || bottom - top < 2) return { state: 'missing' };
+  const rules = inputBoxRules(lines);
+  if (!rules) return { state: 'missing' };
+  const { top, bottom } = rules;
   if (lines.slice(bottom).some((line) => VIM_MODE.test(lineText(line))))
     return { state: 'other-mode' };
   const row = top + 1;

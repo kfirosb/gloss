@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../core/contracts.js';
 import { classifyScreen, markersFor } from '../../runtime/attention-markers.js';
 import { claudeActivity } from './activity.js';
-import { parseStyledScreen, readInputBox, screenText } from './tmux-screen.js';
+import { inputBoxRules, parseStyledScreen, readInputBox, screenText } from './tmux-screen.js';
 
 export interface PaneCursor {
   x: number;
@@ -125,6 +125,10 @@ export function checkAtSend(facts: TerminalFacts): TerminalCheck {
   const box = readInputBox(lines);
   if (box.state === 'missing') return hold(NO_INPUT_BOX_REASON);
   if (box.state === 'other-mode') return hold(OTHER_MODE_REASON);
+  // The cursor must be in the box: elsewhere (the Ctrl+R history picker puts it on the footer row) the keys go to
+  // something Gloss does not recognise, and Ctrl+S may mean something else there.
+  const rules = inputBoxRules(lines);
+  if (!rules || cursor.y <= rules.top || cursor.y >= rules.bottom) return hold(NO_INPUT_BOX_REASON);
   return { ready: true };
 }
 

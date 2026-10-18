@@ -8,7 +8,6 @@ import { recordOf } from '../../src/core/json-record.js';
 import { claudeMessage, parseClaudeRecord } from '../../src/agents/claude/index.js';
 import type { FileReference } from '../../src/core/file-references.js';
 import { createTmux } from '../../src/runtime/tmux.js';
-import { parseStyledScreen, readInputWindow } from '../../src/agents/claude/tmux-screen.js';
 import {
   COMMAND_PREFIX_REASON,
   NO_INPUT_BOX_REASON,
@@ -42,12 +41,13 @@ import {
   FIXTURE_DIR,
   FIXTURE_VERSIONS,
   LONG_FIXTURE_VERSIONS,
+  NARROW_READINGS,
   STASH_FIXTURE_VERSIONS,
+  STASH_READINGS,
   fixtureTerminal,
   readCursor,
   readRecord,
   readScreen,
-  readWindow,
 } from './tmux-fixtures.js';
 
 const idle = (version: string) => ({ status: 'idle', version });
@@ -103,23 +103,16 @@ describe.each(FIXTURE_VERSIONS)('check at Send on captured Claude %s screens', (
 describe.each(STASH_FIXTURE_VERSIONS)(
   'check at Send on captured Claude %s stash screens',
   (version) => {
-    it.each([
-      'stash-empty',
-      'stash-typed',
-      'stash-stashed',
-      'stash-stashed-typed',
-      'stash-working',
-    ])('lets %s through', (state) => {
-      expect(checkAtSend(facts(version, state))).toEqual({ ready: true });
-    });
-    it('leaves the Ctrl+R history picker, where Ctrl+S means something else, to the input window read before any Ctrl+S', () => {
-      // The full screen still shows an empty `❯` box between its rules, so step 1 lets it through; the picker's
-      // cursor sits on the footer row, so the window Gloss reads before its first Ctrl+S cannot be read.
-      expect(checkAtSend(facts(version, 'stash-history'))).toEqual({ ready: true });
-      const w = readWindow(version, 'stash-history');
-      const lines = parseStyledScreen(w.text);
-      expect(lines && readInputWindow(lines, w.cursorRow, w.cursorColumn)).toEqual({
-        readable: false,
+    it.each([...Object.keys(STASH_READINGS), ...Object.keys(NARROW_READINGS), 'typed'])(
+      'lets %s through',
+      (state) => {
+        expect(checkAtSend(facts(version, state))).toEqual({ ready: true });
+      },
+    );
+    it('opens the terminal while the Ctrl+R history picker is open: its cursor is on the footer, not in the box', () => {
+      expect(checkAtSend(facts(version, 'stash-history'))).toEqual({
+        ready: false,
+        reason: NO_INPUT_BOX_REASON,
       });
     });
   },
