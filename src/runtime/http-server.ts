@@ -301,6 +301,19 @@ async function sessionRoute(
       }
       return true;
     }
+    if (route === 'files/review-status' && req.method === 'GET') {
+      res.setHeader('cache-control', 'no-store');
+      respond(
+        res,
+        200,
+        await app.sessions.fileReviewStatus(
+          id,
+          url.searchParams.get('path') ?? '',
+          url.searchParams.get('version') ?? '',
+        ),
+      );
+      return true;
+    }
     if (route === 'files/media' && req.method === 'GET') {
       const controller = new AbortController();
       const cancel = () => controller.abort();

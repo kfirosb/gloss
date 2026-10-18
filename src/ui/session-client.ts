@@ -1,5 +1,6 @@
 import { MAX_MEDIA_PREVIEW_BYTES, MAX_MEDIA_PREVIEW_LABEL } from '../core/content-policy.js';
 import { readServerEvents, SERVER_EVENTS_RETRY_MS } from './server-events.js';
+import type { FileReviewMode } from '../core/file-review-contracts.js';
 import type {
   BrowserPage,
   BrowserSearch,
@@ -152,6 +153,16 @@ export class SessionClient {
     return sessionRequest<{ path: string; mode: 'summary' | 'translation'; text: string }>(
       this.base + '/files/review',
       { method: 'POST', body: JSON.stringify({ path, mode, version }), signal },
+    );
+  }
+  fileReviewStatus(path: string, version: string, signal: AbortSignal) {
+    return sessionRequest<Record<FileReviewMode, boolean>>(
+      this.base +
+        '/files/review-status?path=' +
+        encodeURIComponent(path) +
+        '&version=' +
+        encodeURIComponent(version),
+      { signal },
     );
   }
   previewFile(relativePath: string, signal: AbortSignal) {

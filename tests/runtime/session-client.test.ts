@@ -34,6 +34,25 @@ it('uses encoded session routes and capability for every request including image
     }),
   );
 });
+it('requests saved-review status with encoded path and version', async () => {
+  vi.stubGlobal('location', { hash: '#capability=secret' });
+  const fetcher = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ summary: true, translation: false }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const signal = new AbortController().signal;
+  expect(await new SessionClient('a/b').fileReviewStatus('docs/a b.md', 'v&1', signal)).toEqual({
+    summary: true,
+    translation: false,
+  });
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/sessions/a%2Fb/files/review-status?path=docs%2Fa%20b.md&version=v%261',
+    expect.objectContaining({ signal }),
+  );
+});
 it('exposes CAS conflict current data without retrying', async () => {
   vi.stubGlobal('location', { hash: '#capability=secret' });
   const current = { sessionId: 'A', revision: 4, data: defaultWorkspace() };
