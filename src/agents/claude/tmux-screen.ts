@@ -198,11 +198,13 @@ export function readInputBox(lines: readonly ScreenLine[]): InputBox {
 /** Rows read above the cursor: for a one-row box, the box's top rule (every captured empty and typed screen). */
 export const INPUT_ROWS_ABOVE_CURSOR = 1;
 /**
- * Rows read below the cursor: the box's bottom rule, Claude's footer, and one more row that shows nothing continues
- * under the footer. In every stash capture on 2.1.296 and 2.1.302 the rule is at cursor + 1, the footer at cursor + 2
- * and cursor + 3 is blank; an `@` popup takes the footer's place, and a `/` menu runs on to the pane's bottom.
+ * Rows read below the cursor: the box's bottom rule, Claude's footer (one or two rows), and one more row that shows
+ * nothing continues under the footer. In every stash capture on 2.1.296 and 2.1.302 the rule is at cursor + 1 and
+ * the footer at cursor + 2; at 200 columns cursor + 3 is blank, and on panes of 80, 60 and 40 columns Claude moves
+ * the footer's right side to cursor + 3 and leaves cursor + 4 blank (the `narrow-*` captures). An `@` popup takes the
+ * footer's place, and a `/` menu runs on to the pane's bottom.
  */
-export const INPUT_ROWS_BELOW_CURSOR = 3;
+export const INPUT_ROWS_BELOW_CURSOR = 4;
 /**
  * The rows around Claude's input box, anchored at the cursor: Claude draws the box right below the conversation, so
  * on a short conversation the pane's last rows are blank. tmux clamps `end` to the pane.
@@ -217,10 +219,23 @@ const STASH_MARKER = /›\s*stashed\b/u;
  * Claude's normal footer row, told by its shape and never by its words (they change with the permission mode and
  * the notices): indented two cells, then a character that does not open a popup row. An `@` popup row is indented
  * four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`. A new popup shape needs a capture and an entry here.
- * A footer too wide for the pane keeps `› stashed` and wraps its right side onto the next row (the `narrow-*`
- * captures), which the blank-row check under the footer reads as unreadable.
  */
 const isFooterRow = (text: string) => /^ {2}[^\s❯+]/u.test(text);
+/** Claude ends the footer's right side this many cells before the pane's edge (every stash capture). */
+const FOOTER_RIGHT_MARGIN_CELLS = 2;
+/**
+ * The footer's right side moved onto its own row, as Claude draws it when the footer does not fit the pane (the
+ * `narrow-*` captures): indented at least two cells, not starting like a popup or menu row (`+`, `❯`, `/`), and
+ * right-aligned like the footer, its last visible cell `FOOTER_RIGHT_MARGIN_CELLS` before the edge of the rule
+ * (which spans the pane). An `@` popup row (`    + README.md`) is neither.
+ */
+function isFooterContinuation(line: readonly ScreenCell[], rule: readonly ScreenCell[]): boolean {
+  if (!/^ {2,}[^\s❯+/]/u.test(lineText(line))) return false;
+  const lastVisible = line.findLastIndex(visible);
+  const ruleCells = rule.findLastIndex(visible) + 1;
+  return lastVisible + 1 === ruleCells - FOOTER_RIGHT_MARGIN_CELLS;
+}
+const isBlankRow = (line: readonly ScreenCell[] | undefined) => !line || !line.some(visible);
 export interface ReadableWindow {
   readable: true;
   /** Claude's footer shows that its stash slot holds text. */
@@ -231,25 +246,37 @@ export interface ReadableWindow {
 /** Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's normal footer (a popup). */
 export type InputWindow = { readable: false } | ReadableWindow;
 /**
+ * The footer's rows under the bottom rule at `rule`: one row followed by a blank one, or a row and its right side
+ * moved down followed by a blank one. A row missing from the capture (the pane ends there) counts as blank.
+ * Undefined for anything else: a popup, a menu, a footer of three rows.
+ */
+function footerRows(lines: readonly ScreenLine[], rule: number): string[] | undefined {
+  const bottomRule = lines[rule] ?? [];
+  const first = lines[rule + 1] ?? [];
+  if (!isRule(bottomRule) || !isFooterRow(lineText(first))) return undefined;
+  const second = lines[rule + 2];
+  if (isBlankRow(second)) return [lineText(first)];
+  if (second && isFooterContinuation(second, bottomRule) && isBlankRow(lines[rule + 3]))
+    return [lineText(first), lineText(second)];
+  return undefined;
+}
+/**
  * Reads the rows Gloss captured around the cursor (`cursorRow` is the cursor's row within them): the bottom rule
- * right under the cursor, the normal footer under the rule, and nothing under the footer. A row missing from the
- * capture (the pane ends there) counts as blank. Anything else, a wrapped footer included, is unreadable.
+ * right under the cursor, then Claude's normal footer (`footerRows`). Anything else is unreadable.
  */
 export function readInputWindow(
   lines: readonly ScreenLine[],
   cursorRow: number,
   cursorColumn: number,
 ): InputWindow {
-  const footer = lineText(lines[cursorRow + 2] ?? []);
-  const belowFooter = lineText(lines[cursorRow + 3] ?? []);
-  if (!isRule(lines[cursorRow + 1] ?? []) || !isFooterRow(footer) || belowFooter.trim() !== '')
-    return { readable: false };
+  const footer = footerRows(lines, cursorRow + 1);
+  if (!footer) return { readable: false };
   const prompt = lines[cursorRow] ?? [];
   const emptyAtPrompt =
     isRule(lines[cursorRow - 1] ?? []) &&
-    !VIM_MODE.test(footer) &&
+    !footer.some((text) => VIM_MODE.test(text)) &&
     startsWithPrompt(prompt) &&
     cursorColumn === PROMPT_CELLS &&
     isEmptyInput(prompt.slice(PROMPT_CELLS));
-  return { readable: true, stashed: STASH_MARKER.test(footer), emptyAtPrompt };
+  return { readable: true, stashed: footer.some((text) => STASH_MARKER.test(text)), emptyAtPrompt };
 }

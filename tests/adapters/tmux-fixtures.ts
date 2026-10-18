@@ -69,26 +69,24 @@ export const CAPTURED_STASH = {
 } as const;
 /**
  * The stash screens the capture script's `narrow` mode took at each pane width (`claude-<version>-narrow-<width>-…`),
- * with a stash present: Claude never cuts `› stashed` but wraps the footer's right side onto a second row, which Gloss
- * cannot read. Only a footer that still fits on one row reads.
+ * with a stash present: Claude never cuts `› stashed`; when the footer does not fit, it moves the footer's right
+ * side, marker included, to the row under it. Every one reads the stash; only the typed box is not empty.
  */
-type WindowReading =
-  { readable: false } | { readable: true; stashed: boolean; emptyAtPrompt: boolean };
-export const NARROW_READINGS: Readonly<Record<string, WindowReading>> = Object.fromEntries([
+export const NARROW_READINGS = Object.fromEntries([
   ...[80, 60, 40].flatMap((width) =>
-    ['stash-empty', 'stash-typed', 'stash-ctrl-y'].map((state): [string, WindowReading] => [
+    ['stash-empty', 'stash-typed', 'stash-ctrl-y'].map((state) => [
       `narrow-${width}-${state}`,
-      width === 80 && state === 'stash-typed'
-        ? { readable: true, stashed: true, emptyAtPrompt: false }
-        : { readable: false },
+      { readable: true, stashed: true, emptyAtPrompt: state !== 'stash-typed' },
     ]),
   ),
-  // Each permission mode (Shift+Tab) at the narrowest width.
-  ...[1, 2, 3].map((press): [string, WindowReading] => [
+  // Each permission mode (Shift+Tab) at the narrowest width, over an empty box.
+  ...[1, 2, 3].map((press) => [
     `narrow-40-stash-mode-${press}`,
-    { readable: false },
+    { readable: true, stashed: true, emptyAtPrompt: true },
   ]),
 ]);
+/** Narrow captures whose footer still fits on one row; the others have it on two. */
+export const NARROW_ONE_ROW_FOOTERS: readonly string[] = ['narrow-80-stash-typed'];
 /** What Gloss must read in each captured stash state's input window (Task 1 states with a single right answer). */
 export const STASH_READINGS = {
   'stash-empty': { stashed: false, emptyAtPrompt: true },

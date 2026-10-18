@@ -11,6 +11,7 @@ import {
 } from '../../src/agents/claude/tmux-screen.js';
 import {
   FIXTURE_VERSIONS,
+  NARROW_ONE_ROW_FOOTERS,
   NARROW_READINGS,
   STASH_FIXTURE_VERSIONS,
   STASH_READINGS,
@@ -110,6 +111,8 @@ describe('Claude input box (synthetic)', () => {
   // Synthetic windows: row 0 is the row above the cursor, the cursor is on row 1, column 2.
   const window = (...rows: string[]) => parsed(rows.join('\n') + '\n');
   const footer = '  ? for shortcuts';
+  /** Right-aligned like Claude's footer: its last cell two cells before the rule's edge. */
+  const right = (text: string) => text.padStart(rule.length - 2);
   it('reads the stash marker only on the footer below the bottom rule, and an empty one-row box at the cursor', () => {
     expect(readInputWindow(window(rule, '❯ ', rule, '  › stashed'), 1, 2)).toEqual({
       readable: true,
@@ -152,9 +155,44 @@ describe('Claude input box (synthetic)', () => {
       ),
     ).toEqual({ readable: false });
     expect(readInputWindow(window(rule, '❯ ', rule, ''), 1, 2)).toEqual({ readable: false });
-    // A footer that goes on below its row (a list under it, or a footer wrapped on a narrow pane).
+    // A row under the footer that is not its right side moved down: not right-aligned, or shaped like a popup row.
     expect(readInputWindow(window(rule, '❯ ', rule, footer, '  › stashed'), 1, 2)).toEqual({
       readable: false,
+    });
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, footer, right('    + README.md')), 1, 2),
+    ).toEqual({
+      readable: false,
+    });
+    expect(readInputWindow(window(rule, '❯ ', rule, footer, right('  /mobile')), 1, 2)).toEqual({
+      readable: false,
+    });
+    // A footer of three rows, or a moved right side with something under it.
+    expect(
+      readInputWindow(
+        window(rule, '❯ ', rule, footer, right('◐ medium'), right('› stashed')),
+        1,
+        2,
+      ),
+    ).toEqual({ readable: false });
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, footer, right('› stashed'), '  more'), 1, 2),
+    ).toEqual({ readable: false });
+  });
+  it("reads the footer's right side moved to the row under it, as Claude draws it on a narrow pane", () => {
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, footer, right('◐ medium · › stashed')), 1, 2),
+    ).toEqual({
+      readable: true,
+      stashed: true,
+      emptyAtPrompt: true,
+    });
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, footer, right('◐ medium · /effort')), 1, 2),
+    ).toEqual({
+      readable: true,
+      stashed: false,
+      emptyAtPrompt: true,
     });
   });
   it("reads a footer on the pane's last row, with nothing captured below it", () => {
@@ -163,6 +201,9 @@ describe('Claude input box (synthetic)', () => {
       stashed: true,
       emptyAtPrompt: true,
     });
+    expect(
+      readInputWindow(parsed([rule, '❯ ', rule, footer, right('› stashed')].join('\n')), 1, 2),
+    ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
   });
   it('anchors the window one row above the cursor, never above the pane', () => {
     expect(inputWindowRows(6)).toEqual({ start: 5, end: 6 + INPUT_ROWS_BELOW_CURSOR });
@@ -253,12 +294,16 @@ describe.each(STASH_FIXTURE_VERSIONS)(
     it.each(states)('keeps the stash marker whole on %s, cutting the notices first', (state) => {
       expect(screenText(parsed(readScreen(version, state)))).toMatch(/· › stashed *$/mu);
     });
-    it('wraps the marker to the row under the footer, so that row must be blank for a reading', () => {
-      for (const state of states.filter((name) => !NARROW_READINGS[name]?.readable)) {
+    it('moves the marker to the row under the footer whenever the footer does not fit on one row', () => {
+      for (const state of states) {
         const { y } = readCursor(version, state);
         const rows = screenText(parsed(readScreen(version, state))).split('\n');
-        expect(rows[y + 2], state).not.toMatch(/stashed/u);
-        expect(rows[y + 3], state).toMatch(/› stashed/u);
+        const oneRow = NARROW_ONE_ROW_FOOTERS.includes(state);
+        expect(rows[y + 2], state).toMatch(oneRow ? /› stashed/u : /^(?!.*stashed)/u);
+        expect(rows[y + 3]?.trim(), state).toEqual(
+          oneRow ? '' : expect.stringMatching(/› stashed$/u),
+        );
+        expect(rows[y + 4]?.trim(), state).toBe('');
       }
     });
   },
