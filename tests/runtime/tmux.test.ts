@@ -18,6 +18,7 @@ import {
   createTmux,
   ensureSocketDirectory,
   locateTmux,
+  MAX_PANE_ROW,
   sessionNameFor,
   tmuxCandidates,
   TmuxUnavailable,
@@ -462,6 +463,32 @@ it('rejects an unreadable cursor report and treats an absent buffer as deleted',
   await expect(tmux.paneCursor('la-one')).rejects.toThrow('tmux did not report the cursor');
   await expect(tmux.deleteBuffer('gloss-x')).resolves.toBeUndefined();
 });
+it('captures only the rows asked for and presses only Ctrl+S, once per call', async () => {
+  const calls: string[][] = [];
+  const tmux = await createTmux({
+    stateDir: await temp(),
+    executable: '/stub/tmux',
+    runner: async function* (_exe, args) {
+      calls.push(args);
+      yield { type: 'exit', outcome: ok };
+    },
+  });
+  await tmux.captureRows('la-one', 5, 17);
+  await tmux.pressStash('la-one');
+  expect(calls.map((c) => c.slice(5))).toEqual([
+    ['capture-pane', '-e', '-p', '-S', '5', '-E', '17', '-t', '=la-one:'],
+    ['send-keys', '-t', '=la-one:', '--', 'C-s'],
+  ]);
+  for (const [start, end] of [
+    [-1, 3],
+    [4, 3],
+    [1.5, 3],
+    [0, MAX_PANE_ROW + 1],
+  ] as const)
+    await expect(tmux.captureRows('la-one', start, end)).rejects.toThrow('Invalid rows');
+  await expect(tmux.pressStash('evil')).rejects.toThrow('Invalid tmux session name');
+  expect(calls).toHaveLength(2);
+});
 describe.skipIf(!available)('pasting into a real pane', () => {
   const tui = fileURLToPath(new URL('../fixtures/fake-claude-tui.mjs', import.meta.url));
   async function pane() {
@@ -495,6 +522,15 @@ describe.skipIf(!available)('pasting into a real pane', () => {
     const { tmux } = await pane();
     expect(await tmux.paneCursor('la-paste')).toEqual({ x: 2, y: 2, inMode: false });
     expect(await tmux.capturePaneStyled('la-paste')).toContain('─'.repeat(60));
+  });
+  it('captures only the rows asked for, clamped to the pane, and delivers Ctrl+S as one byte', async () => {
+    const { tmux, read } = await pane();
+    const plain = (text: string) => text.replace(/\u001b\[[0-9;:]*m/g, '').trimEnd();
+    const rows = (await tmux.captureRows('la-paste', 1, 3)).split('\n').map(plain);
+    expect(rows).toEqual(['─'.repeat(60), '❯', '─'.repeat(60)]);
+    expect(await tmux.captureRows('la-paste', 1, MAX_PANE_ROW)).toContain('❯');
+    await tmux.pressStash('la-paste');
+    await expect.poll(read, { timeout: 5000 }).toBe('\u0013');
   });
 });
 

@@ -88,6 +88,10 @@ function fakeTmux() {
     async deleteBuffer() {},
     async scroll() {},
     async exitCopyMode() {},
+    async captureRows() {
+      return '';
+    },
+    async pressStash() {},
     async killSession(n) {
       live.delete(n);
     },

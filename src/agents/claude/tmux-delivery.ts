@@ -17,11 +17,15 @@ export interface GlossTerminal {
   readonly panePid: number;
   capture(): Promise<string>;
   cursor(): Promise<PaneCursor>;
+  /** Rows `start`..`end` of the pane (0 = top), styled, clamped to the pane. */
+  captureRows(start: number, end: number): Promise<string>;
   loadBuffer(buffer: string, text: string): Promise<void>;
   /** Bracketed paste, line feeds kept, buffer deleted afterwards. */
   pasteBuffer(buffer: string): Promise<void>;
   deleteBuffer(buffer: string): Promise<void>;
   pressEnter(): Promise<void>;
+  /** Ctrl+S once: Claude's stash. Gloss presses no other key besides Enter. */
+  pressStash(): Promise<void>;
 }
 /** The parts of Claude's session record the checks read. */
 export interface TerminalSession {

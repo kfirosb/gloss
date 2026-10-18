@@ -85,12 +85,16 @@ export interface Tmux {
   capturePaneStyled(name: string): Promise<string>;
   /** The active pane's cursor cell, and whether the pane is in copy or another tmux mode. */
   paneCursor(name: string): Promise<{ x: number; y: number; inMode: boolean }>;
+  /** Rows `start`..`end` of the visible pane (0 = top), styled; tmux clamps both ends to the pane. */
+  captureRows(name: string, start: number, end: number): Promise<string>;
   /** Fills a named paste buffer from stdin, so the text never travels as a tmux command argument. */
   loadBuffer(buffer: string, text: string): Promise<void>;
   /** Pastes and deletes a named buffer: bracketed when the program asked for it (-p), line feeds kept (-r). */
   pasteBuffer(name: string, buffer: string): Promise<void>;
   deleteBuffer(buffer: string): Promise<void>;
   sendKeys(name: string, keys: string[]): Promise<void>;
+  /** Claude's stash key, Ctrl+S, once. The only key besides Enter that Gloss presses in a Claude pane. */
+  pressStash(name: string): Promise<void>;
   /** Types text literally (no key-name parsing), then presses Enter. */
   typeText(name: string, text: string): Promise<void>;
   resizeWindow(name: string, cols: number, rows: number): Promise<void>;
@@ -126,6 +130,8 @@ const sessionAbsent = (outcome: ProcessOutcome) =>
 const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
 const BUFFER = /^gloss-[A-Za-z0-9-]{1,100}$/;
 const CURSOR = /^(\d+) (\d+) ([01])$/;
+/** Highest pane row Gloss asks tmux to capture; no pane is taller. */
+export const MAX_PANE_ROW = 10_000;
 
 /** One wheel report in the encoding the pane's app asked for: SGR, or legacy X10 (coordinates capped at 223). */
 function wheelReport(up: boolean, col: number, row: number, sgr: boolean): number[] {
@@ -271,6 +277,25 @@ export async function createTmux(
       if (!match) throw new Error('tmux did not report the cursor');
       return { x: Number(match[1]), y: Number(match[2]), inMode: match[3] === '1' };
     },
+    async captureRows(name, start, end) {
+      check(name);
+      const row = (n: number) => Number.isSafeInteger(n) && n >= 0 && n <= MAX_PANE_ROW;
+      if (!row(start) || !row(end) || start > end) throw new Error('Invalid rows');
+      const target = '=' + name + ':';
+      return (
+        await run([
+          'capture-pane',
+          '-e',
+          '-p',
+          '-S',
+          String(start),
+          '-E',
+          String(end),
+          '-t',
+          target,
+        ])
+      ).lines.join('\n');
+    },
     async loadBuffer(buffer, text) {
       checkBuffer(buffer);
       await run(['load-buffer', '-b', buffer, '-'], false, text);
@@ -295,6 +320,10 @@ export async function createTmux(
     async sendKeys(name, keys) {
       check(name);
       await run(['send-keys', '-t', '=' + name + ':', '--', ...keys]);
+    },
+    async pressStash(name) {
+      check(name);
+      await run(['send-keys', '-t', '=' + name + ':', '--', 'C-s']);
     },
     async typeText(name, text) {
       check(name);

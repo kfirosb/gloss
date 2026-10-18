@@ -179,10 +179,12 @@ export function glossTerminalFor(
     panePid: launch.panePid,
     capture: () => tmux.capturePaneStyled(name),
     cursor: () => tmux.paneCursor(name),
+    captureRows: (start, end) => tmux.captureRows(name, start, end),
     loadBuffer: (buffer, text) => tmux.loadBuffer(buffer, text),
     pasteBuffer: (buffer) => tmux.pasteBuffer(name, buffer),
     deleteBuffer: (buffer) => tmux.deleteBuffer(buffer),
     pressEnter: () => tmux.sendKeys(name, ['Enter']),
+    pressStash: () => tmux.pressStash(name),
   };
 }
 

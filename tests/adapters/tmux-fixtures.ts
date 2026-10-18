@@ -127,7 +127,7 @@ export interface FixtureTerminalOptions {
   inMode?: boolean;
   cursorShift?: number;
   panePid?: number;
-  fail?: 'capture' | 'load' | 'paste' | 'enter';
+  fail?: 'capture' | 'rows' | 'load' | 'paste' | 'enter' | 'stash';
   onEnter?: (text: string) => Promise<void>;
   /**
    * The captured screen shown from the paste until Enter, as Claude shows pasted text; `null` keeps the screen as it
@@ -136,6 +136,10 @@ export interface FixtureTerminalOptions {
   pastedState?: string | null;
   /** Screen reads after the paste that still show the old screen, as while Claude is still drawing it. */
   pasteDrawnAfter?: number;
+  /** The captured states Claude shows after the first and the second Ctrl+S; a missing entry keeps the screen. */
+  afterStash?: readonly string[];
+  /** Window reads after a Ctrl+S that still show the screen from before it, as while Claude is still redrawing. */
+  stashDrawnAfter?: number;
 }
 /** A Gloss terminal that shows a captured screen and records what the adapter does to it. */
 export function fixtureTerminal(
@@ -147,6 +151,10 @@ export function fixtureTerminal(
   const pastedState = options.pastedState === undefined ? 'typed' : options.pastedState;
   /** Screen reads since the paste, while it is in the input; undefined when nothing is pasted. */
   let readsSincePaste: number | undefined;
+  let shown = state;
+  let pending: string | undefined;
+  let readsSincePress = 0;
+  let presses = 0;
   const fail = (step: FixtureTerminalOptions['fail']) => {
     if (options.fail === step) throw new Error(`fixture ${step} failure`);
   };
@@ -156,20 +164,34 @@ export function fixtureTerminal(
     async capture() {
       log.calls.push('capture');
       fail('capture');
-      if (readsSincePaste === undefined || pastedState === null) return readScreen(version, state);
+      if (readsSincePaste === undefined || pastedState === null) return readScreen(version, shown);
       readsSincePaste += 1;
       return readsSincePaste > (options.pasteDrawnAfter ?? 0)
         ? readScreen(version, pastedState)
-        : readScreen(version, state);
+        : readScreen(version, shown);
     },
     async cursor() {
       log.calls.push('cursor');
-      const cursor = readCursor(version, state);
+      if (pending !== undefined) {
+        if (readsSincePress >= (options.stashDrawnAfter ?? 0)) {
+          shown = pending;
+          pending = undefined;
+        } else readsSincePress += 1;
+      }
+      const cursor = readCursor(version, shown);
       return {
         x: cursor.x + (options.cursorShift ?? 0),
         y: cursor.y,
         inMode: options.inMode ?? cursor.inMode,
       };
+    },
+    async captureRows(start, end) {
+      log.calls.push('rows');
+      fail('rows');
+      return readScreen(version, shown)
+        .split('\n')
+        .slice(start, end + 1)
+        .join('\n');
     },
     async loadBuffer(buffer, text) {
       log.calls.push('load:' + buffer);
@@ -189,6 +211,16 @@ export function fixtureTerminal(
       readsSincePaste = undefined;
       fail('enter');
       await options.onEnter?.(log.loaded.at(-1) ?? '');
+    },
+    async pressStash() {
+      log.calls.push('key:C-s');
+      fail('stash');
+      const next = options.afterStash?.[presses];
+      presses += 1;
+      if (next !== undefined) {
+        pending = next;
+        readsSincePress = 0;
+      }
     },
   };
   return { terminal, log };
