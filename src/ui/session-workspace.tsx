@@ -523,6 +523,20 @@ export function SessionWorkspace({
   };
   const [filesOpen, setFilesOpen] = useState(false);
   const filesToggle = useRef<HTMLButtonElement>(null);
+  // Focus returns here when the window closes: the composer for @-mention opens, the link for file links.
+  const filesOpener = useRef<HTMLElement | null>(null);
+  const openFiles = () => {
+    if (!filesOpen)
+      filesOpener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setFilesOpen(true);
+  };
+  const closeFiles = (returnFocus = true) => {
+    setFilesOpen(false);
+    const opener = filesOpener.current;
+    filesOpener.current = null;
+    if (returnFocus) (opener?.isConnected ? opener : filesToggle.current)?.focus();
+  };
   const [revealedFile, setRevealedFile] = useState('');
   const [preview, setPreview] = useState<{
     path: string;
@@ -538,7 +552,7 @@ export function SessionWorkspace({
   }, []);
   const openPreview = (path: string, token: typeof mention = null) => {
     setError('');
-    setFilesOpen(true);
+    openFiles();
     setPreview({ path, token });
     setMention(null);
   };
@@ -1558,7 +1572,7 @@ export function SessionWorkspace({
                     type="button"
                     className="files-toggle"
                     aria-expanded={filesOpen}
-                    onClick={() => setFilesOpen((value) => !value)}
+                    onClick={() => (filesOpen ? closeFiles(false) : openFiles())}
                   >
                     Files
                   </button>
@@ -1680,10 +1694,7 @@ export function SessionWorkspace({
               revealedFile={revealedFile}
               path={preview?.path ?? null}
               onSelect={(path) => openPreview(path)}
-              onClose={() => {
-                setFilesOpen(false);
-                filesToggle.current?.focus();
-              }}
+              onClose={() => closeFiles()}
               busy={uploading}
               attachError={error}
               attached={preview?.attached ?? ''}

@@ -96,6 +96,9 @@ for (const [width, height] of [
     await expect(page.getByRole('dialog', { name: 'Files' })).toContainText('Read only');
     await page.getByRole('button', { name: 'Attach file', exact: true }).click();
     await page.getByRole('button', { name: 'Close files', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
+    // Opened from the composer's @-mention picker, so closing returns focus there.
+    await expect(input).toBeFocused();
     await expect(input).toHaveValue('Use \u200E@File 2 ');
     await expect(page.locator('.composer .attachment-card')).toHaveCount(2);
     await expect(page.locator('.composer .attachment-card').last()).toContainText('b/same.txt');

@@ -105,7 +105,9 @@ export function FilesWindow({
   }, []);
   useEffect(() => closeButton.current?.focus(), []);
   // Stored geometry is unclamped; fit it to the live viewport every render.
-  const base = geometry ? clampFilesWindow(geometry, viewport) : defaultFilesWindow(viewport);
+  const fitted = geometry ? clampFilesWindow(geometry, viewport) : defaultFilesWindow(viewport);
+  // clampFilesWindow limits the split to the collapsed width; expanded, the stored split is limited by the pane shown.
+  const base = expanded && geometry ? { ...fitted, split: geometry.split } : fitted;
   const { shown, surface } = useGeometryDrag(base, onGeometry);
   const paneWidth = expanded ? viewport.width : shown.width;
   const split = clampSplit(shown.split, paneWidth);

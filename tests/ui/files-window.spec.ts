@@ -113,6 +113,22 @@ test('split handle and resize grip change the window and the split is keyboard o
   const resized = (await win.boundingBox())!;
   expect(Math.round(before.width - resized.width)).toBe(100);
   expect(Math.round(before.height - resized.height)).toBe(60);
+
+  // Expanded, the split may pass the collapsed maximum (800 - 240 = 560) and stays there after release.
+  await win.getByRole('button', { name: 'Expand', exact: true }).click();
+  const handle = (await split.boundingBox())!;
+  const from = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 740, from.y, { steps: 5 });
+  await page.mouse.up();
+  await expect(split).toHaveAttribute('aria-valuenow', '900');
+  expect(Math.round((await list.boundingBox())!.width)).toBe(900);
+  await split.focus();
+  await page.keyboard.press('End');
+  await expect(split).toHaveAttribute('aria-valuemax', '1040');
+  await expect(split).toHaveAttribute('aria-valuenow', '1040');
+  expect(Math.round((await list.boundingBox())!.width)).toBe(1040);
 });
 
 test('an off-screen saved window opens fully inside the viewport', async ({ page }) => {
