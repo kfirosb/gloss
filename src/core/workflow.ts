@@ -13,10 +13,18 @@ import {
   type FileReference,
 } from './file-references.js';
 import {
+  CHECKING_TERMINAL_REASON,
   REQUEST_ID_PATTERN,
-  canSendWhileWorking,
+  TYPING_STARTED_REASON,
+  isAwaitingEvidence,
   isDeliverySubmitted,
+  isDeliveryTransport,
+  isDeliveryUnresolved,
+  sendGate,
   type Attachment,
+  type DeliveryEvidence,
+  type DeliveryRoute,
+  type DeliveryTransport,
 } from './contracts.js';
 import type {
   AgentAdapter,
@@ -109,6 +117,8 @@ export interface Workflow {
   resetInstruction(id: string, revision: number): void;
   discardDraft(id: string): void;
   send(id: string, revision: number, transport?: SendContext['transport']): Promise<Delivery>;
+  /** The route a Claude send would take now, or why there is none. */
+  deliveryRoute(): Promise<DeliveryRoute>;
   invalidateProjectContext(): Promise<void>;
   snapshot(): ConversationSnapshot;
   subscribe(listener: (snapshot: ConversationSnapshot) => void): () => void;
@@ -117,6 +127,11 @@ export interface Workflow {
 
 /** Remembered channel request IDs, enough to deduplicate recent native echoes. */
 const SEEN_CHANNEL_LIMIT = 1000;
+const NOT_CONNECTED_REASON = 'Claude is not connected';
+const ROUTE_UNAVAILABLE_REASON =
+  'Gloss couldn’t check how to reach this session; it will check again';
+const NOT_TYPED_REASON = 'Gloss couldn’t reach the terminal; nothing was sent';
+const ROUTE_MISMATCH_REASON = 'Gloss reaches this session another way; nothing was sent';
 
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -396,6 +411,155 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
   // Recover a stop between persisting the handoff and saving draft cleanup.
   for (const delivery of state.deliveries) clearSubmittedDraft(delivery);
 
+  /** Deliveries claimed before `delivery` for the same session, oldest first. */
+  const earlierFor = (delivery: Delivery): Delivery[] => {
+    const index = state.deliveries.findIndex((item) => item.id === delivery.id);
+    return (index < 0 ? state.deliveries : state.deliveries.slice(0, index))
+      .filter((item) => item.id !== delivery.id && sameTarget(item.target, delivery.target))
+      .map(copy);
+  };
+  /** Exact native evidence; never sends. */
+  const confirmEvidence = async (
+    active: CodingConnection,
+    delivery: Delivery,
+  ): Promise<boolean | DeliveryEvidence> =>
+    active.reconcileDelivery
+      ? active.reconcileDelivery(copy(delivery), earlierFor(delivery))
+      : false;
+  const markSent = (delivery: Delivery, evidence: true | DeliveryEvidence) => {
+    delivery.state = 'sent';
+    delete delivery.reason;
+    if (evidence !== true) delivery.nativeMessageId = evidence.nativeMessageId;
+  };
+  /** Stores the evidence that settled `delivery`; the caller broadcasts. */
+  const settleWithEvidence = (delivery: Delivery, evidence: true | DeliveryEvidence) => {
+    markSent(delivery, evidence);
+    deps.store.updateDelivery(copy(delivery));
+    clearSubmittedDraft(delivery);
+  };
+  /**
+   * Claude needs a route; other agents have one transport. Throws the route's reason when there is none. An explicit
+   * transport only names the route the session offers; it never skips the route order or the Desktop exclusion.
+   */
+  const resolveTransport = async (
+    target: Target,
+    explicit: DeliveryTransport | undefined,
+    active: CodingConnection,
+  ): Promise<DeliveryTransport | undefined> => {
+    if (target.agent !== 'claude') return undefined;
+    const route: DeliveryRoute = active.deliveryRoute
+      ? await active.deliveryRoute()
+      : { transport: 'channel' };
+    if (route.transport === null) throw new Error(route.reason);
+    if (explicit !== undefined && explicit !== route.transport)
+      throw new Error(ROUTE_MISMATCH_REASON);
+    return route.transport;
+  };
+  /**
+   * A review is sent only while the session is idle, except on the terminal route: there the check at Send shows the
+   * terminal for an open dialog or approval prompt (spec 2.4). Returns the transport the send must take, so a route
+   * that changes before it goes out is refused rather than skipping this rule.
+   */
+  const reviewTransport = async (
+    target: Target,
+    explicit: DeliveryTransport | undefined,
+  ): Promise<DeliveryTransport | undefined> => {
+    if (state.codingState === 'idle') return explicit;
+    const active = connection;
+    if (
+      active &&
+      (state.codingState === 'dialog-open' || state.codingState === 'approval-required') &&
+      (await resolveTransport(target, explicit, active)) === 'tmux'
+    )
+      return 'tmux';
+    throw new Error('Blocked: agent is working or unavailable');
+  };
+  /**
+   * Hands a claimed delivery to the agent once; nothing is ever resent. A terminal send reports typing through
+   * `onTyping`, which stores TYPING_STARTED_REASON before the paste; until then it carries CHECKING_TERMINAL_REASON, so
+   * a stop before typing is recovered as not sent and one after it as unconfirmed.
+   */
+  const dispatchClaimed = async (delivery: Delivery, active: CodingConnection): Promise<void> => {
+    const terminal = delivery.transport === 'tmux';
+    let typingStarted = false;
+    const onTyping = ({ nativeAfterRevision }: { nativeAfterRevision: number }): undefined => {
+      const typing: Delivery = {
+        ...copy(delivery),
+        state: 'sending',
+        reason: TYPING_STARTED_REASON,
+        nativeAfterRevision,
+      };
+      deps.store.updateDelivery(typing);
+      Object.assign(delivery, typing);
+      typingStarted = true;
+      publish(false);
+      return undefined;
+    };
+    try {
+      const result = await active.send(
+        delivery.id,
+        delivery.englishText,
+        delivery.attachments,
+        delivery.transport
+          ? {
+              panelSessionId: state.id,
+              transport: delivery.transport,
+              earlier: earlierFor(delivery),
+              ...(terminal ? { onTyping } : {}),
+            }
+          : undefined,
+      );
+      if (result.channelGeneration) delivery.channelGeneration = result.channelGeneration;
+      if (result.nativeMessageId) delivery.nativeMessageId = result.nativeMessageId;
+      if (result.nativeAfterRevision !== undefined)
+        delivery.nativeAfterRevision = result.nativeAfterRevision;
+      if (typingStarted && result.state === 'failed') {
+        // Once typing started the text may be in the terminal: never claim it was not sent.
+        delivery.state = 'unconfirmed';
+        delivery.reason = TYPING_STARTED_REASON;
+      } else if (
+        // Native acceptance can arrive before the transport finishes. Never downgrade it.
+        delivery.state !== 'sent' &&
+        !(
+          delivery.state === 'queued' &&
+          (result.state === 'sending' || result.state === 'unconfirmed')
+        )
+      ) {
+        delivery.state = result.state;
+        if (result.reason !== undefined) delivery.reason = result.reason;
+        else delete delivery.reason;
+        if (result.openTerminal && result.state === 'failed') delivery.openTerminal = true;
+        if (
+          delivery.state === 'sending' ||
+          (delivery.state === 'sent' && active.capabilities.acknowledgement === 'none')
+        ) {
+          delivery.state = 'unconfirmed';
+          delivery.reason ??= 'The adapter cannot confirm delivery';
+        }
+      }
+    } catch (error) {
+      if (terminal && !typingStarted) {
+        // The adapter types only after typing-started is stored, so a throw before it typed nothing.
+        delivery.state = 'failed';
+        delivery.reason = NOT_TYPED_REASON;
+      } else if (delivery.state !== 'sent' && delivery.state !== 'queued') {
+        delivery.state = 'unconfirmed';
+        delivery.reason = error instanceof Error ? error.message : 'Delivery outcome is unknown';
+      }
+    }
+    if (delivery.state !== 'sent') {
+      try {
+        const evidence = await confirmEvidence(active, delivery);
+        if (evidence) markSent(delivery, evidence);
+      } catch {
+        /* Preserve uncertainty. */
+      }
+    }
+    deps.store.updateDelivery(copy(delivery));
+    clearSubmittedDraft(delivery);
+    publish();
+  };
+
   const reconcilePending = async (active: CodingConnection) => {
     if (!active.reconcileDelivery) return;
     const generation = connectionGeneration;
@@ -407,24 +571,13 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       sameTarget(state.target, active.target);
     for (const delivery of state.deliveries) {
       if (!stillCurrent()) return;
-      if (
-        !['queued', 'sending', 'unconfirmed'].includes(delivery.state) ||
-        !sameTarget(delivery.target, active.target)
-      )
-        continue;
+      if (!isAwaitingEvidence(delivery) || !sameTarget(delivery.target, active.target)) continue;
       try {
-        const accepted = await active.reconcileDelivery(copy(delivery));
+        const evidence = await confirmEvidence(active, delivery);
         if (!stillCurrent()) return;
-        if (
-          !accepted ||
-          !state.deliveries.includes(delivery) ||
-          !['queued', 'sending', 'unconfirmed'].includes(delivery.state)
-        )
+        if (!evidence || !state.deliveries.includes(delivery) || !isAwaitingEvidence(delivery))
           continue;
-        delivery.state = 'sent';
-        delete delivery.reason;
-        deps.store.updateDelivery(copy(delivery));
-        clearSubmittedDraft(delivery);
+        settleWithEvidence(delivery, evidence);
         publish();
       } catch {
         /* Native events trigger status-only checks, never retries of the send. */
@@ -568,8 +721,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       ) {
         const active = connection;
         try {
-          if (!(await active.reconcileDelivery!(copy(delivery))) || closed || connection !== active)
-            return;
+          if (!(await confirmEvidence(active, delivery)) || closed || connection !== active) return;
         } catch {
           return;
         }
@@ -723,18 +875,10 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       }
       if (attached.reconcileDelivery)
         for (const delivery of state.deliveries) {
-          if (
-            !['queued', 'sending', 'unconfirmed'].includes(delivery.state) ||
-            !sameTarget(delivery.target, target)
-          )
-            continue;
+          if (!isAwaitingEvidence(delivery) || !sameTarget(delivery.target, target)) continue;
           try {
-            if (await attached.reconcileDelivery(delivery)) {
-              delivery.state = 'sent';
-              delete delivery.reason;
-              deps.store.updateDelivery(copy(delivery));
-              clearSubmittedDraft(delivery);
-            }
+            const evidence = await confirmEvidence(attached, delivery);
+            if (evidence) settleWithEvidence(delivery, evidence);
           } catch {
             /* Keep unresolved work if native history cannot be verified. */
           }
@@ -888,11 +1032,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       )
         return;
       try {
-        if (await connection.reconcileDelivery(prior)) {
-          prior.state = 'sent';
-          delete prior.reason;
-          deps.store.updateDelivery(copy(prior));
-          clearSubmittedDraft(prior);
+        const evidence = await confirmEvidence(connection, prior);
+        if (evidence) {
+          settleWithEvidence(prior, evidence);
           publish();
         }
       } catch {
@@ -920,11 +1062,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           sameTarget(prior.target, state.target)
         ) {
           try {
-            if (await connection.reconcileDelivery(prior)) {
-              prior.state = 'sent';
-              delete prior.reason;
-              deps.store.updateDelivery(copy(prior));
-              clearSubmittedDraft(prior);
+            const evidence = await confirmEvidence(connection, prior);
+            if (evidence) {
+              settleWithEvidence(prior, evidence);
               publish();
             }
           } catch {
@@ -937,31 +1077,23 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const pending =
         state.composerDraft &&
         state.deliveries.find(
-          (d) =>
-            d.draftId === state.composerDraft!.id &&
-            ['sending', 'queued', 'unconfirmed'].includes(d.state),
+          (d) => d.draftId === state.composerDraft!.id && isDeliveryUnresolved(d),
         );
       if (pending)
         throw new Error(
           'Previous composer delivery is unresolved; check its delivery before sending again',
         );
-      if (
-        !state.target ||
-        !connection ||
-        (state.codingState !== 'idle' &&
-          !(
-            state.codingState === 'working' &&
-            canSendWhileWorking(
-              connection.capabilities,
-              state.target.agent === 'claude' ? (transport ?? 'channel') : transport,
-            )
-          ))
-      )
+      if (!state.target || !connection || state.codingState === 'disconnected')
         throw new Error('Blocked: agent is working or unavailable');
       assertAttachmentLimits(attachments);
       const target = copy(state.target);
+      const active = connection;
       composerOperation = true;
       try {
+        // Resolved under the composer lock: no second composer send can start while the route is read.
+        const composerTransport = await resolveTransport(target, transport, active);
+        if (sendGate(state.codingState, active.capabilities, composerTransport) === 'block')
+          throw new Error('Blocked: agent is working or unavailable');
         attachments = await resolveReferences(attachments);
         let draft = state.composerDraft;
         if (!draft || draft.id !== id) {
@@ -990,7 +1122,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
             JSON.stringify(attachments.map((a) => a.id))
         )
           throw new Error('Composer request changed; text preserved');
-        return await this.send(draft.id, draft.revision, transport);
+        return await this.send(draft.id, draft.revision, composerTransport);
       } finally {
         composerOperation = false;
       }
@@ -1027,7 +1159,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
             (d) =>
               d.draftId === current.id &&
               d.revision === current.revision &&
-              ['sending', 'queued', 'unconfirmed'].includes(d.state),
+              isDeliveryUnresolved(d),
           )
         )
           throw new Error('Delivery outcome is unresolved; instruction preserved');
@@ -1056,17 +1188,21 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Prepared instruction changed; reopen the review');
       }
       const prior = state.deliveries.find((d) => d.draftId === id && d.revision === revision);
-      if (prior && (prior.target.agent === 'claude' || prior.state !== 'failed'))
-        return copy(prior);
+      // A failed Claude review is never sent again through another route, except a terminal one: a failed terminal
+      // send never typed anything.
+      const retryable =
+        prior?.state === 'failed' &&
+        (prior.target.agent !== 'claude' || prior.transport === 'tmux');
+      if (prior && !retryable) return copy(prior);
       if (
         typeof localizedText !== 'string' ||
         !localizedText.trim() ||
         localizedText.length > MAX_TEXT_CHARS
       )
         throw new Error(`A nonempty review of at most ${MAX_TEXT_CHARS} characters is required`);
-      if (state.codingState !== 'idle') throw new Error('Blocked: agent is working or unavailable');
       reviewOperation = true;
       try {
+        const sendTransport = await reviewTransport(current.target, transport);
         let englishText = current.englishText;
         if (localizedText !== current.localizedText) {
           const version = languageContextVersion;
@@ -1105,7 +1241,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         };
         state.currentDraft = next;
         publish();
-        return await this.send(next.id, next.revision, transport);
+        return await this.send(next.id, next.revision, sendTransport);
       } finally {
         reviewOperation = false;
       }
@@ -1187,7 +1323,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
             (d) =>
               d.draftId === current.id &&
               d.revision === current.revision &&
-              ['sending', 'queued', 'unconfirmed'].includes(d.state),
+              isDeliveryUnresolved(d),
           )
         )
           throw new Error(
@@ -1240,10 +1376,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('A nonempty instruction is required');
       if (
         state.deliveries.some(
-          (d) =>
-            d.draftId === id &&
-            d.revision === revision &&
-            ['sending', 'queued', 'unconfirmed'].includes(d.state),
+          (d) => d.draftId === id && d.revision === revision && isDeliveryUnresolved(d),
         )
       )
         throw new Error('Cannot edit an instruction with an unresolved delivery');
@@ -1362,7 +1495,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         (delivery) => delivery.draftId === id && delivery.revision === revision,
       );
       if (prior) return copy(prior);
-      if (transport !== undefined && transport !== 'channel' && transport !== 'peer')
+      if (transport !== undefined && !isDeliveryTransport(transport))
         throw new Error('Invalid delivery transport');
       const draft = state.currentDraft?.id === id ? state.currentDraft : state.composerDraft;
       if (!draft || draft.id !== id) throw new Error('Draft not found');
@@ -1375,17 +1508,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error(
           'This agent connection does not support image attachments or file references; instruction preserved',
         );
-      if (state.codingState === 'approval-required') throw new Error('Agent approval is required');
-      if (
-        state.codingState === 'working' &&
-        !canSendWhileWorking(
-          connection.capabilities,
-          draft.target.agent === 'claude' ? (transport ?? 'channel') : transport,
-        )
-      ) {
-        throw new Error('Agent is busy');
-      }
       const deliveryConnection = connection;
+      const deliveryTransport = await resolveTransport(draft.target, transport, deliveryConnection);
+      if (
+        sendGate(state.codingState, deliveryConnection.capabilities, deliveryTransport) === 'block'
+      )
+        throw new Error(
+          state.codingState === 'approval-required'
+            ? 'Agent approval is required'
+            : 'Agent is busy',
+        );
       const attachments = draft.attachments?.length
         ? await resolveReferences(draft.attachments)
         : [];
@@ -1403,7 +1535,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           : state.composerDraft?.id !== id || state.composerDraft.revision !== revision
       )
         throw new Error('Draft changed');
-
       const delivery: Delivery = {
         id: createId('delivery'),
         draftId: draft.id,
@@ -1419,7 +1550,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
             }
           : {}),
         state: 'sending',
-        ...(draft.target.agent === 'claude' ? { transport: transport ?? 'channel' } : {}),
+        // Replaced by TYPING_STARTED_REASON just before the paste; at startup it shows nothing was typed.
+        ...(deliveryTransport === 'tmux' ? { reason: CHECKING_TERMINAL_REASON } : {}),
+        ...(deliveryTransport ? { transport: deliveryTransport } : {}),
       };
       if (!deps.store.claimDelivery(copy(delivery))) {
         const latest = deps.store.load(state.id);
@@ -1431,59 +1564,20 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       }
       state.deliveries.push(delivery);
       publish();
-
-      try {
-        const result = await deliveryConnection.send(
-          delivery.id,
-          delivery.englishText,
-          delivery.attachments,
-          delivery.transport
-            ? { panelSessionId: state.id, transport: delivery.transport }
-            : undefined,
-        );
-        if (result.channelGeneration) delivery.channelGeneration = result.channelGeneration;
-        if (result.nativeMessageId) delivery.nativeMessageId = result.nativeMessageId;
-        if (result.nativeAfterRevision !== undefined)
-          delivery.nativeAfterRevision = result.nativeAfterRevision;
-        // Native acceptance can arrive before the transport finishes. Never downgrade it.
-        if (
-          delivery.state !== 'sent' &&
-          !(
-            delivery.state === 'queued' &&
-            (result.state === 'sending' || result.state === 'unconfirmed')
-          )
-        ) {
-          delivery.state = result.state;
-          if (result.reason !== undefined) delivery.reason = result.reason;
-          if (
-            delivery.state === 'sending' ||
-            (delivery.state === 'sent' &&
-              deliveryConnection.capabilities.acknowledgement === 'none')
-          ) {
-            delivery.state = 'unconfirmed';
-            delivery.reason ??= 'The adapter cannot confirm delivery';
-          }
-        }
-      } catch (error) {
-        if (delivery.state !== 'sent' && delivery.state !== 'queued') {
-          delivery.state = 'unconfirmed';
-          delivery.reason = error instanceof Error ? error.message : 'Delivery outcome is unknown';
-        }
-      }
-      if (delivery.state !== 'sent' && deliveryConnection.reconcileDelivery) {
-        try {
-          if (await deliveryConnection.reconcileDelivery(delivery)) {
-            delivery.state = 'sent';
-            delete delivery.reason;
-          }
-        } catch {
-          /* Preserve uncertainty. */
-        }
-      }
-      deps.store.updateDelivery(copy(delivery));
-      clearSubmittedDraft(delivery);
-      publish();
+      await dispatchClaimed(delivery, deliveryConnection);
       return copy(delivery);
+    },
+
+    async deliveryRoute() {
+      requireOpen();
+      const active = connection;
+      if (!active || !state.target) return { transport: null, reason: NOT_CONNECTED_REASON };
+      if (!active.deliveryRoute) return { transport: 'channel' };
+      try {
+        return await active.deliveryRoute();
+      } catch {
+        return { transport: null, reason: ROUTE_UNAVAILABLE_REASON };
+      }
     },
 
     async invalidateProjectContext() {

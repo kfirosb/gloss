@@ -6,7 +6,7 @@ import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import type { LanguageOverride } from '../core/language-settings.js';
 import type { SessionStore } from '../core/session-contracts.js';
 import { createAttentionMonitor } from './attention-monitor.js';
-import { createClaudeChannelSetup } from './claude-channel-setup.js';
+import { createClaudeExecutable } from './claude-config.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
 import type { OpenSessionCandidate } from '../core/session-catalog.js';
 import {
@@ -17,8 +17,9 @@ import {
 } from './session-launcher.js';
 import type { SessionManager } from './session-manager.js';
 import { createTerminalBridge } from './terminal-bridge.js';
-import { createTmux, type Tmux } from './tmux.js';
+import { createTmux, sessionNameFor, type Tmux } from './tmux.js';
 import { insideFolderReal } from './worktrees.js';
+import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
 
 const MAX_ANCESTRY = 16;
 
@@ -120,6 +121,27 @@ export function claimedCodexRefs(
   return claimed;
 }
 
+/** Launches of `agent` that own a session, directly or through their registered panel, in any state. */
+function owningLaunches(
+  agent: 'claude' | 'codex',
+  sessionRef: string,
+  launches: readonly LaunchRecord[],
+  sessions: readonly { id: string; target: Target }[],
+): LaunchRecord[] {
+  return launches.filter(
+    (l) =>
+      l.agent === agent &&
+      (l.sessionRef === sessionRef ||
+        (l.panelSessionId !== undefined &&
+          sessions.some(
+            (s) =>
+              s.id === l.panelSessionId &&
+              s.target.agent === agent &&
+              s.target.sessionRef === sessionRef,
+          ))),
+  );
+}
+
 /**
  * Liveness of a Codex thread Gloss launched: true while any launch that owns it (directly or through its
  * registered panel) still runs in tmux, false once all of them ended, undefined for threads it never launched.
@@ -130,19 +152,40 @@ export function launchedCodexLiveness(
   launches: readonly LaunchRecord[],
   sessions: readonly { id: string; target: Target }[],
 ): boolean | undefined {
-  const owning = launches.filter(
-    (l) =>
-      l.agent === 'codex' &&
-      (l.sessionRef === sessionRef ||
-        (l.panelSessionId !== undefined &&
-          sessions.some(
-            (s) =>
-              s.id === l.panelSessionId &&
-              s.target.agent === 'codex' &&
-              s.target.sessionRef === sessionRef,
-          ))),
-  );
+  const owning = owningLaunches('codex', sessionRef, launches, sessions);
   return owning.length ? owning.some((l) => l.state !== 'ended') : undefined;
+}
+
+/** The one live Claude launch owning a session, directly or through its panel; none when absent or ambiguous. */
+export function claudeLaunchFor(
+  sessionRef: string,
+  launches: readonly LaunchRecord[],
+  sessions: readonly { id: string; target: Target }[],
+): LaunchRecord | undefined {
+  const live = owningLaunches('claude', sessionRef, launches, sessions).filter(
+    (l) => l.state !== 'ended',
+  );
+  return live.length === 1 ? live[0] : undefined;
+}
+
+/** The Claude adapter's view of the tmux pane a launch runs in. */
+export function glossTerminalFor(
+  tmux: Tmux,
+  launch: Pick<LaunchRecord, 'id' | 'panePid'>,
+): GlossTerminal {
+  const name = sessionNameFor(launch.id);
+  return {
+    launchId: launch.id,
+    panePid: launch.panePid,
+    capture: () => tmux.capturePaneStyled(name),
+    cursor: () => tmux.paneCursor(name),
+    captureRows: (start, end) => tmux.captureRows(name, start, end),
+    loadBuffer: (buffer, text) => tmux.loadBuffer(buffer, text),
+    pasteBuffer: (buffer) => tmux.pasteBuffer(name, buffer),
+    deleteBuffer: (buffer) => tmux.deleteBuffer(buffer),
+    pressEnter: () => tmux.sendKeys(name, ['Enter']),
+    pressStash: () => tmux.pressStash(name),
+  };
 }
 
 /** Caches the tmux promise; a failure is forgotten so a later launch retries (for example after installing tmux). */
@@ -227,14 +270,13 @@ export function createLaunchServices(options: {
 }) {
   const tmux = options.tmux ?? cachedTmux();
   const runner = options.runner ?? runProcess;
-  const channel = createClaudeChannelSetup();
   const live = () => options.application();
   const launcher = createSessionLauncher({
     shell: defaultShell(),
     tmux,
     store: options.store,
     sessions: { register: (...args) => live().sessions!.register(...args) },
-    prepareClaude: (folder) => channel.prepareNewSessionConfig(folder),
+    claudeExecutable: createClaudeExecutable(),
     async findCodex(launch, signal): Promise<Target | undefined> {
       // A cached probe from before the launch cannot contain its thread.
       const scan = await options.codex.discoverOpen?.(signal, { fresh: true });
@@ -300,6 +342,15 @@ export function createLaunchServices(options: {
     const inside = await Promise.all(live.map((l) => insideFolderReal(l.folder, folder)));
     await Promise.all(live.filter((_, i) => inside[i]).map((l) => launcher.end(l.id)));
   };
+  /** Gloss's own pane for a Claude session, while its tmux session lives. */
+  const glossTerminal = async (sessionRef: string): Promise<GlossTerminal | undefined> => {
+    const launch = claudeLaunchFor(sessionRef, launcher.list(), options.store.listSessions());
+    if (!launch) return undefined;
+    const current = await tmux();
+    return (await current.hasSession(sessionNameFor(launch.id)))
+      ? glossTerminalFor(current, launch)
+      : undefined;
+  };
   return {
     launcher,
     terminals,
@@ -310,5 +361,6 @@ export function createLaunchServices(options: {
     endLaunchesInFolder,
     launchedCodexLive: (sessionRef: string) =>
       launchedCodexLiveness(sessionRef, launcher.list(), options.store.listSessions()),
+    glossTerminal,
   };
 }

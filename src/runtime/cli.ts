@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
 function isEntry() {
   return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]!).href;
 }
@@ -80,7 +81,12 @@ export async function launch(args: string[]) {
           },
         };
   const adapterOptions = sourceSink ? { sourceSink } : {};
-  const claudeAdapter = createClaudeAdapter(adapterOptions);
+  let glossTerminal: ((sessionRef: string) => Promise<GlossTerminal | undefined>) | undefined;
+  // Gloss's panes are known once the launcher exists, which needs the adapters first.
+  const claudeAdapter = createClaudeAdapter({
+    ...adapterOptions,
+    glossTerminal: async (sessionRef) => glossTerminal?.(sessionRef),
+  });
   let launchedCodex: ((sessionRef: string) => boolean | undefined) | undefined;
   // Launched threads are open exactly while their tmux session runs (see src/agents/README.md).
   const codexAdapter = createCodexAdapter({
@@ -97,6 +103,7 @@ export async function launch(args: string[]) {
     application: () => application,
   });
   launchedCodex = launchServices.launchedCodexLive;
+  glossTerminal = launchServices.glossTerminal;
   // The detached whisper-server must not outlive the CLI, so only the real entry attaches the signal handlers.
   const { createDictationServices } = await import('./dictation/services.js');
   const dictation = createDictationServices({

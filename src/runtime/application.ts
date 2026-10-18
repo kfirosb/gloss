@@ -3,7 +3,7 @@ import { createAsyncCache } from '../core/async-cache.js';
 import type { SeenStore } from '../core/session-catalog.js';
 import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
-import type { ImageAttachment } from '../core/contracts.js';
+import type { DeliveryRoute, ImageAttachment } from '../core/contracts.js';
 import { createFileRegistry } from './file-registry.js';
 import { splitArgs, validateLaunchSettings, type LaunchSettings } from '../core/launch-settings.js';
 import { recordOf } from '../core/json-record.js';
@@ -172,6 +172,8 @@ export interface SessionLanguage {
 }
 export interface Application {
   claudeChannelStatus?(id: string): ReturnType<ChannelSetupService['status']>;
+  /** The route a Claude send would take now. */
+  claudeRoute?(id: string): Promise<DeliveryRoute>;
   prepareClaudeChannel?(id: string): ReturnType<ChannelSetupService['createChannelSetup']>;
   claudeRegistration?(): Promise<RegistrationStatus>;
   claudePeerSetting?(id: string): Promise<PeerSetting>;
@@ -787,6 +789,12 @@ export function createApplication(options: ApplicationOptions): Application {
     async claudeChannelStatus(id) {
       requireOpen();
       return channelSetup.status(savedTarget(id));
+    },
+    async claudeRoute(id) {
+      requireOpen();
+      if (savedTarget(id).agent !== 'claude')
+        throw new Error('Delivery routes apply only to Claude sessions.');
+      return (await sessions.ensure(id)).deliveryRoute();
     },
     async prepareClaudeChannel(id) {
       requireOpen();

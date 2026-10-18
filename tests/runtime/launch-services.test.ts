@@ -6,6 +6,7 @@ import {
   descendsFrom,
   cachedTmux,
   claimedCodexRefs,
+  claudeLaunchFor,
   launchedCodexLiveness,
   createLaunchApplyLanguage,
   createLaunchServices,
@@ -558,4 +559,36 @@ it('ends only the live launches in a folder', async () => {
     services.attention.close();
     services.terminals.close();
   }
+});
+
+it('finds the one live Claude launch of a session, directly or through its panel', () => {
+  const launch = (id: string, extra: Partial<LaunchRecord>): LaunchRecord => ({
+    id,
+    agent: 'claude',
+    folder: '/f',
+    panePid: 10,
+    state: 'running',
+    createdAt: 1,
+    ...extra,
+  });
+  const sessions = [
+    { id: 'panel-b', target: { agent: 'claude' as const, sessionRef: 'ref-b', projectId: '/f' } },
+  ];
+  expect(claudeLaunchFor('ref-a', [launch('a', { sessionRef: 'ref-a' })], [])?.id).toBe('a');
+  expect(claudeLaunchFor('ref-b', [launch('b', { panelSessionId: 'panel-b' })], sessions)?.id).toBe(
+    'b',
+  );
+  expect(
+    claudeLaunchFor('ref-a', [launch('a', { sessionRef: 'ref-a', state: 'ended' })], []),
+  ).toBeUndefined();
+  expect(
+    claudeLaunchFor(
+      'ref-a',
+      [launch('a', { sessionRef: 'ref-a' }), launch('c', { sessionRef: 'ref-a' })],
+      [],
+    ),
+  ).toBeUndefined();
+  expect(
+    claudeLaunchFor('ref-a', [launch('a', { sessionRef: 'ref-a', agent: 'codex' })], []),
+  ).toBeUndefined();
 });

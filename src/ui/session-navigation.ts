@@ -1,4 +1,5 @@
 import type { CatalogEntry } from '../core/session-catalog.js';
+import { DIALOG_OPEN_REASON } from '../core/contracts.js';
 import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js';
 import type { SidebarSettings } from '../runtime/connected-folders.js';
 export const agentName = (entry: CatalogEntry) =>
@@ -255,9 +256,11 @@ export function activityLabel(entry: CatalogEntry) {
   const label =
     entry.activity === 'approval-required'
       ? 'Approval required'
-      : entry.attention === 'response'
-        ? 'New response'
-        : entry.activity[0]!.toUpperCase() + entry.activity.slice(1);
+      : entry.activity === 'dialog-open'
+        ? DIALOG_OPEN_REASON
+        : entry.attention === 'response'
+          ? 'New response'
+          : entry.activity[0]!.toUpperCase() + entry.activity.slice(1);
   return entry.availability === 'unavailable' && entry.activity !== 'disconnected'
     ? `${label} · Unavailable`
     : label;

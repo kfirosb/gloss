@@ -35,6 +35,9 @@ async function fixture(page: import('@playwright/test').Page, deliveryState: str
   await page.route('**/api/sessions/*/claude-channel', (route) =>
     route.fulfill({ json: { state: 'connected' } }),
   );
+  await page.route('**/api/sessions/*/claude-route', (route) =>
+    route.fulfill({ json: { transport: 'channel' } }),
+  );
   await page.route('**/api/sessions/*/actions', (route) => {
     const action = route.request().postDataJSON();
     if (action.type === 'send-composer') {
@@ -46,7 +49,7 @@ async function fixture(page: import('@playwright/test').Page, deliveryState: str
         draftId: 'composer-' + action.requestId,
         revision: 1,
         state,
-        transport: action.transport,
+        transport: action.transport ?? 'channel',
         ...(state === 'failed' ? { reason: 'channel not connected' } : {}),
       });
     }
