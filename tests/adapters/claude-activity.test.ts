@@ -275,6 +275,18 @@ describe('parseClaudeActivity', () => {
     expect(call).toMatchObject({ kind: 'call', call: { depth: 2 } });
   });
 });
+describe('parseClaudeActivity sidechain records', () => {
+  it('skips them in the main transcript and parses them when reading a subagent transcript', () => {
+    const record = assistant(
+      [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+      { isSidechain: true },
+    );
+    expect(parseClaudeActivity(record, 1)).toEqual([]);
+    expect(parseClaudeActivity(record, 1, 1)).toEqual([
+      { kind: 'call', call: expect.objectContaining({ id: 't1', depth: 1 }) },
+    ]);
+  });
+});
 describe('parseClaudeRecord carries activity without changing messages', () => {
   it('returns activity beside an unchanged (absent) message for a tool_use record', () => {
     const parsed = parseClaudeRecord(

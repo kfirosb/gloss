@@ -126,7 +126,8 @@ export function parseClaudeActivity(
   offset: number,
   depth = 0,
 ): ActivityEvent[] {
-  if (record.isSidechain === true) return [];
+  // Sidechain records in the main transcript belong to a subagent file; only depth > 0 reads that file.
+  if (record.isSidechain === true && depth === 0) return [];
   const message = recordOf(record.message);
   if (!message) return [];
   const body = message.content;
