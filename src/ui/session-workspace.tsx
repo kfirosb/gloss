@@ -187,6 +187,9 @@ function Message({
 }
 // Keys already posted in this page; module-level so remounting the workspace (tab switches) never re-posts the same sequence.
 const postedSeen = new Set<string>();
+/** What to do after a declined terminal Send; the message stays in Gloss. */
+const TERMINAL_NOTICE_GUIDANCE =
+  'Your message is still in Gloss; press Send again when the terminal is ready.';
 /** Marks the shown session seen once per response sequence, only while the page is visible and the window focused. Approval attention is cleared by the attention monitor, never here. */
 function useMarkSeen(entry: CatalogEntry | undefined) {
   const sessionId = entry?.sessionId;
@@ -348,15 +351,18 @@ export function SessionWorkspace({
   const liveViewNow = useRef(liveView);
   liveViewNow.current = liveView;
   /**
-   * The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with why.
+   * The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with what to
+   * do. The notice says why too unless the status strip already does (`stripShowsReason`, the composer's sends).
    * Returns whether the terminal was shown.
    */
-  const showTerminalFor = (delivery: Delivery | undefined): boolean => {
+  const showTerminalFor = (delivery: Delivery | undefined, stripShowsReason = false): boolean => {
     if (!delivery?.openTerminal || !launchId) return false;
     if (!showsTerminal(liveViewNow.current)) chooseLiveView('split');
     else setTerminalFocus(true);
     setTerminalNotice(
-      `Not sent: ${delivery.reason ?? 'the terminal needs you'}. Your message is still in Gloss; press Send again when the terminal is ready.`,
+      stripShowsReason
+        ? TERMINAL_NOTICE_GUIDANCE
+        : `Not sent: ${delivery.reason ?? 'the terminal needs you'}. ${TERMINAL_NOTICE_GUIDANCE}`,
     );
     return true;
   };
@@ -704,6 +710,7 @@ export function SessionWorkspace({
       apply(result);
       showTerminalFor(
         result.snapshot.deliveries.find((d) => d.draftId === `composer-${attempt.requestId}`),
+        true,
       );
     } catch (e) {
       setError(errorMessage(e, 'Delivery uncertain; text preserved'));

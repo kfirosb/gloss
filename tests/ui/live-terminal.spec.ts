@@ -542,11 +542,12 @@ test('a terminal Send the server declines shows the terminal in Split with the r
   await send.click();
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
   await expect(terminal(page)).toBeVisible();
-  await expect(notice(page)).toContainText(
-    'Not sent: A dialog is open in the terminal. Your message is still in Gloss',
-  );
+  // The strip already says why it was not sent; the notice only says what to do.
   await expect(page.locator('.status-strip')).toContainText(
     'Not sent: A dialog is open in the terminal',
+  );
+  await expect(notice(page)).toHaveText(
+    'Your message is still in Gloss; press Send again when the terminal is ready.',
   );
   await expect(input).toHaveValue('שלום');
   await expect(send).toBeEnabled();
@@ -623,7 +624,10 @@ test('a review Send shows the terminal only for its own newest delivery, not an 
   await page.getByRole('button', { name: 'Resume review', exact: true }).click();
   await review.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
-  await expect(notice(page)).toContainText('Not sent: A dialog is open in the terminal');
+  // No strip shows a review's delivery, so the notice says why.
+  await expect(notice(page)).toHaveText(
+    'Not sent: A dialog is open in the terminal. Your message is still in Gloss; press Send again when the terminal is ready.',
+  );
   // The modal review would cover the terminal, so it closes; its text waits behind Resume review.
   await expect(review).toBeHidden();
   await expect(terminal(page)).toBeVisible();
