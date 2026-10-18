@@ -12,7 +12,7 @@ async function setup(page: import('@playwright/test').Page, name: string, text: 
   await input.fill('@file');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  return page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
+  return page.getByRole('dialog', { name: 'File preview' }).locator('.files-window-preview');
 }
 for (const [width, height] of [
   [1280, 800],
@@ -25,7 +25,11 @@ for (const [width, height] of [
       '# Project guide\n\n**Important**\n\n- First item\n- Second item\n\n> A quotation\n\n[Docs](https://example.com)\n\n```js\nconst ready = true;\n```';
     const dialog = await setup(page, 'README.md', source);
     await expect(dialog.getByRole('heading', { name: 'Project guide' })).toBeVisible();
-    await expect(dialog.locator('strong')).toContainText(['README.md', 'Important']);
+    // The popup's title bar names the file; the pane holds only the content.
+    await expect(
+      page.getByRole('dialog', { name: 'File preview' }).locator('.files-window-title strong'),
+    ).toHaveText('README.md');
+    await expect(dialog.locator('strong')).toContainText(['Important']);
     await expect(dialog.getByRole('link', { name: 'Docs' })).toHaveAttribute(
       'href',
       'https://example.com',

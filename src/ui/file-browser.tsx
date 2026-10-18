@@ -8,7 +8,7 @@ import type { SessionClient } from './session-client.js';
 import type { FilesSide } from './display-preferences.js';
 import { errorMessage } from './error-message.js';
 export const FILE_DRAG_TYPE = 'application/x-session-file';
-/** The docked column's header controls; the Files window's own list has no header. */
+/** The docked column's header controls. */
 interface FileColumnControls {
   side: FilesSide;
   /** The side toggle, so the workspace can refocus it after the flip remounts the column. */
@@ -25,7 +25,7 @@ export function FileBrowser({
   revealedFile?: string;
   client: SessionClient;
   onPreview(path: string): void;
-  column?: FileColumnControls;
+  column: FileColumnControls;
 }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'name' | 'content'>('name');
@@ -61,7 +61,7 @@ export function FileBrowser({
   }, [client, query, mode]);
   return (
     <aside className="file-sidebar compact-file-sidebar" aria-label="Session files" dir="ltr">
-      {column && <FileColumnHeader {...column} />}
+      <FileColumnHeader {...column} />
       {revealedFile && (
         <div className="revealed-file file-entries">
           <small>Opened file</small>
@@ -152,7 +152,7 @@ function FileColumnHeader({ side, sideButton, onSide, onClose }: FileColumnContr
     </div>
   );
 }
-/** Read-only preview of one session file with TL;DR/Translate and Attach; the Files window owns closing. */
+/** Read-only preview of one session file with TL;DR/Translate and Attach; the preview popup owns closing. */
 export function FilePreviewPane({
   languageSettings,
   client,
@@ -187,10 +187,8 @@ export function FilePreviewPane({
     return () => controller.abort();
   }, [client, path]);
   return (
-    <section className="file-preview-pane" aria-label="File preview" dir="ltr">
-      <div className="file-toolbar">
-        <strong>{preview?.name ?? path.split('/').at(-1)}</strong>
-      </div>
+    <section className="file-preview-pane" aria-label="File contents" dir="ltr">
+      {/* The popup's title bar names the file; the full path stays here. */}
       <p className="preview-path">{path}</p>
       {error ? (
         <div className="preview-content">

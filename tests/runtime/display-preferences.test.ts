@@ -274,10 +274,13 @@ it('remembers a validated Live Conversation layout per session', () => {
   expect(Object.keys(result).at(-1)).toBe('s599');
 });
 it('round-trips a valid Files window and drops a malformed one without losing other fields', () => {
-  const filesWindow = { x: 10, y: 20, width: 900, height: 620, split: 270 };
+  const filesWindow = { x: 10, y: 20, width: 900, height: 620 };
   const s = storage();
   writeDisplayPreferences({ ...readDisplayPreferences(), collapsed: true, filesWindow }, s);
   expect(readDisplayPreferences(s).filesWindow).toEqual(filesWindow);
+  // A 0.14.0 blob still carries the list width; the geometry survives without it.
+  const old = storage(JSON.stringify({ version: 1, filesWindow: { ...filesWindow, split: 270 } }));
+  expect(readDisplayPreferences(old).filesWindow).toEqual(filesWindow);
   const bad = storage(
     JSON.stringify({ version: 1, collapsed: true, filesWindow: { x: 'a', y: 0, width: 1 } }),
   );

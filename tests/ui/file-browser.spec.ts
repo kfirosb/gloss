@@ -71,7 +71,9 @@ for (const [width, height] of [
     await page.getByRole('button', { name: 'Files', exact: true }).click();
     await page.getByRole('button', { name: 'Open folder src', exact: true }).click();
     await page.getByRole('button', { name: 'Preview notes.txt', exact: true }).click();
-    const preview = page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
+    const preview = page
+      .getByRole('dialog', { name: 'File preview' })
+      .locator('.files-window-preview');
     await expect(preview).toContainText('<script>unsafe()</script>');
     await expect(input).toHaveValue('Keep this');
     expect(registrations).toBe(0);
@@ -83,10 +85,10 @@ for (const [width, height] of [
     await expect(input).toHaveValue('Keep this \u200E@File 1 ');
     // Closing the popup leaves the Files column open for the search below.
     await page
-      .getByRole('dialog', { name: 'Files' })
+      .getByRole('dialog', { name: 'File preview' })
       .getByRole('button', { name: 'Close file preview', exact: true })
       .click();
-    await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'File preview' })).toHaveCount(0);
     await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
     await expect(page.locator('.composer .attachment-card')).not.toContainText('/project');
     await input.evaluate((e) => {
@@ -158,7 +160,9 @@ test('failed Attach is visible and preserves text; successful delayed Attach pre
   await input.fill('Use @note');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  const preview = page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
+  const preview = page
+    .getByRole('dialog', { name: 'File preview' })
+    .locator('.files-window-preview');
   await preview.getByRole('button', { name: 'Attach file', exact: true }).click();
   await expect(preview.getByRole('alert')).toContainText('File vanished');
   await expect(input).toHaveValue('Use @note');
@@ -326,7 +330,7 @@ test('late preview and attachment responses stay with their originating session'
   await page.getByRole('button', { name: 'Attach file', exact: true }).click();
   await expect.poll(() => Boolean(attachRelease)).toBe(true);
   await page
-    .getByRole('dialog', { name: 'Files' })
+    .getByRole('dialog', { name: 'File preview' })
     .getByRole('button', { name: 'Close file preview' })
     .click();
   await selectSession(page, 'B');
@@ -343,13 +347,13 @@ test('late preview and attachment responses stay with their originating session'
   await page.getByRole('button', { name: 'Preview notes.txt' }).click();
   await expect.poll(() => Boolean(previewRelease)).toBe(true);
   await page
-    .getByRole('dialog', { name: 'Files' })
+    .getByRole('dialog', { name: 'File preview' })
     .getByRole('button', { name: 'Close file preview' })
     .click();
   await selectSession(page, 'B');
   previewRelease!();
   await expect(input).toHaveValue('B draft');
-  await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'File preview' })).toHaveCount(0);
   await expect(page.getByText('Preview A', { exact: true })).toHaveCount(0);
 });
 test('cards compact legacy internal absolute paths and never label managed copies as originals', async ({

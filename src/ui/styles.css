@@ -1948,7 +1948,6 @@ pre {
 .compact-file-sidebar {
   padding: 8px 6px;
   gap: 8px;
-  height: 100%;
 }
 .file-search-controls {
   display: flex;

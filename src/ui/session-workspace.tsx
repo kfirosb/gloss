@@ -550,7 +550,8 @@ export function SessionWorkspace({
       pendingCaret.current = before.length + insert.length;
     });
   };
-  // The docked column and the file popup open and close separately; closing the column closes both.
+  // The docked column is the only file list; the popup shows the chosen file. They open and close separately, and
+  // closing the column closes both. Choosing a file while the popup is open only swaps its path.
   const [filesOpen, setFilesOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const filesToggle = useRef<HTMLButtonElement>(null);
@@ -1760,18 +1761,16 @@ export function SessionWorkspace({
             </main>
             {preferences.filesSide === 'right' && filesColumn}
           </div>
-          {previewOpen && (
+          {previewOpen && preview && (
             <FilesWindow
               client={client}
               languageSettings={languageSettings}
-              revealedFile={revealedFile}
-              path={preview?.path ?? null}
-              onSelect={(path) => openPreview(path)}
+              path={preview.path}
               onClose={closePreview}
               busy={uploading}
               attachError={attachError}
-              attached={preview?.attached ?? ''}
-              onAttach={() => preview && void attachPath(preview.path, preview.token, true)}
+              attached={preview.attached ?? ''}
+              onAttach={() => void attachPath(preview.path, preview.token, true)}
               geometry={preferences.filesWindow}
               onGeometry={(next) => setPreferences((value) => ({ ...value, filesWindow: next }))}
             />

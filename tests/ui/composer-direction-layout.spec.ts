@@ -207,12 +207,12 @@ test('inserted references display left-to-right and Discuss first sends them wit
   await input.press('End');
   await page.getByRole('option', { name: /reference\.txt/ }).click();
   await page
-    .getByRole('dialog', { name: 'Files' })
+    .getByRole('dialog', { name: 'File preview' })
     .getByRole('button', { name: 'Attach file', exact: true })
     .click();
   await expect(input).toHaveValue(`תסתכל על ${LRM}@File 1 `);
   await page
-    .getByRole('dialog', { name: 'Files' })
+    .getByRole('dialog', { name: 'File preview' })
     .getByRole('button', { name: 'Close file preview', exact: true })
     .click();
   await page.getByRole('button', { name: 'Discuss first', exact: true }).click();

@@ -42,7 +42,7 @@ test('file review provides a cached TL;DR and translation with original availabl
   });
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Files' });
+  const dialog = page.getByRole('dialog', { name: 'File preview' });
   const summaryChip = dialog.getByRole('button', { name: 'TL;DR', exact: true });
   const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
   await expect(summaryChip).toHaveAttribute('data-saved', 'true');
@@ -97,7 +97,9 @@ test('review errors preserve the original and let the user retry', async ({ page
   await input.fill('@plan');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  const dialog = page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
+  const dialog = page
+    .getByRole('dialog', { name: 'File preview' })
+    .locator('.files-window-preview');
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByRole('alert')).toHaveText('Try again');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
@@ -158,7 +160,7 @@ test('changing the session languages resets the open file review', async ({ page
   });
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Files' });
+  const dialog = page.getByRole('dialog', { name: 'File preview' });
   const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
   await translateChip.click();
   await expect(dialog.getByLabel('File translation')).toContainText('תוצאה 1');
