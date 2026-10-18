@@ -57,6 +57,15 @@ export const CAPTURED_LONG = {
   /** The scratch project the references point into, as the scrubbed transcript names it. */
   project: (version: string) => `/fixture/home/project-long-${version.replaceAll('.', '-')}`,
 } as const;
+/** Versions with the stash captures (the capture script's `stash` mode); 2.1.296 is the screen reader's floor. */
+export const STASH_FIXTURE_VERSIONS = ['2.1.296', '2.1.302'] as const;
+/** The texts the capture script's `stash` mode typed; keep them identical to its constants. */
+export const CAPTURED_STASH = {
+  draft: 'hello there',
+  secondDraft: 'second draft',
+  busy: 'Count from 1 to 1000, one number per line.',
+  message: 'Reply with the single word OK.',
+} as const;
 export interface TerminalLog {
   calls: string[];
   loaded: string[];

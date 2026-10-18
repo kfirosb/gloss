@@ -33,9 +33,11 @@ import {
 import {
   CAPTURED,
   CAPTURED_LONG,
+  CAPTURED_STASH,
   FIXTURE_DIR,
   FIXTURE_VERSIONS,
   LONG_FIXTURE_VERSIONS,
+  STASH_FIXTURE_VERSIONS,
   fixtureTerminal,
   readRecord,
 } from './tmux-fixtures.js';
@@ -548,3 +550,30 @@ describe.each(LONG_FIXTURE_VERSIONS)('long pastes in the captured Claude %s sess
       expect(confirms(body), body.slice(0, 40)).toBe(true);
   });
 });
+
+describe.each(STASH_FIXTURE_VERSIONS)(
+  'transcript of the captured Claude %s stash session',
+  (version) => {
+    const typed = readFileSync(join(FIXTURE_DIR, `claude-typed-stash-${version}.jsonl`), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim())
+      .flatMap((line, offset) => {
+        const value: unknown = JSON.parse(line);
+        const record = recordOf(value);
+        if (!record || typeof record.sessionId !== 'string') return [];
+        const parsed = parseClaudeRecord(record, offset, record.sessionId);
+        return parsed.message ? [parsed.message] : [];
+      })
+      .filter((m) => m.role === 'user' && m.clientId === undefined);
+    it('records each message sent over a stash exactly, and never the stashed text', () => {
+      expect(typed.filter((m) => sameTypedText(m.text, CAPTURED_STASH.busy))).toHaveLength(1);
+      expect(typed.filter((m) => sameTypedText(m.text, CAPTURED_STASH.message))).toHaveLength(1);
+      expect(
+        typed.some(
+          (m) =>
+            m.text.includes(CAPTURED_STASH.draft) || m.text.includes(CAPTURED_STASH.secondDraft),
+        ),
+      ).toBe(false);
+    });
+  },
+);

@@ -6,6 +6,10 @@
 // writes to the real home. Usage: node scripts/probes/capture-claude-input-screens.mjs <version> <fake home> [long]
 // The `long` mode captures only claude-typed-long-<version>.jsonl: where Claude starts collapsing a paste to a chip,
 // and how it records long pastes and the attachment manifest once submitted (D-1, the `<pasted_content>` wrapper).
+// The `stash` mode captures only the stash screens (plan 2b, Task 1): Ctrl+S with and without a stash, an empty and a
+// filled box, while Claude works, with the @ popup open, and next to the Ctrl+Y hint. Each state also
+// gets a .window.ansi: the rows from one above the cursor to 24 below it. It also saves the plain `typed` screen when
+// that version has none, and the Ctrl+R history picker opened over a stash (`stash-history`).
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -37,6 +41,14 @@ const SEVEN_LINES = [
 ].join('\n');
 const LONG_LINE = 'Reply with the single word OK.'.padEnd(2000, ' filler');
 const MANIFEST_TEXT = 'Reply with the single word OK after reading the referenced files.';
+// Stash mode (tests/adapters/tmux-fixtures.ts, CAPTURED_STASH).
+const STASH_DRAFT = 'hello there';
+const SECOND_DRAFT = 'second draft';
+// Long enough that Haiku is still answering through the working captures (it counts to 150 in about 2 s).
+const STASH_BUSY_PROMPT = 'Count from 1 to 1000, one number per line.';
+const STASH_MESSAGE = 'Reply with the single word OK.';
+// Rows below the cursor saved in each .window.ansi; Gloss reads at most this many (INPUT_ROWS_BELOW_CURSOR).
+const WINDOW_BELOW = 24;
 // A 1x1 red PNG for the manifest's image reference.
 const RED_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
@@ -45,18 +57,26 @@ const RED_PNG = Buffer.from(
 
 const execFileAsync = promisify(execFile);
 const [version, homeArgument, mode] = process.argv.slice(2);
-if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !homeArgument || (mode && mode !== 'long'))
+if (
+  !/^\d+\.\d+\.\d+$/.test(version ?? '') ||
+  !homeArgument ||
+  (mode && mode !== 'long' && mode !== 'stash')
+)
   throw new Error(
-    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long]',
+    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash]',
   );
 const long = mode === 'long';
+const stash = mode === 'stash';
 const home = await realpath(homeArgument);
 if (!home.startsWith('/private/var/'))
   throw new Error('The fake home must resolve under /private/var');
 const claude = join(homedir(), '.local', 'share', 'claude', 'versions', version);
 const tmux = '/opt/homebrew/bin/tmux';
 const base = ['-u', '-S', join(home, 'cap.sock'), '-f', '/dev/null'];
-const project = join(home, (long ? 'project-long-' : 'project-') + version.replaceAll('.', '-'));
+const project = join(
+  home,
+  (long ? 'project-long-' : stash ? 'project-stash-' : 'project-') + version.replaceAll('.', '-'),
+);
 const out = join(process.cwd(), 'tests', 'fixtures', 'tmux-screens');
 const prefix = `claude-${version}`;
 const sessionId = randomUUID();
@@ -83,6 +103,8 @@ await copyFile(
   constants.COPYFILE_EXCL,
 ).catch(ignoreExisting);
 await mkdir(project, { recursive: true });
+// The `@READ` popup needs a file to suggest.
+if (stash) await writeFile(join(project, 'README.md'), 'hello\n');
 await chmod(home, 0o700);
 await mkdir(out, { recursive: true });
 
@@ -111,6 +133,71 @@ const promptLine = (screen) =>
     .split('\n')
     .filter((line) => line.startsWith('❯'))
     .at(-1) ?? '';
+// Rows below the rule that closes the input box: Claude's footer (or a popup), where `› stashed` shows.
+function footer(screen) {
+  const lines = screen.split('\n');
+  const at = lines.findLastIndex((line) => line.startsWith('❯'));
+  const close = lines.findIndex((line, i) => i > at && RULE.test(line));
+  return at < 0 || close < 0 ? '' : lines.slice(close + 1).join('\n');
+}
+const stashShown = (screen) => /›\s*stashed/.test(footer(screen));
+const below = (screen, pattern) => {
+  const lines = screen.split('\n');
+  const at = lines.findLastIndex((line) => line.startsWith('❯'));
+  return at >= 0 && lines.slice(at + 1).some((line) => pattern.test(line));
+};
+const summary = [];
+const latencies = [];
+async function saveStash(name) {
+  await save(name);
+  const [x, y] = (await cursor()).split(' ').map(Number);
+  const window = await t(
+    'capture-pane',
+    '-e',
+    '-p',
+    '-S',
+    String(Math.max(0, y - 1)),
+    '-E',
+    String(y + WINDOW_BELOW),
+    '-t',
+    pane,
+  );
+  await writeFile(join(out, `${prefix}-${name}.window.ansi`), window);
+  const screen = await plain();
+  const lastText = screen.split('\n').findLastIndex((line) => line.trim() !== '');
+  summary.push({
+    name,
+    cursor: `${x} ${y}`,
+    marker: stashShown(screen),
+    rowsBelowCursor: lastText - y,
+  });
+}
+// Presses Ctrl+S and records how long Claude takes to show `ready` (the redraw KEY_SETTLE_MIN_MS rests on).
+async function timedStash(label, ready) {
+  const started = Date.now();
+  await keys('C-s');
+  for (;;) {
+    if (ready(await plain())) return void latencies.push({ label, ms: Date.now() - started });
+    if (Date.now() - started > 10_000) throw new Error(`Timed out waiting for ${label}`);
+    await sleep(20);
+  }
+}
+async function emptyBox() {
+  for (let i = 0; i < 16; i++) await keys('BSpace');
+  await until(
+    (s) => inputBox(s) && !/@READ|\/mo|gone|second|hello/.test(promptLine(s)),
+    'empty box',
+    10_000,
+  );
+}
+async function ensureStash() {
+  if (stashShown(await plain())) return;
+  await literal(STASH_DRAFT);
+  await timedStash('ensure', (s) => stashShown(s) && !promptLine(s).includes(STASH_DRAFT));
+}
+// Claude is answering: its spinner line (`✢ Elucidating…`, later `✳ Beboppin'… (1s · ↓ 7 tokens)`) or the footer's
+// interrupt hint. The footer drops that hint while the box has text, so the spinner is the sign to wait on.
+const working = (screen) => /esc to interrupt|^[^\s❯⏺⎿]\s+[^\s…]+…/mu.test(screen);
 const idle = (screen) => promptLine(screen) !== '' && !/esc to interrupt/.test(screen);
 // The input box is on screen: a `❯` line directly under a rule, closed by a rule a few lines below, and no dialog
 // footer. A dialog's own echoed `❯ /model` line satisfies `idle`, so closing a dialog must wait on this instead.
@@ -290,6 +377,90 @@ async function captureLong() {
     );
   }
 }
+async function captureStash() {
+  await saveStash('stash-empty');
+  await keys('C-s');
+  await sleep(700);
+  if (stashShown(await plain()))
+    throw new Error('Ctrl+S on an empty box with no stash showed a stash');
+  await saveStash('stash-empty-after');
+  await literal(STASH_DRAFT);
+  await until((s) => promptLine(s).includes(STASH_DRAFT), 'draft typed', 10_000);
+  await saveStash('stash-typed');
+  // The plain `typed` screen (the same text, no stash) for versions the default mode never captured.
+  if (!(await readFile(join(out, `${prefix}-typed.ansi`)).catch(() => undefined)))
+    await save('typed');
+  await timedStash('stash', (s) => stashShown(s) && !promptLine(s).includes(STASH_DRAFT));
+  await saveStash('stash-stashed');
+  await literal(SECOND_DRAFT);
+  await until((s) => promptLine(s).includes(SECOND_DRAFT), 'second draft typed', 10_000);
+  if (!stashShown(await plain()))
+    throw new Error('The stash marker is gone while the box has text');
+  await saveStash('stash-stashed-typed');
+  await timedStash('replace', (s) => stashShown(s) && !promptLine(s).includes(SECOND_DRAFT));
+  await saveStash('stash-replaced');
+  await timedStash('pop', (s) => !stashShown(s) && promptLine(s).includes(SECOND_DRAFT));
+  await saveStash('stash-popped');
+  await timedStash('restash', (s) => stashShown(s) && !promptLine(s).includes(SECOND_DRAFT));
+  await saveStash('stash-restashed');
+  // Claude working with a stash present and an empty box. Submitting restores the stash first, so stash it again.
+  await paste(STASH_BUSY_PROMPT);
+  await until(
+    (s) => promptBox(s).includes(STASH_BUSY_PROMPT.slice(0, 12)),
+    'busy prompt pasted',
+    10_000,
+  );
+  await keys('Enter');
+  await until(
+    (s) => working(s) && promptLine(s).includes(SECOND_DRAFT),
+    'working, draft restored',
+    30_000,
+  );
+  await timedStash('working', (s) => stashShown(s) && !promptLine(s).includes(SECOND_DRAFT));
+  await saveStash('stash-working');
+  await sleep(300);
+  await saveStash('stash-working-later');
+  if (!working(await plain())) throw new Error('Claude finished before the working captures');
+  await paste(STASH_MESSAGE);
+  await until((s) => promptBox(s).includes(STASH_MESSAGE.slice(0, 12)), 'message pasted', 10_000);
+  await sleep(500);
+  await keys('Enter');
+  await until(
+    (s) => promptLine(s).includes(SECOND_DRAFT) && !stashShown(s),
+    'stash restored on queue',
+    10_000,
+  );
+  await saveStash('stash-restored');
+  await answered(STASH_BUSY_PROMPT, 180_000);
+  await answered(STASH_MESSAGE, 180_000);
+  // Popups, each with a stash present underneath.
+  await emptyBox();
+  await ensureStash();
+  await literal('@READ');
+  await until((s) => below(s, /README\.md/), 'file popup', 10_000);
+  await saveStash('stash-at-popup');
+  await keys('C-s');
+  await sleep(700);
+  await saveStash('stash-at-popup-after');
+  if (below(await plain(), /README\.md/)) await keys('Escape');
+  // No `/` menu capture: it lists the account's synced skills and plugins. Like the @ popup, it replaces the footer.
+  await emptyBox();
+  await ensureStash();
+  await literal('gone');
+  await keys('C-u');
+  await until((s) => /Ctrl\+Y/i.test(s), 'Ctrl+Y hint', 10_000);
+  await saveStash('stash-ctrl-y');
+  // The Ctrl+R history picker over a stash (spec 2.6: step 1 rules it out). Ctrl+S is not pressed in it.
+  await keys('C-r');
+  await until((s) => /search prompts|bck-i-search/i.test(s), 'history picker', 10_000);
+  await saveStash('stash-history');
+  await keys('Escape');
+  console.log(JSON.stringify({ version, summary, latencies }, null, 2));
+  await writeFile(
+    join(home, `stash-summary-${version}.json`),
+    JSON.stringify({ summary, latencies }, null, 2),
+  );
+}
 async function captureScreens() {
   await checkPanePid();
   await save('empty');
@@ -370,19 +541,19 @@ await t(
 try {
   const first = await until((s) => idle(s) || /Yes, I trust this folder/.test(s), 'startup');
   if (/Yes, I trust this folder/.test(first)) {
-    if (!long) await save('trust');
+    if (!long && !stash) await save('trust');
     // The question opens on "No, exit"; move to the trust answer before confirming.
     await keys('Down');
     await until((s) => /❯ Yes, I trust this folder/.test(s), 'trust answer selected', 10_000);
     await keys('Enter');
   }
   await until(idle, 'input box');
-  await (long ? captureLong() : captureScreens());
+  await (long ? captureLong() : stash ? captureStash() : captureScreens());
 } finally {
   const records = await transcriptRecords();
   if (records.length)
     await writeFile(
-      join(out, `claude-typed-${long ? 'long-' : ''}${version}.jsonl`),
+      join(out, `claude-typed-${long ? 'long-' : stash ? 'stash-' : ''}${version}.jsonl`),
       scrubbedTranscript(records),
     );
   await t('kill-server').catch(() => undefined);
