@@ -13,6 +13,7 @@ import type {
   CodingState,
   Target,
 } from '../core/contracts.js';
+import type { ActivityEvent } from '../core/activity-contracts.js';
 import type { ProviderUsage } from '../core/usage.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../runtime/process-runner.js';
 
@@ -175,6 +176,7 @@ export type Parsed = {
   delivery?: string;
   usage?: ProviderUsage;
   channelSeen?: string;
+  activity?: ActivityEvent[];
 };
 export type RecordParser = (value: JsonRecord, offset: number) => Parsed;
 const CHUNK = 1024 * 1024;
@@ -333,6 +335,7 @@ export class Transcript {
         if (parsed.usage) events.push({ type: 'usage', usage: parsed.usage });
         if (parsed.channelSeen)
           events.push({ type: 'channel-seen', requestId: parsed.channelSeen });
+        for (const event of parsed.activity ?? []) events.push({ type: 'activity', event });
       }
       if (this.pending.length > CHUNK) this.failure('Transcript record exceeds read bound');
       this.fullyRead = this.offset === size;

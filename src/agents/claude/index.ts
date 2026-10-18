@@ -1,4 +1,5 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
+import { parseClaudeActivity } from './activity.js';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -311,12 +312,14 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
   const origin = recordOf(record.origin);
   if (record.sessionId !== sessionRef || typeof record.uuid !== 'string' || !message)
     throw new Error('Malformed Claude message');
-  if (record.type === 'assistant' && message.stop_reason !== 'end_turn') return {};
+  const activity = parseClaudeActivity(record, offset);
+  const carried = activity.length ? { activity } : {};
+  if (record.type === 'assistant' && message.stop_reason !== 'end_turn') return carried;
   const peer = record.type === 'user' && origin?.kind === 'peer';
   let deliveryId = peer && typeof origin?.msg_id === 'string' ? origin.msg_id : undefined;
   if (record.isMeta && !peer) {
     const seen = record.type === 'user' ? channelRequest(origin, message.content) : undefined;
-    return seen ? { channelSeen: seen } : {};
+    return seen ? { ...carried, channelSeen: seen } : carried;
   }
   const body = message.content;
   let text = typeof body === 'string' ? body : textBlocks(body).join('\n');
@@ -328,12 +331,13 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
     const markerId = marker?.[1] ?? marker?.[2];
     if (marker && markerId) {
       // Older Claude versions also record our msg_id (the full request id); it must name the same delivery.
-      if (deliveryId && deliveryId !== markerId && peerTag(deliveryId) !== markerId) return {};
+      if (deliveryId && deliveryId !== markerId && peerTag(deliveryId) !== markerId) return carried;
       deliveryId = markerId;
       text = text.slice(marker[0].length);
     }
   }
   return {
+    ...carried,
     ...(text
       ? {
           message: {
