@@ -10,6 +10,8 @@ import {
   type ConversationSnapshot,
   type Delivery,
 } from '../../src/core/contracts.js';
+import { MAX_FILE_REVIEW_CACHE_ROWS } from '../../src/core/content-policy.js';
+import type { FileReviewKey } from '../../src/core/file-review-contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 
 const directories: string[] = [];
@@ -87,6 +89,26 @@ describe('SqliteStore', () => {
     state.activity = { calls: [], tasks: [], running: 0, gaps: [] };
     store.save(state);
     expect(store.load(state.id)).not.toHaveProperty('activity');
+  });
+  it('isolates cached file reviews and caps the table newest-first', () => {
+    const store = new SqliteStore(databasePath());
+    const key: FileReviewKey = {
+      scope: '/p',
+      path: 'a.md',
+      version: 'v',
+      mode: 'summary',
+      language: 'he',
+      model: 'm',
+      promptVersion: 'v1',
+    };
+    store.putFileReview(key, 'תקציר');
+    expect(store.getFileReview(key)).toBe('תקציר');
+    expect(store.getFileReview({ ...key, version: 'w' })).toBeUndefined();
+    for (let i = 0; i < MAX_FILE_REVIEW_CACHE_ROWS; i += 1)
+      store.putFileReview({ ...key, path: `f${i}` }, 'x');
+    expect(store.getFileReview(key)).toBeUndefined();
+    expect(store.getFileReview({ ...key, path: 'f0' })).toBe('x');
+    store.close();
   });
 
   it('isolates cached summaries by session source content model and prompt', () => {

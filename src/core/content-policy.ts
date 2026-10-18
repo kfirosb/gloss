@@ -36,3 +36,5 @@ export const ATTACHMENT_LIMIT_MESSAGE = `Attach at most ${MAX_ATTACHMENTS} files
 export const IMAGE_LIMIT_MESSAGE = `Attach at most ${MAX_IMAGES} images`;
 export const ATTACHMENT_AND_IMAGE_LIMIT_MESSAGE = `Attach at most ${MAX_ATTACHMENTS} files and ${MAX_IMAGES} images`;
 export const DISTINCT_ATTACHMENT_LIMIT_MESSAGE = `Attach at most ${MAX_ATTACHMENTS} distinct files`;
+/** Newest-first cap on persisted file TL;DR/translation results, in rows. */
+export const MAX_FILE_REVIEW_CACHE_ROWS = 2000;

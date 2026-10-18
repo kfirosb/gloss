@@ -10,6 +10,7 @@ import {
 const copy = <T>(value: T): T => structuredClone(value);
 const translationKey = (key: TranslationKey) => JSON.stringify(key);
 
+import { fileReviewCacheKey, type FileReviewKey } from '../../src/core/file-review-contracts.js';
 import { summaryCacheKey, type SummaryKey } from '../../src/core/summary-contracts.js';
 export class MemoryConversationStore implements ConversationStore {
   private readonly summaries = new Map<string, string>();
@@ -18,6 +19,13 @@ export class MemoryConversationStore implements ConversationStore {
   }
   putSummary(key: SummaryKey, text: string) {
     this.summaries.set(summaryCacheKey(key), text);
+  }
+  private readonly fileReviews = new Map<string, string>();
+  getFileReview(key: FileReviewKey) {
+    return this.fileReviews.get(fileReviewCacheKey(key));
+  }
+  putFileReview(key: FileReviewKey, text: string) {
+    this.fileReviews.set(fileReviewCacheKey(key), text);
   }
   readonly operationLog: string[] = [];
   private readonly snapshots = new Map<string, ConversationSnapshot>();

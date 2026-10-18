@@ -58,6 +58,24 @@ describe('independent session workflows', () => {
     expect(a).toBe(b);
     expect(factory).toHaveBeenCalledTimes(1);
   });
+  it('reports file review marks without starting a workflow for the session', async () => {
+    const { manager, factory } = setup();
+    await expect(manager.fileReviewStatus('A', 'docs/a.md', 'v1')).resolves.toEqual({
+      summary: false,
+      translation: false,
+    });
+    expect(factory).not.toHaveBeenCalled();
+    const workflow = await manager.ensure('A');
+    await workflow.reviewFileText('Long file', 'summary', new AbortController().signal, {
+      scope: process.cwd(),
+      path: 'docs/a.md',
+      version: 'v1',
+    });
+    await expect(manager.fileReviewStatus('A', 'docs/a.md', 'v1')).resolves.toEqual({
+      summary: true,
+      translation: false,
+    });
+  });
   it('isolates actions, agents and monotonic event sequences', async () => {
     const { manager, languages, agents } = setup();
     await Promise.all([manager.ensure('A'), manager.ensure('B')]);

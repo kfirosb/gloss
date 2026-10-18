@@ -14,6 +14,7 @@ export type { SessionEnvelope } from '../core/session-contracts.js';
 import { MAX_ATTACHMENTS, ATTACHMENT_LIMIT_MESSAGE } from '../core/content-policy.js';
 import type { LanguageSettings } from '../core/language-settings.js';
 import type { Workflow } from '../core/workflow.js';
+import type { FileReviewMode } from '../core/file-review-contracts.js';
 import type { Action } from './protocol.js';
 import type { FileRegistry } from '../core/file-references.js';
 import { readProjectMetadata } from './project-metadata.js';
@@ -29,6 +30,12 @@ export interface SessionManager {
     version: string | undefined,
     signal: AbortSignal,
   ): Promise<{ path: string; mode: 'summary' | 'translation'; text: string }>;
+  /** Reports which review modes already have a saved result for this exact file version. */
+  fileReviewStatus(
+    sessionId: string,
+    path: string,
+    version: string,
+  ): Promise<Record<FileReviewMode, boolean>>;
   summarizeResponse(sessionId: string, source: SummarySource): Promise<ResponseSummary>;
   subagentActivity(
     sessionId: string,
@@ -88,7 +95,7 @@ export function createSessionManager(options: {
   const manager: SessionManager = {
     async reviewFile(id, path, mode, version, signal) {
       requireOpen();
-      recordFor(id);
+      const record = recordFor(id);
       if (
         typeof path !== 'string' ||
         !path ||
@@ -101,7 +108,13 @@ export function createSessionManager(options: {
       const source = await options.files.reviewText(id, path, signal);
       if (version !== undefined && source.version !== version)
         throw new Error('File changed; reopen the preview');
-      const text = await (await manager.ensure(id)).reviewFileText(source.text, mode, signal);
+      const text = await (
+        await manager.ensure(id)
+      ).reviewFileText(source.text, mode, signal, {
+        scope: record.canonicalRoot,
+        path,
+        version: source.version,
+      });
       const current = await options.files.reviewText(id, path, signal);
       if (current.version !== source.version || current.text !== source.text)
         throw new Error('File changed; reopen the preview');
@@ -112,6 +125,26 @@ export function createSessionManager(options: {
     },
     async backgroundOutput(id, taskId) {
       return (await manager.ensure(id)).backgroundOutput(taskId);
+    },
+    async fileReviewStatus(id, path, version) {
+      requireOpen();
+      const record = recordFor(id);
+      if (
+        typeof path !== 'string' ||
+        !path ||
+        path.length > 4096 ||
+        typeof version !== 'string' ||
+        !version
+      )
+        throw new Error('Invalid file review request');
+      // Marks are a hint for a live workflow; previewing must not start one for a saved session.
+      const workflow = workflows.get(id);
+      if (!workflow) return { summary: false, translation: false };
+      return workflow.fileReviewStatus({
+        scope: record.canonicalRoot,
+        path,
+        version,
+      });
     },
     async summarizeResponse(id, source) {
       validateSummarySource(source);

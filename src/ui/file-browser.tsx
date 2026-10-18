@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { BrowserEntry, FilePreview } from '../core/file-references.js';
 import { FileTree, FileRow } from './file-tree.js';
 import { FileReview } from './file-review.js';
@@ -10,13 +10,11 @@ export const FILE_DRAG_TYPE = 'application/x-session-file';
 export function FileBrowser({
   client,
   onPreview,
-  onClose,
   revealedFile = '',
 }: {
   revealedFile?: string;
   client: SessionClient;
   onPreview(path: string): void;
-  onClose(): void;
 }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'name' | 'content'>('name');
@@ -52,12 +50,6 @@ export function FileBrowser({
   }, [client, query, mode]);
   return (
     <aside className="file-sidebar compact-file-sidebar" aria-label="Session files" dir="ltr">
-      <div className="file-toolbar">
-        <strong>Files</strong>
-        <button type="button" onClick={onClose} aria-label="Close files" title="Close files">
-          ×
-        </button>
-      </div>
       {revealedFile && (
         <div className="revealed-file file-entries">
           <small>Opened file</small>
@@ -127,7 +119,8 @@ export function FileBrowser({
     </aside>
   );
 }
-export function FilePreviewDialog({
+/** Read-only preview of one session file with TL;DR/Translate and Attach; the Files window owns closing. */
+export function FilePreviewPane({
   languageSettings,
   client,
   path,
@@ -135,7 +128,6 @@ export function FilePreviewDialog({
   attachError,
   attached,
   onAttach,
-  onClose,
 }: {
   client: SessionClient;
   path: string;
@@ -143,16 +135,10 @@ export function FilePreviewDialog({
   attachError: string;
   attached: string;
   onAttach(): void;
-  onClose(): void;
   languageSettings: LanguageSettings;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => {
-    dialog.current?.showModal();
-    return () => dialog.current?.close();
-  }, []);
   useEffect(() => {
     const controller = new AbortController();
     setPreview(null);
@@ -168,18 +154,9 @@ export function FilePreviewDialog({
     return () => controller.abort();
   }, [client, path]);
   return (
-    <dialog
-      ref={dialog}
-      aria-label="File preview"
-      className="file-preview"
-      dir="ltr"
-      onCancel={onClose}
-    >
+    <section className="file-preview-pane" aria-label="File preview" dir="ltr">
       <div className="file-toolbar">
         <strong>{preview?.name ?? path.split('/').at(-1)}</strong>
-        <button type="button" onClick={onClose}>
-          Close preview
-        </button>
       </div>
       <p className="preview-path">{path}</p>
       {error ? (
@@ -192,7 +169,14 @@ export function FilePreviewDialog({
         </div>
       ) : (
         <FileReview
-          key={client.sessionId + ':' + path + ':' + (preview.version ?? preview.text ?? '')}
+          // Results are per file version and language, so a language change starts a fresh review.
+          key={[
+            client.sessionId,
+            path,
+            preview.version ?? preview.text ?? '',
+            languageSettings.assist,
+            languageSettings.reply,
+          ].join(':')}
           client={client}
           preview={preview}
           languageSettings={languageSettings}
@@ -204,10 +188,18 @@ export function FilePreviewDialog({
       {attachError && <p role="alert">{attachError}</p>}
       <div className="file-toolbar">
         <span>Read-only preview</span>
-        <button type="button" disabled={!preview || busy} onClick={onAttach}>
+        {/* aria-disabled, not disabled: disabling the focused button would drop focus to the body,
+            where the window's Escape handler no longer sees the key. */}
+        <button
+          type="button"
+          aria-disabled={!preview || busy}
+          onClick={() => {
+            if (preview && !busy) onAttach();
+          }}
+        >
           Attach file
         </button>
       </div>
-    </dialog>
+    </section>
   );
 }

@@ -3,7 +3,12 @@
 // `node scripts/dark-styles.mjs`; each color gets one variable per dark style.
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SHEETS = ['src/ui/styles.css', 'src/ui/file-tree.css', 'src/ui/file-content-preview.css'];
+const SHEETS = [
+  'src/ui/styles.css',
+  'src/ui/file-tree.css',
+  'src/ui/file-content-preview.css',
+  'src/ui/files-window.css',
+];
 const OUT = 'src/ui/dark-styles.css';
 const FG = new Set([
   'color',

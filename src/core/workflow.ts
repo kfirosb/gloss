@@ -41,6 +41,12 @@ import type {
   Target,
 } from './contracts.js';
 import { TRANSLATION_PROMPT_VERSION } from './language-style.js';
+import {
+  FILE_REVIEW_PROMPT_VERSION,
+  type FileReviewKey,
+  type FileReviewMode,
+  type FileReviewScope,
+} from './file-review-contracts.js';
 import { randomUUID } from 'node:crypto';
 import { ResponseSummaries } from './response-summaries.js';
 import type { SummarySource, ResponseSummary } from './summary-contracts.js';
@@ -75,9 +81,12 @@ export interface WorkflowDependencies {
 export interface Workflow {
   reviewFileText(
     text: string,
-    mode: 'summary' | 'translation',
+    mode: FileReviewMode,
     signal: AbortSignal,
+    cache?: FileReviewScope,
   ): Promise<string>;
+  /** Which reviews of this file version are already stored for the current language and model. */
+  fileReviewStatus(cache: FileReviewScope): Record<FileReviewMode, boolean>;
   summarizeResponse(source: SummarySource): Promise<ResponseSummary>;
   connect(target: Target): Promise<void>;
   ingestSourceMessage(message: SourceMessage): void;
@@ -783,13 +792,24 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     return result;
   };
 
+  const fileReviewKey = (cache: FileReviewScope, mode: FileReviewMode): FileReviewKey => ({
+    ...cache,
+    mode,
+    language: mode === 'summary' ? settings.assist : settings.reply,
+    model: state.languageModel,
+    promptVersion: FILE_REVIEW_PROMPT_VERSION,
+  });
+
   const workflow: Workflow = {
-    async reviewFileText(text, mode, signal) {
+    async reviewFileText(text, mode, signal, cache) {
       requireOpen();
       signal.throwIfAborted();
       if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_CHARS)
         throw new Error(`File review requires text of at most ${MAX_TEXT_CHARS} characters`);
       if (mode !== 'summary' && mode !== 'translation') throw new Error('Invalid file review mode');
+      const key = cache && fileReviewKey(cache, mode);
+      const stored = key && deps.store.getFileReview(key);
+      if (stored !== undefined) return stored;
       const version = languageContextVersion;
       const result = await languageOperation(version, async (operationSignal) => {
         const combined = AbortSignal.any([signal, operationSignal]);
@@ -805,7 +825,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireCurrentContext(version);
       if (!result || (mode === 'summary' && result.length > MAX_SUMMARY_CHARS))
         throw new Error('Invalid file review output');
+      // Stored before the manager's post-review re-read; keyed by the pre-review version, so a changed file never gets it.
+      if (key) deps.store.putFileReview(key, result);
       return result;
+    },
+    fileReviewStatus(cache) {
+      requireOpen();
+      return {
+        summary: deps.store.getFileReview(fileReviewKey(cache, 'summary')) !== undefined,
+        translation: deps.store.getFileReview(fileReviewKey(cache, 'translation')) !== undefined,
+      };
     },
     summarizeResponse: (source) => summaries.summarize(source),
     async connect(target) {

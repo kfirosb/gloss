@@ -1,0 +1,101 @@
+/* Floating, non-modal Files window: title bar over the file list, split handle and preview. */
+.files-window {
+  position: fixed;
+  /* Above the sessions sidebar (25), below header popovers such as the language menu (30). */
+  z-index: 28;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: var(--files-split) 6px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid light-dark(#bbc5d8, var(--dk-bg-bbc5d8));
+  border-radius: 12px;
+  box-shadow: 0 12px 48px #17203355;
+  background: light-dark(#fff, var(--dk-bg-ffffff));
+  direction: ltr;
+}
+/* Expanded covers the whole viewport, the sessions sidebar (z-index 25) included. */
+.files-window[data-expanded='true'] {
+  inset: 0;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+}
+.files-window-title {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid light-dark(#d9deea, var(--dk-bg-d9deea));
+  background: light-dark(#f4f6fa, var(--dk-bg-f4f6fa));
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.files-window-title:active {
+  cursor: grabbing;
+}
+.files-window[data-expanded='true'] .files-window-title {
+  cursor: default;
+}
+.files-window-title strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.files-window-title button {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.files-window-title .files-window-close {
+  border: 0;
+  background: transparent;
+  padding: 0 6px;
+  font-size: 20px;
+  line-height: 24px;
+}
+.files-window-list,
+.files-window-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.files-window-split {
+  cursor: col-resize;
+  touch-action: none;
+  background: light-dark(#e6eaf2, var(--dk-bg-e6eaf2));
+}
+.files-window-split:hover,
+.files-window-split:focus-visible {
+  background: light-dark(#9fb0cc, var(--dk-bg-9fb0cc));
+  outline: 2px solid light-dark(#69a78a, var(--dk-bg-69a78a));
+}
+.files-window-empty {
+  margin: 0;
+  padding: 24px;
+  color: light-dark(#58657d, var(--dk-fg-58657d));
+  font-size: 0.9rem;
+}
+.files-window-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 55%,
+    light-dark(#9fb0cc, var(--dk-bg-9fb0cc)) 55%,
+    light-dark(#9fb0cc, var(--dk-bg-9fb0cc)) 65%,
+    transparent 65%
+  );
+}
+/* Matches button:disabled for buttons that stay focusable while busy. */
+.files-window button[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
