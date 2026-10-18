@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { rmSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Target } from '../../src/core/contracts.js';
@@ -16,6 +16,7 @@ import {
   MOVE_NOT_RUNNING_REASON,
   MOVE_RESUME_EXITED_REASON,
   MOVE_RESUME_OTHER_REASON,
+  MOVE_RESUME_STILL_OPEN_REASON,
   MOVE_UNVERIFIED_REASON,
   MOVE_WAIT_ENDED_REASON,
   MOVE_WORKING_REASON,
@@ -61,7 +62,15 @@ async function setup(
     record?: Record<string, unknown>;
     onTerm?: 'exit' | 'ignore' | 'keep-record';
     prepare?: 'throws';
-    resume?: 'ok' | 'throws' | 'pane-closes' | 'other-session' | 'stale-record';
+    resume?:
+      | 'ok'
+      | 'throws'
+      | 'pane-closes'
+      | 'other-session'
+      | 'stale-record'
+      | 'no-domain'
+      | 'record-later';
+    endFails?: boolean;
     launches?: LaunchRecord[];
     alivePanes?: string[];
     outsideParent?: number;
@@ -77,9 +86,11 @@ async function setup(
   // The target names the project through a symlink; the move must use the record's own folder.
   await symlink(project, link);
   const recordPath = (pid: number) => join(config, 'sessions', `${pid}.json`);
-  const write = (pid: number, fields: Record<string, unknown> = {}) =>
-    writeFile(
-      recordPath(pid),
+  // Written whole and renamed into place, so a poll never reads a half-written record.
+  const write = async (pid: number, fields: Record<string, unknown> = {}) => {
+    const partial = `${recordPath(pid)}.partial`;
+    await writeFile(
+      partial,
       JSON.stringify({
         sessionId: SESSION,
         cwd: project,
@@ -92,6 +103,8 @@ async function setup(
         ...fields,
       }),
     );
+    await rename(partial, recordPath(pid));
+  };
   await write(OUTSIDE_PID, options.record);
   const live = new Map<number, ProcessInfo>([
     [OUTSIDE_PID, claudeAt(OUTSIDE_PID, START, options.outsideParent)],
@@ -141,11 +154,23 @@ async function setup(
       if (options.resume === 'pane-closes') alivePanes.delete(launch.id);
       else if (options.resume === 'other-session') {
         live.set(PANE_PID, pane);
-        await write(PANE_PID, { sessionId: OTHER, procStart: PANE_START, status: undefined });
+        // Without pidDomain or procStart: Gloss launched this pane, so its record is trusted anyway.
+        await write(PANE_PID, {
+          sessionId: OTHER,
+          procStart: undefined,
+          pidDomain: undefined,
+          status: undefined,
+        });
       } else if (options.resume === 'stale-record') {
         // A record an earlier process left at this pid: its start time is not the pane's.
         live.set(PANE_PID, pane);
         await write(PANE_PID, { sessionId: OTHER, procStart: LATER });
+      } else if (options.resume === 'no-domain') {
+        live.set(PANE_PID, pane);
+        await write(PANE_PID, { procStart: undefined, pidDomain: undefined, status: undefined });
+      } else if (options.resume === 'record-later') {
+        // The pane runs, and its record is written when the test says so.
+        live.set(PANE_PID, pane);
       } else {
         live.set(PANE_PID, pane);
         // Task 1: the first record after `--resume` carries no status yet.
@@ -156,6 +181,7 @@ async function setup(
     async end(launchId) {
       events.push('end');
       ends.push(launchId);
+      if (options.endFails) throw new Error('Session is still running');
       const ended = launches.find((l) => l.id === launchId);
       if (ended) ended.state = 'ended';
       alivePanes.delete(launchId);
@@ -425,6 +451,57 @@ it('ends a reopened launch that exits at once or opens another session, through 
     expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
     expect(f.resumes).toHaveLength(1);
   }
+});
+
+it('a reopened pane whose record has no pidDomain or procStart counts as reopened', async () => {
+  const f = await setup({ resume: 'no-domain' });
+  expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+    state: 'in-gloss',
+  });
+  // The check ends at the first read; a later press is no longer refused as in flight.
+  await vi.waitFor(async () =>
+    expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+      state: 'in-gloss',
+    }),
+  );
+  expect(f.ends).toEqual([]);
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+});
+
+it('the move stays in flight until the reopen check resolves: a press meanwhile is refused', async () => {
+  const f = await setup({ resume: 'record-later' });
+  expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+    state: 'in-gloss',
+  });
+  await vi.waitFor(() => expect(f.now()).toBeGreaterThan(0));
+  expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+    state: 'in-gloss',
+    failure: { reason: MOVE_ALREADY_MOVING_REASON },
+  });
+  await f.write(PANE_PID, { procStart: PANE_START, status: undefined });
+  await vi.waitFor(async () =>
+    expect(await f.service.act(f.target, { action: 'move', expected: f.expected })).toEqual({
+      state: 'in-gloss',
+    }),
+  );
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
+  expect(f.prepares).toHaveLength(1);
+  expect(f.resumes).toHaveLength(1);
+  expect(f.ends).toEqual([]);
+});
+
+it('when ending a wrong reopen fails, the failure says its terminal is still open, and the error is logged', async () => {
+  const f = await setup({ resume: 'other-session', endFails: true });
+  await f.service.act(f.target, { action: 'move', expected: f.expected });
+  await vi.waitFor(() =>
+    expect(f.logs).toEqual([expect.stringContaining('Session is still running')]),
+  );
+  expect((await f.service.status(f.target)).failure).toEqual({
+    reason: `${MOVE_RESUME_OTHER_REASON} ${MOVE_RESUME_STILL_OPEN_REASON}`,
+    manual: manual(f.project),
+  });
+  expect(f.ends).toEqual(['L']);
+  expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
 });
 
 it('a stale record at the pane pid from an earlier process is not taken for another session', async () => {

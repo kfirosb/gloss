@@ -17,6 +17,7 @@ import {
   MOVE_NOT_CLOSED_REASON,
   MOVE_RESUME_EXITED_REASON,
   MOVE_RESUME_OTHER_REASON,
+  MOVE_RESUME_STILL_OPEN_REASON,
   MOVE_WAIT_ENDED_REASON,
   glossHoldsSession,
   glossOwnsSession,
@@ -127,6 +128,10 @@ const sameIdentity = (record: VerifiedRecord, expected: MoveIdentity) =>
   record.pid === expected.pid && record.procStart === expected.procStart;
 type CloseOutcome = { closed: true } | { closed: false; reason: string };
 const notClosed = (reason: string): CloseOutcome => ({ closed: false, reason });
+/** Work that continues after a move's response: the move is in flight until `check` settles. */
+interface FollowUp {
+  check: Promise<void>;
+}
 
 /**
  * Spec 5: closes an idle outside Claude session with SIGTERM and reopens it in Gloss's tmux. Never SIGKILL, never a
@@ -174,14 +179,15 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
   async function status(target: Target): Promise<ClaudeMoveStatus> {
     validateTarget(target, 'claude');
     const ref = target.sessionRef;
-    if (moving.has(ref)) return { state: 'moving' };
     // A failure stays visible with every state, including after a reopen whose pane then closed.
     const failure = failures.get(ref);
     const noted = (value: ClaudeMoveStatus): ClaudeMoveStatus =>
       failure ? { ...value, failure } : value;
     if (waiters.has(ref)) return noted({ state: 'waiting' });
     const gloss = await glossLaunches(ref);
+    // While the reopened session is being checked, the move is still in flight but the session already runs in Gloss.
     if (glossOwnsSession(gloss)) return noted({ state: 'in-gloss' });
+    if (moving.has(ref)) return { state: 'moving' };
     const found = await candidate(target, gloss);
     if (found.kind === 'blocked') return noted({ state: 'unavailable', reason: found.reason });
     const process = { pid: found.record.pid, procStart: found.record.procStart };
@@ -250,21 +256,38 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
       log(`Claude ${before.pid} exited on SIGTERM but left its session record behind.`);
   }
   /**
+   * Gloss launched the pane, so its record is the pane's when it names the pane pid and that process is alive; no
+   * `procStart` or `pidDomain` is needed. Only a trusted start time that `ps` contradicts marks a record an earlier
+   * process left at a reused pid.
+   */
+  async function paneRecord(launch: LaunchRecord) {
+    const record = await readSessionRecord(sessionRecordPath(config, launch.panePid));
+    if (!record || record.pid !== launch.panePid || !exists(launch.panePid)) return undefined;
+    const trusted = trustedProcStart(record);
+    if (trusted === undefined) return record;
+    const live = await liveProcess(launch.panePid);
+    return live && live.startedAt !== trusted ? undefined : record;
+  }
+  /**
    * Decision 8 and ruling I2: after `resume` returned, the pane's own record must name this session. Another session
    * in the pane, or the pane closing, ends that launch through the launcher's normal End and reports the failure.
-   * A record whose process isn't the pane's live Claude (a pid reused since) is not evidence either way.
    */
   async function checkResume(ref: string, launch: LaunchRecord, folder: string) {
     const deadline = now() + MOVE_RESUME_CHECK_MS;
     const fail = async (reason: string) => {
-      failures.set(ref, { reason, manual: manualResume(ref, folder) });
-      await options.launcher.end(launch.id).catch(() => undefined);
+      const manual = manualResume(ref, folder);
+      failures.set(ref, { reason, manual });
+      try {
+        await options.launcher.end(launch.id);
+      } catch (error) {
+        failures.set(ref, { reason: `${reason} ${MOVE_RESUME_STILL_OPEN_REASON}`, manual });
+        log(`Ending a reopened Claude launch failed: ${errorText(error)}`);
+      }
     };
     while (now() < deadline && !stopped()) {
-      const live = await liveProcess(launch.panePid);
-      const record = await readSessionRecord(sessionRecordPath(config, launch.panePid));
+      const record = await paneRecord(launch);
       if (stopped()) return;
-      if (record && isSessionProcess(record, live, uid)) {
+      if (record) {
         if (record.sessionId !== ref) await fail(MOVE_RESUME_OTHER_REASON);
         return;
       }
@@ -276,7 +299,7 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
     }
   }
   /** I5: the reopen is prepared before anything is closed, and started only once the process is gone. */
-  async function moveNow(target: Target, before: VerifiedRecord): Promise<void> {
+  async function moveNow(target: Target, before: VerifiedRecord): Promise<FollowUp | undefined> {
     const ref = target.sessionRef;
     // I5: the folder is always the record's own.
     const folder = before.cwd;
@@ -301,19 +324,26 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
       failures.set(ref, { reason: errorText(error), manual: manualResume(ref, folder) });
       return;
     }
-    void checkResume(ref, launch, folder).catch((error: unknown) =>
-      log(`Checking a reopened Claude session failed: ${errorText(error)}`),
-    );
+    return {
+      check: checkResume(ref, launch, folder).catch((error: unknown) =>
+        log(`Checking a reopened Claude session failed: ${errorText(error)}`),
+      ),
+    };
   }
-  /** Runs `work` as this session's one move; the caller has checked that none is in flight. */
-  async function asMove(ref: string, work: () => Promise<void>) {
+  /**
+   * Runs `work` as this session's one move; the caller has checked that none is in flight. The move stays in flight
+   * until it resolves: through the reopen check when `work` hands one back.
+   */
+  async function asMove(ref: string, work: () => Promise<FollowUp | undefined>) {
     moving.add(ref);
+    let followUp: FollowUp | undefined;
     try {
-      await work();
+      followUp = await work();
     } catch (error) {
       failures.set(ref, { reason: errorText(error) });
     } finally {
-      moving.delete(ref);
+      if (followUp) void followUp.check.finally(() => moving.delete(ref));
+      else moving.delete(ref);
     }
   }
   function startWaiting(target: Target, record: VerifiedRecord) {
@@ -374,8 +404,9 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
           failures.set(ref, { reason: MOVE_CHANGED_REASON });
           return;
         }
-        if (moveReadiness(found.record).kind === 'ready') await moveNow(target, found.record);
-        else if (request.action === 'when-idle') startWaiting(target, found.record);
+        if (moveReadiness(found.record).kind === 'ready') return moveNow(target, found.record);
+        if (request.action === 'when-idle') startWaiting(target, found.record);
+        return undefined;
       });
       return status(target);
     },
