@@ -1,6 +1,7 @@
 import type { OpenSessionScan } from './session-catalog.js';
 import type { FileReference } from './file-references.js';
 import type { LanguageSettings } from './language-settings.js';
+import type { ActivityEvent, ActivitySnapshot } from './activity-contracts.js';
 export type { FileReference, FileReferenceStore, FileRegistry } from './file-references.js';
 export type AgentKind = 'claude' | 'codex';
 /** Composer request IDs; also embedded in native channel and delivery markers. */
@@ -113,6 +114,7 @@ export type AgentEvent =
   | { type: 'channel-seen'; requestId: string }
   | { type: 'status'; state: CodingState }
   | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
+  | { type: 'activity'; event: ActivityEvent }
   | { type: 'gap'; reason: string };
 export interface CodingConnection {
   target: Target;
@@ -206,6 +208,7 @@ export interface ConversationSnapshot {
   sourceSequence?: number;
   capabilities?: AgentCapabilities;
   sourceGaps?: string[];
+  activity?: ActivitySnapshot;
   hostMetadata?: Record<string, unknown>;
 }
 
