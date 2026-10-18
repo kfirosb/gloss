@@ -247,7 +247,7 @@ describe('activity reducer', () => {
     kind,
     id,
     description: id,
-    command: kind === 'background' ? 'npm run dev' : undefined,
+    ...(kind === 'background' ? { command: 'npm run dev' } : {}),
     position: 1,
     depth: 0,
     status: 'running',

@@ -295,7 +295,15 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     });
   };
 
+  /** A scheduled publish of activity changes; any publish before it carries them too. */
+  let activityPublish: ReturnType<typeof setTimeout> | undefined;
+  const cancelActivityPublish = () => {
+    if (activityPublish === undefined) return;
+    clearTimeout(activityPublish);
+    activityPublish = undefined;
+  };
   const publish = (persist = true) => {
+    cancelActivityPublish();
     state.languageSettings = settings;
     state.language = settings.assist;
     if (persist) deps.store.save(copy(state));
@@ -424,15 +432,60 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
   };
 
+  /** Translates one subagent report and writes it back only onto the same task, report and connection. */
+  const translateReport = async (taskId: string, position: number, report: string) => {
+    const generation = connectionGeneration;
+    const target = settings.reply;
+    const abort = new AbortController();
+    activeLanguageOperations.add(abort);
+    let result: { text: string; status: string };
+    try {
+      result = await translateMessageResult(
+        {
+          sourceScope: `${state.id}:activity`,
+          sourceId: taskId,
+          sourceRevision: position,
+          text: report,
+          complete: true,
+          language: target,
+          promptLanguage: languageName(target),
+          model: state.languageModel,
+          promptVersion: TRANSLATION_PROMPT_VERSION,
+          signal: abort.signal,
+        },
+        { store: deps.store, session: deps.languageSession },
+      );
+    } catch {
+      // The translation cache failed; the English report stays in place.
+      result = { text: report, status: 'error' };
+    } finally {
+      activeLanguageOperations.delete(abort);
+    }
+    const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
+    // A resumed agent may have handed back a new report meanwhile; this translation is of the old one.
+    if (closed || generation !== connectionGeneration || !current || current.report !== report)
+      return;
+    current.reportTranslation = {
+      text: result.text,
+      status: result.status === 'complete' ? 'complete' : 'error',
+    };
+    publish(false);
+  };
+
   /** Channel deliveries Claude has read into its context and not yet answered with a finished turn. */
   const seenChannel = new Set<string>();
   const consumeEvent = async (event: AgentEvent, active: CodingConnection) => {
     if (event.type === 'activity') {
       // Activity is derived from the transcript on every attach, so it is published but never persisted.
+      // An attach replays hundreds of events at once, and every publish clones and sends the whole
+      // snapshot, so a batch is published once after the events already delivered are folded.
       const next = applyActivityEvent(state.activity ?? emptyActivity(), event.event);
       if (next !== state.activity) {
         state.activity = next;
-        publish(false);
+        activityPublish ??= setTimeout(() => {
+          activityPublish = undefined;
+          if (!closed) publish(false);
+        }, 0);
       }
       return;
     }
@@ -1512,36 +1565,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (task.reportTranslation?.status === 'pending') return;
       task.reportTranslation = { text: report, status: 'pending' };
       publish(false);
-      const generation = connectionGeneration;
-      const target = settings.reply;
-      const abort = new AbortController();
-      activeLanguageOperations.add(abort);
-      try {
-        const result = await translateMessageResult(
-          {
-            sourceScope: `${state.id}:activity`,
-            sourceId: taskId,
-            sourceRevision: task.position,
-            text: report,
-            complete: true,
-            language: target,
-            promptLanguage: languageName(target),
-            model: state.languageModel,
-            promptVersion: TRANSLATION_PROMPT_VERSION,
-            signal: abort.signal,
-          },
-          { store: deps.store, session: deps.languageSession },
-        );
-        const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
-        if (closed || generation !== connectionGeneration || !current) return;
-        current.reportTranslation = {
-          text: result.text,
-          status: result.status === 'complete' ? 'complete' : 'error',
-        };
-        publish(false);
-      } finally {
-        activeLanguageOperations.delete(abort);
-      }
+      // Like a message translation, the request is answered at once; the pending and finished states
+      // reach the client through snapshots, so a slow translation never holds the request open.
+      void translateReport(taskId, task.position, report);
     },
 
     subscribe(listener) {
@@ -1557,6 +1583,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       summaries.close();
       if (closed) return;
       closed = true;
+      cancelActivityPublish();
       connectionGeneration += 1;
       eventAbort?.abort();
       for (const abort of activeLanguageOperations) abort.abort();
