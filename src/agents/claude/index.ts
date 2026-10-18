@@ -1,9 +1,10 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
 import { parseClaudeActivity } from './activity.js';
+import { validateBackgroundOutputPath } from './background-output.js';
 import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createConnection } from 'node:net';
 import {
   REQUEST_ID_SOURCE,
@@ -64,6 +65,9 @@ export function claudeActivity(status: unknown): CodingState {
   return 'working';
 }
 type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
+/** Bounded memory of background output files named in the transcript. */
+const MAX_REMEMBERED_OUTPUTS = 200;
+
 function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
   return createClaudeLiveness({
     ...(options.runner ? { runner: options.runner } : {}),
@@ -546,19 +550,31 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         after: number;
         channelDone: boolean;
       };
+      // Background output paths come only from the transcript, keyed by the starting tool_use id.
+      const outputs = new Map<string, { taskId: string; outputPath: string }>();
+      const rememberOutputs = (events: AgentEvent[]) => {
+        for (const event of events) {
+          if (event.type !== 'activity' || event.event.kind !== 'task-output') continue;
+          const { id, taskId, outputPath } = event.event;
+          outputs.delete(id);
+          outputs.set(id, { taskId, outputPath });
+          if (outputs.size > MAX_REMEMBERED_OUTPUTS) outputs.delete(outputs.keys().next().value!);
+        }
+        return events;
+      };
       const feed = {
         get caughtUp() {
           return transcript.caughtUp;
         },
         initialize: () => transcript.initialize(),
         takeInitial: () => [
-          ...transcript.takeInitial(),
+          ...rememberOutputs(transcript.takeInitial()),
           ...pendingChannelEvents.splice(0),
           ...pollReplies(),
         ],
         async poll() {
           return [
-            ...(await transcript.poll()),
+            ...rememberOutputs(await transcript.poll()),
             ...pendingChannelEvents.splice(0),
             ...pollReplies(),
           ];
@@ -777,8 +793,16 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           }
           yield* streamSubagent(file.path, target.sessionRef, file.meta.spawnDepth, signal);
         },
-        async outputPath() {
-          throw new Error('Output unavailable');
+        async outputPath(id) {
+          const output = outputs.get(id);
+          const uid = process.getuid?.();
+          if (!output || uid === undefined) throw new Error('Output unavailable');
+          return validateBackgroundOutputPath(output.outputPath, {
+            projectDirName: basename(dirname(path)),
+            sessionRef: target.sessionRef,
+            taskId: output.taskId,
+            uid,
+          });
         },
       };
       connection.reconcileDelivery = async (delivery) => {

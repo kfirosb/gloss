@@ -89,6 +89,8 @@ export interface Workflow {
   translateMessage(sourceId: string): Promise<void>;
   translateActivityReport(taskId: string): Promise<void>;
   subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
+  /** The validated path of a background task's output file. */
+  backgroundOutput(taskId: string): Promise<string>;
   prepareDirect(indices: number[], expected?: { id: string; revision: number }): Promise<Draft>;
   sendReview(
     id: string,
@@ -1489,6 +1491,15 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!state.activity?.tasks.some((task) => task.id === taskId))
         throw new Error('Unknown task');
       return activity.subagent(taskId, signal);
+    },
+
+    async backgroundOutput(taskId) {
+      requireOpen();
+      const activity = connection?.activity;
+      if (!activity) throw new Error('Activity unavailable');
+      if (!state.activity?.tasks.some((task) => task.id === taskId))
+        throw new Error('Unknown task');
+      return activity.outputPath(taskId);
     },
 
     async translateActivityReport(taskId) {

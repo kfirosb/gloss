@@ -35,6 +35,7 @@ export interface SessionManager {
     taskId: string,
     signal: AbortSignal,
   ): Promise<AsyncIterable<ActivityEvent>>;
+  backgroundOutput(sessionId: string, taskId: string): Promise<string>;
   updateSessionTitle(id: string, title: string): void;
   list(): SessionRecord[];
   /** Deletes a closed session's saved history. Throws code 'session-open' while a workflow is connected or opening; a cached workflow that is disconnected, or whose session the catalog reports closed (catalogClosed), is closed and dropped. */
@@ -105,6 +106,9 @@ export function createSessionManager(options: {
     },
     async subagentActivity(id, taskId, signal) {
       return (await manager.ensure(id)).subagentActivity(taskId, signal);
+    },
+    async backgroundOutput(id, taskId) {
+      return (await manager.ensure(id)).backgroundOutput(taskId);
     },
     async summarizeResponse(id, source) {
       validateSummarySource(source);

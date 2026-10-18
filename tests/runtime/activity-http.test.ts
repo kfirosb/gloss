@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApplication } from '../../src/runtime/application.js';
@@ -22,6 +22,7 @@ const call = (id: string, tool: string): ActivityEvent => ({
 
 class ActivityAgent extends FakeAgent {
   aborted = false;
+  outputFile = '';
   constructor(private readonly withActivity: boolean) {
     super('claude');
   }
@@ -39,7 +40,8 @@ class ActivityAgent extends FakeAgent {
           await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve()));
         },
         async outputPath() {
-          throw new Error('Output unavailable');
+          if (!agent.outputFile) throw new Error('Output unavailable');
+          return agent.outputFile;
         },
       },
     };
@@ -87,7 +89,14 @@ async function setup(withActivity: boolean) {
     new URL(`/api/sessions/A/activity/subagents/${taskId}/events`, server.url);
   const get = (taskId: string, signal?: AbortSignal) =>
     fetch(url(taskId), { headers: { authorization: 'Bearer cap' }, ...(signal ? { signal } : {}) });
-  return { agent, get };
+  agent.outputFile = join(attachmentRoot, 'bg.output');
+  await writeFile(agent.outputFile, 'line one\nline two\n');
+  const output = (query = '', signal?: AbortSignal) =>
+    fetch(new URL(`/api/sessions/A/activity/tasks/task1/output${query}`, server.url), {
+      headers: { authorization: 'Bearer cap' },
+      ...(signal ? { signal } : {}),
+    });
+  return { agent, get, output };
 }
 
 it('streams subagent events as SSE and aborts the source when the client disconnects', async () => {
@@ -123,6 +132,46 @@ it('rejects unknown tasks and connections without activity', async () => {
   const unavailable = await without.get('task1');
   expect(unavailable.status).toBe(400);
   expect(await unavailable.text()).toContain('Activity unavailable');
+});
+
+it('streams the background output tail as SSE', async () => {
+  const { output } = await setup(true);
+  const abort = new AbortController();
+  const response = await output('', abort.signal);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toBe('text/event-stream');
+  const reader = response.body!.getReader();
+  let text = '';
+  const decoder = new TextDecoder();
+  while (!text.includes('\n\n')) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    text += decoder.decode(chunk.value);
+  }
+  expect(JSON.parse(text.slice(6, text.indexOf('\n\n')))).toEqual({
+    kind: 'chunk',
+    text: 'line one\nline two\n',
+    start: 0,
+    end: 18,
+  });
+  abort.abort();
+});
+
+it('returns an output window as JSON and rejects a malformed end', async () => {
+  const { output } = await setup(true);
+  const window = await output('?end=9');
+  expect(window.status).toBe(200);
+  expect(await window.json()).toEqual({ text: 'line one\n', start: 0, end: 9, size: 18 });
+  expect((await output('?end=abc')).status).toBe(400);
+  expect((await output('?end=-1')).status).toBe(400);
+});
+
+it('reports unavailable output', async () => {
+  const { agent, output } = await setup(true);
+  agent.outputFile = '';
+  const response = await output();
+  expect(response.status).toBe(400);
+  expect(await response.text()).toContain('Output unavailable');
 });
 
 async function waitFor(condition: () => boolean) {
