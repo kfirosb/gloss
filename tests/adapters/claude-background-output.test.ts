@@ -72,3 +72,24 @@ it('requires the suffix on a path-separator boundary', async () => {
     'Output unavailable',
   );
 });
+
+it('rejects identifiers that are not a single path segment', async () => {
+  const { root, tasks } = await fixture();
+  const escaped = join(root, 'outside.output');
+  await writeFile(escaped, 'secret');
+  await expect(
+    validateBackgroundOutputPath(escaped, { ...expected, taskId: '../../../../outside' }),
+  ).rejects.toThrow('Output unavailable');
+  await expect(
+    validateBackgroundOutputPath(join(tasks, 't1.output'), { ...expected, taskId: 'a/t1' }),
+  ).rejects.toThrow('Output unavailable');
+  await expect(
+    validateBackgroundOutputPath(join(tasks, 't1.output'), {
+      ...expected,
+      sessionRef: 'x/session-1',
+    }),
+  ).rejects.toThrow('Output unavailable');
+  await expect(
+    validateBackgroundOutputPath(join(tasks, 't1.output'), { ...expected, projectDirName: '..' }),
+  ).rejects.toThrow('Output unavailable');
+});

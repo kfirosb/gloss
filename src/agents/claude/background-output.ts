@@ -1,5 +1,5 @@
 import { lstat, realpath } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { basename, join, sep } from 'node:path';
 
 export interface ExpectedOutput {
   projectDirName: string;
@@ -10,6 +10,19 @@ export interface ExpectedOutput {
 
 const UNAVAILABLE = 'Output unavailable';
 
+/** A lone path segment: nothing that `join` could normalize into a different location. */
+function isSingleSegment(value: string): boolean {
+  return (
+    value !== '' &&
+    value !== '.' &&
+    value !== '..' &&
+    !value.includes('\0') &&
+    !value.includes('/') &&
+    !value.includes(sep) &&
+    basename(value) === value
+  );
+}
+
 /** Where Claude writes a background task's output, relative to its (platform specific) tmp base. */
 export function expectedOutputSuffix(
   projectDirName: string,
@@ -17,6 +30,7 @@ export function expectedOutputSuffix(
   taskId: string,
   uid: number,
 ): string {
+  if (![projectDirName, sessionRef, taskId].every(isSingleSegment)) throw new Error(UNAVAILABLE);
   return join(`claude-${uid}`, projectDirName, sessionRef, 'tasks', `${taskId}.output`);
 }
 
