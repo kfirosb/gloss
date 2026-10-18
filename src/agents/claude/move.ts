@@ -39,10 +39,14 @@ export interface GlossLaunches {
   panePids: readonly number[];
 }
 
-/** Spec 5.1: only an idle record may be moved; Gloss can't see an outside screen, so a dialog is read from the record. */
+/**
+ * Spec 5.1: only an idle record may be moved; Gloss can't see an outside screen, so a dialog is read from the record.
+ * A Claude Desktop session is never movable, whatever its status.
+ */
 export function moveReadiness(
-  record: Pick<ClaudeSessionRecord, 'status' | 'waitingFor'>,
+  record: Pick<ClaudeSessionRecord, 'status' | 'waitingFor' | 'entrypoint'>,
 ): MoveReadiness {
+  if (record.entrypoint === 'claude-desktop') return { kind: 'busy', reason: MOVE_DESKTOP_REASON };
   const activity = claudeActivity(record.status, record.waitingFor);
   if (activity === 'idle') return { kind: 'ready' };
   return {
@@ -50,22 +54,33 @@ export function moveReadiness(
     reason: activity === 'working' ? MOVE_WORKING_REASON : MOVE_DIALOG_REASON,
   };
 }
-/** The live process is the one the record describes: same pid and start time, this user's, running Claude. */
+/**
+ * A Claude process of this user runs at the record's pid, and started when the record says it did if the record's
+ * start time can be trusted. Without a trusted start time a reused pid can't be told apart, so this alone is not
+ * enough to signal the process.
+ */
+function runsRecord(
+  record: Pick<ClaudeSessionRecord, 'pid' | 'procStart' | 'pidDomain' | 'version'>,
+  live: ProcessInfo | undefined,
+  uid: number | undefined,
+): live is ProcessInfo {
+  const procStart = trustedProcStart(record);
+  return (
+    !!live &&
+    uid !== undefined &&
+    live.pid === record.pid &&
+    live.uid === uid &&
+    (procStart === undefined || live.startedAt === procStart) &&
+    isClaudeExecutable(live.command, record.version)
+  );
+}
+/** The live process is the one the record describes: same pid and trusted start time, this user's, running Claude. */
 export function isSessionProcess(
   record: Pick<ClaudeSessionRecord, 'pid' | 'procStart' | 'pidDomain' | 'version'>,
   live: ProcessInfo | undefined,
   uid: number | undefined,
 ): boolean {
-  const procStart = trustedProcStart(record);
-  return (
-    !!live &&
-    !!procStart &&
-    uid !== undefined &&
-    live.pid === record.pid &&
-    live.uid === uid &&
-    live.startedAt === procStart &&
-    isClaudeExecutable(live.command, record.version)
-  );
+  return trustedProcStart(record) !== undefined && runsRecord(record, live, uid);
 }
 /** Spec 5.3: the re-read record still describes the same idle process. */
 export function sameIdleProcess(
@@ -81,41 +96,59 @@ export function sameIdleProcess(
   );
 }
 /**
- * Whether Gloss itself holds the session or the process `pid`: a live owning launch, an ended one whose pane still
- * runs, or any launch's pane being that very process. Gloss must never close its own pane.
+ * Whether Gloss itself holds the session or the process: a live owning launch, an ended one whose pane still runs,
+ * or any launch's pane being that very process or its parent (a Claude typed into a Gloss shell). Gloss must never
+ * close a process of its own panes.
  */
-export function glossHoldsSession(pid: number, gloss: GlossLaunches): boolean {
-  return glossOwnsSession(gloss) || gloss.panePids.includes(pid);
+export function glossHoldsSession(
+  process: Pick<ProcessInfo, 'pid' | 'ppid'>,
+  gloss: GlossLaunches,
+): boolean {
+  return (
+    glossOwnsSession(gloss) ||
+    gloss.panePids.includes(process.pid) ||
+    gloss.panePids.includes(process.ppid)
+  );
 }
 /** A launch that is not ended owns the session, and so does an ended one whose pane still runs. */
 function glossOwnsSession(gloss: GlossLaunches): boolean {
   return gloss.owners.some((launch) => launch.state !== 'ended' || launch.paneAlive);
 }
-/** The one outside process to move among this session's records in its project. */
+/** One record for the session, with what `ps` reports for its pid now (undefined when nothing runs there). */
+export interface MoveMatch {
+  record: ClaudeSessionRecord;
+  process: ProcessInfo | undefined;
+}
+/**
+ * The one outside process to move among this session's records in its project, for the user `uid`. Every live
+ * terminal process counts: one Gloss can't verify blocks the move, since closing another would leave it writing.
+ */
 export function pickMoveCandidate(
-  matches: readonly { record: ClaudeSessionRecord; live: boolean }[],
+  matches: readonly MoveMatch[],
+  uid: number | undefined,
   gloss: GlossLaunches,
 ): MoveCandidate {
   if (glossOwnsSession(gloss)) return { kind: 'blocked', reason: MOVE_IN_GLOSS_REASON };
   if (matches.some(({ record }) => record.entrypoint === 'claude-desktop'))
     return { kind: 'blocked', reason: MOVE_DESKTOP_REASON };
-  const terminals = matches.filter(({ record }) => isTerminalRecord(record));
-  const verified = terminals.flatMap(({ record, live }) => {
+  const live = matches.flatMap(({ record, process }) =>
+    isTerminalRecord(record) && runsRecord(record, process, uid) ? [{ record, process }] : [],
+  );
+  if (live.some(({ process }) => glossHoldsSession(process, gloss)))
+    return { kind: 'blocked', reason: MOVE_IN_GLOSS_REASON };
+  const verified = live.flatMap(({ record }) => {
     const procStart = trustedProcStart(record);
-    return live && procStart ? [{ ...record, procStart }] : [];
+    return procStart ? [{ ...record, procStart }] : [];
   });
+  if (verified.length < live.length)
+    return {
+      kind: 'blocked',
+      reason: verified.length ? MOVE_AMBIGUOUS_REASON : MOVE_UNVERIFIED_REASON,
+    };
   const [only, ...more] = verified;
   if (more.length) return { kind: 'blocked', reason: MOVE_AMBIGUOUS_REASON };
-  if (only)
-    return glossHoldsSession(only.pid, gloss)
-      ? { kind: 'blocked', reason: MOVE_IN_GLOSS_REASON }
-      : { kind: 'found', record: only };
-  return {
-    kind: 'blocked',
-    reason: terminals.some(({ record }) => !trustedProcStart(record))
-      ? MOVE_UNVERIFIED_REASON
-      : MOVE_NOT_RUNNING_REASON,
-  };
+  if (only) return { kind: 'found', record: only };
+  return { kind: 'blocked', reason: MOVE_NOT_RUNNING_REASON };
 }
 /** Spec 5.6: what the user runs when Gloss could not reopen the session. `sessionRef` is a validated UUID. */
 export function manualResume(sessionRef: string, folder: string) {
