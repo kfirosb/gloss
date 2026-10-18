@@ -125,13 +125,18 @@ describe.each(STASH_FIXTURE_VERSIONS)(
   },
 );
 describe('check at Send', () => {
-  it('opens the terminal for a dialog named only in the record, an approval, a scrolled pane, an old or unreadable version and an unread screen', () => {
+  it('opens the terminal for a dialog named only in the record, a waiting status, an approval, a scrolled pane, an old or unreadable version and an unread screen', () => {
     const hold = (reason: string) => ({ ready: false, reason });
     expect(
       checkAtSend(
         facts('2.1.301', 'empty', {
           session: { status: 'busy', waitingFor: 'dialog open', version: '2.1.301' },
         }),
+      ),
+    ).toEqual(hold(DIALOG_OPEN_REASON));
+    expect(
+      checkAtSend(
+        facts('2.1.301', 'empty', { session: { status: 'waiting', version: '2.1.301' } }),
       ),
     ).toEqual(hold(DIALOG_OPEN_REASON));
     expect(
