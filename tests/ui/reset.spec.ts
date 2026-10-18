@@ -1,5 +1,6 @@
 import { mockSession } from './session-fixture.js';
 import { expect, test } from '@playwright/test';
+import type { ConversationSnapshot } from '../../src/core/contracts.js';
 test('reset preserves composer and selections, survives failure, and allows a fresh preparation', async ({
   page,
 }) => {

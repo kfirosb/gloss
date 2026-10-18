@@ -183,6 +183,11 @@ async function sessionRoute(
       return true;
     }
   }
+  if (route === 'claude-route' && req.method === 'GET' && app.claudeRoute) {
+    res.setHeader('cache-control', 'no-store');
+    respond(res, 200, await app.claudeRoute(id));
+    return true;
+  }
   if (route === 'language') {
     res.setHeader('cache-control', 'no-store');
     if (req.method === 'GET' && app.sessionLanguage) {

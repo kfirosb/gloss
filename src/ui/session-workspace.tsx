@@ -16,7 +16,7 @@ import React, {
   type ReactNode,
 } from 'react';
 
-import type { AgentMessage } from '../core/contracts.js';
+import type { AgentMessage, Delivery } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
@@ -92,12 +92,16 @@ import {
   needsReplyTranslation,
 } from '../core/language-settings.js';
 import { isHebrew } from '../core/language-style.js';
-import { ClaudeConnection, PeerExplanation, useClaudeConnection } from './claude-connection.js';
+import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
 import {
-  canSendWhileWorking,
+  DIALOG_OPEN_REASON,
   isChannelAwaitingReply,
   isDeliverySubmitted,
+  isDeliveryUnresolved,
+  isFailedUntyped,
+  sendGate,
 } from '../core/contracts.js';
+import { RouteLine, useDeliveryRoute } from './delivery-route.js';
 import { fencedOutput } from './output-fence.js';
 import { useDictation } from './use-dictation.js';
 import {
@@ -184,6 +188,9 @@ function Message({
 }
 // Keys already posted in this page; module-level so remounting the workspace (tab switches) never re-posts the same sequence.
 const postedSeen = new Set<string>();
+/** What to do after a declined terminal Send; the message stays in Gloss. */
+const TERMINAL_NOTICE_GUIDANCE =
+  'Your message is still in Gloss; press Send again when the terminal is ready.';
 /** Marks the shown session seen once per response sequence, only while the page is visible and the window focused. Approval attention is cleared by the attention monitor, never here. */
 function useMarkSeen(entry: CatalogEntry | undefined) {
   const sessionId = entry?.sessionId;
@@ -269,7 +276,7 @@ function ComposerStatus({
       {state === 'waiting' && <span className="attn-spinner" aria-hidden="true" />}
       {state === 'failed' && <span aria-hidden="true">✕</span>}
       {(state === 'delivered' || state === 'received') && <span aria-hidden="true">✓</span>}
-      <span>{text}</span>
+      <span dir="auto">{text}</span>
       {children}
     </div>
   );
@@ -295,7 +302,10 @@ export function SessionWorkspace({
   useMarkSeen(entry);
   const isClaude = record.target.agent === 'claude';
   const channelStatus = useClaudeConnection(client, isClaude);
-  const channelReady = !isClaude || channelStatus.state === 'connected';
+  const route = useDeliveryRoute(client, isClaude);
+  /** Claude needs a route before Send is offered; Codex always sends through its own queue. */
+  const routeTransport = isClaude ? (route?.transport ?? undefined) : undefined;
+  const routeReady = !isClaude || !!routeTransport;
   const workspace = useWorkspace(record.id);
   const popupMode = usePopupMode();
   const [preferences, setPreferences] = useDisplayPreferences();
@@ -326,7 +336,10 @@ export function SessionWorkspace({
       },
     }));
   const [terminalFocus, setTerminalFocus] = useState(true);
+  /** Why the terminal was shown for a declined Send; cleared when the user picks a view or sends again. */
+  const [terminalNotice, setTerminalNotice] = useState<string>();
   const chooseLiveView = (view: LiveView) => {
+    setTerminalNotice(undefined);
     setApprovalView(null);
     setTerminalFocus(true);
     setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
@@ -338,6 +351,22 @@ export function SessionWorkspace({
   // The approval poll keeps its first callback, so it reads the current view through a ref.
   const liveViewNow = useRef(liveView);
   liveViewNow.current = liveView;
+  /**
+   * The server did not type a terminal message because the terminal needs the user (spec 2.1): show it, with what to
+   * do. The notice says why too unless the status strip already does (`stripShowsReason`, the composer's sends).
+   * Returns whether the terminal was shown.
+   */
+  const showTerminalFor = (delivery: Delivery | undefined, stripShowsReason = false): boolean => {
+    if (!delivery?.openTerminal || !launchId) return false;
+    if (!showsTerminal(liveViewNow.current)) chooseLiveView('split');
+    else setTerminalFocus(true);
+    setTerminalNotice(
+      stripShowsReason
+        ? TERMINAL_NOTICE_GUIDANCE
+        : `Not sent: ${delivery.reason ?? 'the terminal needs you'}. ${TERMINAL_NOTICE_GUIDANCE}`,
+    );
+    return true;
+  };
   useAutoOpenTerminal(entry, record.id, popupMode, lastKeystrokeAt, () => {
     const { view, returnTo } = approvalSwitch(liveViewNow.current);
     if (!returnTo) return;
@@ -432,7 +461,7 @@ export function SessionWorkspace({
   const dictationLanguage = isHebrew(languageSettings.write) ? 'he' : 'en';
   // A send pressed while recording waits for the last segment; the hook's sendNow bumps a counter so the send runs after
   // the render that holds the appended text, never with a stale composer value.
-  const pendingAction = useRef<'channel' | 'peer' | 'discuss'>('channel');
+  const pendingAction = useRef<'send' | 'discuss'>('send');
   const [dictationSend, setDictationSend] = useState(0);
   const dictation = useDictation({
     sessionId: client.sessionId,
@@ -663,27 +692,26 @@ export function SessionWorkspace({
     workspace.update((data) => {
       data.attachmentIds = data.attachmentIds.filter((value) => value !== id);
     });
-  const composerSendBlocked = (transport: 'channel' | 'peer') =>
+  const composerDelivery =
+    composerAttempt &&
+    snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
+  const composerSendBlocked =
     unsupportedFiles ||
     (!text.trim() && !images.length) ||
     uploading ||
     composerSending ||
-    (snapshot.codingState !== 'idle' &&
-      !(
-        snapshot.codingState === 'working' &&
-        canSendWhileWorking(snapshot.capabilities, isClaude ? transport : undefined)
-      ));
-  const composerSendDisabled = composerSendBlocked('channel');
-  const sendComposer = async (transport: 'channel' | 'peer' = 'channel') => {
+    !routeReady ||
+    sendGate(snapshot.codingState, snapshot.capabilities, routeTransport) === 'block';
+  const sendComposer = async () => {
     if (dictation.requestSend()) {
-      pendingAction.current = transport;
+      pendingAction.current = 'send';
       return;
     }
-    await sendComposerNow(transport);
+    await sendComposerNow();
   };
-  const sendComposerNow = async (transport: 'channel' | 'peer' = 'channel') => {
-    if (composerSendBlocked(transport) || (isClaude && transport === 'channel' && !channelReady))
-      return;
+  const sendComposerNow = async () => {
+    if (composerSendBlocked) return;
+    setTerminalNotice(undefined);
     const prior =
       composerAttempt &&
       snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
@@ -702,21 +730,19 @@ export function SessionWorkspace({
     setComposerSending(true);
     setError('');
     try {
-      const result = await call({
-        type: 'send-composer',
-        ...attempt,
-        ...(isClaude ? { transport } : {}),
-      });
+      // The server picks the route; the client never names a transport.
+      const result = await call({ type: 'send-composer', ...attempt });
       apply(result);
+      showTerminalFor(
+        result.snapshot.deliveries.find((d) => d.draftId === `composer-${attempt.requestId}`),
+        true,
+      );
     } catch (e) {
       setError(errorMessage(e, 'Delivery uncertain; text preserved'));
     } finally {
       setComposerSending(false);
     }
   };
-  const composerDelivery =
-    composerAttempt &&
-    snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
   const awaitingClaudeReplies = snapshot.deliveries.filter(isChannelAwaitingReply).length;
   const received = useReceivedFlash(
     snapshot.deliveries.filter((d) => d.transport === 'channel' && d.state === 'sent').length,
@@ -759,7 +785,8 @@ export function SessionWorkspace({
           : stripState === 'sending'
             ? 'Sending' + stripReason
             : stripState === 'failed'
-              ? 'Failed' + stripReason
+              ? (composerDelivery && isFailedUntyped(composerDelivery) ? 'Not sent' : 'Failed') +
+                stripReason
               : stripState === 'received'
                 ? 'Response received'
                 : 'Delivered' + stripReason;
@@ -939,9 +966,9 @@ export function SessionWorkspace({
   useEffect(() => {
     if (!dictationSend) return;
     const action = pendingAction.current;
-    pendingAction.current = 'channel';
+    pendingAction.current = 'send';
     if (action === 'discuss') discussNow();
-    else void sendComposerNow(action);
+    else void sendComposerNow();
   }, [dictationSend]);
   // Cmd/Ctrl+Shift+M anywhere toggles dictation, except while typing in another field or with a modal dialog open
   // that does not hold the composer (the composer's own keydown handles it first and prevents the default).
@@ -1042,8 +1069,9 @@ export function SessionWorkspace({
       setPreparing(false);
     }
   };
-  const sendReview = async (transport: 'channel' | 'peer' = 'channel') => {
-    if (!review || preparing || (isClaude && transport === 'channel' && !channelReady)) return;
+  const sendReview = async () => {
+    if (!review || preparing || !routeReady) return;
+    setTerminalNotice(undefined);
     setPreparing(true);
     setReviewError('');
     pendingInputClear.current.set(`${review.draft.id}:${review.draft.revision}`, text);
@@ -1053,10 +1081,15 @@ export function SessionWorkspace({
         draftId: review.draft.id,
         revision: review.draft.revision,
         localizedText: review.localizedText,
-        ...(isClaude ? { transport } : {}),
       });
       if (!belongsHere(result)) return;
       const accepted = apply(result);
+      // Newest first: a retry claims a later revision, and an older declined delivery keeps its in-memory flag.
+      const terminalShown = showTerminalFor(
+        result.snapshot.deliveries.findLast(
+          (d) => d.draftId === review.draft.id && d.revision >= review.draft.revision,
+        ),
+      );
       const sent = result.snapshot.deliveries.some(
         (d) =>
           d.draftId === review.draft.id &&
@@ -1077,6 +1110,8 @@ export function SessionWorkspace({
           if (!workspace.envelope?.snapshot.currentDraft && data.composer === text)
             data.composer = '';
         });
+      // The modal review would cover the terminal just shown; the review stays saved for Resume review.
+      else if (terminalShown) setReviewOpen(false);
       else if (accepted) setReviewOpen(true);
     } catch (e) {
       setReviewError(errorMessage(e, 'Delivery failed'));
@@ -1126,7 +1161,14 @@ export function SessionWorkspace({
         })}
       />
       {launchId && entry?.attentionNotice && (
-        <small className="live-attention-notice">{entry.attentionNotice}</small>
+        <small className="live-attention-notice" dir="auto">
+          {entry.attentionNotice}
+        </small>
+      )}
+      {launchId && terminalNotice && (
+        <small className="live-attention-notice" role="status" dir="auto">
+          {terminalNotice}
+        </small>
       )}
     </>
   );
@@ -1316,11 +1358,15 @@ export function SessionWorkspace({
   );
   const composerPanel = (
     <ReadingPane title="Chat with the Language Assistant" name="composer">
-      {isClaude && <ClaudeConnection client={client} status={channelStatus} />}
+      {isClaude && route && route.transport !== 'tmux' && (
+        <ClaudeConnection client={client} status={channelStatus} />
+      )}
       {stripState && (
         <ComposerStatus state={stripState} text={stripText} fading={stripFading}>
           {stripState !== 'waiting' && awaitingClaudeReplies > 0 && (
-            <small className="status-strip-waiting">{waitingText}</small>
+            <small className="status-strip-waiting" dir="auto">
+              {waitingText}
+            </small>
           )}
           {composerDelivery &&
             ['unconfirmed', 'queued'].includes(composerDelivery.state) &&
@@ -1513,24 +1559,13 @@ export function SessionWorkspace({
               title={
                 unsupportedFiles ? 'This coding agent does not support file references' : undefined
               }
-              disabled={composerSendDisabled || !channelReady}
+              disabled={composerSendBlocked}
               aria-label={terminalDestinationLabel()}
               onClick={() => void sendComposer()}
             >
               Send to agent
             </button>
-            {isClaude && (
-              <>
-                <button
-                  type="button"
-                  disabled={composerSendBlocked('peer')}
-                  onClick={() => void sendComposer('peer')}
-                >
-                  Send as peer
-                </button>
-                <PeerExplanation client={client} />
-              </>
-            )}
+            {isClaude && <RouteLine client={client} route={route} />}
           </div>
         </ImageAttachments>
         <small>
@@ -1555,7 +1590,9 @@ export function SessionWorkspace({
                 ? activityLabel(entry)
                 : snapshot.codingState === 'approval-required'
                   ? 'Approval required'
-                  : snapshot.codingState[0]!.toUpperCase() + snapshot.codingState.slice(1)}
+                  : snapshot.codingState === 'dialog-open'
+                    ? DIALOG_OPEN_REASON
+                    : snapshot.codingState[0]!.toUpperCase() + snapshot.codingState.slice(1)}
             </span>
             <UsageReadout
               sessionId={record.id}
@@ -1633,25 +1670,10 @@ export function SessionWorkspace({
                 review={review}
                 open={reviewOpen}
                 busy={preparing}
-                channelReady={channelReady}
-                {...(isClaude ? { onPeerSend: () => void sendReview('peer') } : {})}
+                routeReady={routeReady}
                 blocked={
-                  snapshot.codingState !== 'idle' &&
-                  !(
-                    snapshot.codingState === 'working' &&
-                    canSendWhileWorking(snapshot.capabilities, isClaude ? 'channel' : undefined)
-                  )
+                  sendGate(snapshot.codingState, snapshot.capabilities, routeTransport) === 'block'
                 }
-                {...(isClaude
-                  ? {
-                      peerBlocked:
-                        snapshot.codingState !== 'idle' &&
-                        !(
-                          snapshot.codingState === 'working' &&
-                          canSendWhileWorking(snapshot.capabilities, 'peer')
-                        ),
-                    }
-                  : {})}
                 {...(delivery ? { delivery } : {})}
                 error={reviewError}
                 onChange={(value) => saveReview({ ...review, localizedText: value })}
@@ -1665,9 +1687,7 @@ export function SessionWorkspace({
             )}
             <ResetInstructionDialog
               open={resetOpen}
-              pending={Boolean(
-                delivery && ['sending', 'queued', 'unconfirmed'].includes(delivery.state),
-              )}
+              pending={Boolean(delivery && isDeliveryUnresolved(delivery))}
               busy={preparing}
               error={resetError}
               close={() => setResetOpen(false)}

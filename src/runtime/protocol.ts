@@ -4,6 +4,7 @@ import type {
   Draft,
   SourceMessage,
   AgentKind,
+  DeliveryTransport,
 } from '../core/contracts.js';
 export type Action =
   | { type: 'connect'; target: Target }
@@ -16,7 +17,7 @@ export type Action =
       requestId: string;
       text: string;
       attachmentIds?: string[];
-      transport?: 'channel' | 'peer';
+      transport?: DeliveryTransport;
     }
   | { type: 'prepare'; indices: number[]; expected?: { id: string; revision: number } }
   | {
@@ -24,7 +25,7 @@ export type Action =
       draftId: string;
       revision: number;
       localizedText: string;
-      transport?: 'channel' | 'peer';
+      transport?: DeliveryTransport;
     }
   | {
       type: 'approve';
@@ -36,7 +37,7 @@ export type Action =
   | { type: 'revise'; draftId: string; text: string }
   | { type: 'reset-instruction'; draftId: string; revision: number }
   | { type: 'discard'; draftId: string }
-  | { type: 'send'; draftId: string; revision: number; transport?: 'channel' | 'peer' }
+  | { type: 'send'; draftId: string; revision: number; transport?: DeliveryTransport }
   | { type: 'translate-message'; sourceId: string }
   | { type: 'older-history' };
 export interface RuntimeSnapshot {

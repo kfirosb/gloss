@@ -6,8 +6,33 @@ export type AgentKind = 'claude' | 'codex';
 /** Composer request IDs; also embedded in native channel and delivery markers. */
 export const REQUEST_ID_SOURCE = '[a-zA-Z0-9-]{1,100}';
 export const REQUEST_ID_PATTERN = new RegExp(`^${REQUEST_ID_SOURCE}$`);
-export type CodingState = 'idle' | 'working' | 'approval-required' | 'disconnected';
+export type CodingState =
+  | 'idle'
+  | 'working'
+  | 'approval-required'
+  /** Claude's session record names an open dialog (status "waiting" or any waitingFor). */
+  | 'dialog-open'
+  | 'disconnected';
 export type DeliveryState = 'sending' | 'queued' | 'sent' | 'failed' | 'unconfirmed';
+/** How a Claude message reaches the session: typed into Gloss's tmux pane, the gloss channel, or Claude's peer inbox. */
+export type DeliveryTransport = 'tmux' | 'channel' | 'peer';
+const DELIVERY_TRANSPORTS: readonly string[] = ['tmux', 'channel', 'peer'];
+export const isDeliveryTransport = (value: unknown): value is DeliveryTransport =>
+  typeof value === 'string' && DELIVERY_TRANSPORTS.includes(value);
+/** The one route a send to this session would take now, or why there is none. */
+export type DeliveryRoute = { transport: DeliveryTransport } | { transport: null; reason: string };
+/** Native evidence that names the transcript record confirming a delivery. */
+export interface DeliveryEvidence {
+  nativeMessageId: string;
+}
+export const DIALOG_OPEN_REASON = 'A dialog is open in the terminal';
+/** Stored on a terminal send from its claim until typing starts; at startup it means nothing was typed. */
+export const CHECKING_TERMINAL_REASON = 'Checking the terminal';
+/** A terminal send Gloss stopped (quit or crash) before typing started. */
+export const NOT_TYPED_AT_RESTART_REASON =
+  'Gloss stopped before typing this message; nothing was sent';
+/** Persisted just before a terminal paste; a delivery with this reason is never typed again. */
+export const TYPING_STARTED_REASON = 'Typing started in the terminal; Gloss will not type it again';
 
 export interface Target {
   agent: AgentKind;
@@ -36,7 +61,7 @@ export interface Draft {
   englishText: string;
 }
 export interface Delivery {
-  transport?: 'channel' | 'peer';
+  transport?: DeliveryTransport;
   channelGeneration?: string;
   referenceFormat?: 'manifest-v1';
   attachments?: Attachment[];
@@ -49,6 +74,11 @@ export interface Delivery {
   englishText: string;
   state: DeliveryState;
   reason?: string;
+  /**
+   * A terminal send Gloss did not type because the terminal needs the user (spec 2.1); the UI shows the terminal.
+   * Kept in memory only, so it describes the Send that just returned. Never stored.
+   */
+  openTerminal?: true;
 }
 /** The channel accepted the handoff; Claude's matching reply is still pending. */
 export function isChannelAwaitingReply(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
@@ -57,6 +87,18 @@ export function isChannelAwaitingReply(delivery: Pick<Delivery, 'state' | 'trans
 /** A submitted draft can be released without claiming that Claude has replied. */
 export function isDeliverySubmitted(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
   return delivery.state === 'sent' || isChannelAwaitingReply(delivery);
+}
+/** The outcome is not known yet: a new composer send waits and the draft is kept. */
+export function isDeliveryUnresolved(delivery: Pick<Delivery, 'state'>): boolean {
+  return ['sending', 'queued', 'unconfirmed'].includes(delivery.state);
+}
+/** A failed terminal send typed nothing: after typing starts a failure becomes `unconfirmed`. The UI says "Not sent". */
+export function isFailedUntyped(delivery: Pick<Delivery, 'state' | 'transport'>): boolean {
+  return delivery.state === 'failed' && delivery.transport === 'tmux';
+}
+/** Native evidence may still settle it. */
+export function isAwaitingEvidence(delivery: Pick<Delivery, 'state'>): boolean {
+  return ['sending', 'queued', 'unconfirmed'].includes(delivery.state);
 }
 export interface AgentMessage {
   clientId?: string;
@@ -81,17 +123,38 @@ export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind):
     return channelA === channelB ? a.revision - b.revision : Number(channelA) - Number(channelB);
   });
 }
+type SendCapabilities = Pick<
+  AgentCapabilities,
+  'sendWhileBusy' | 'channelSendWhileBusy' | 'peerSendWhileBusy' | 'tmuxSendWhileBusy'
+>;
 export function canSendWhileWorking(
-  capabilities:
-    | Pick<AgentCapabilities, 'sendWhileBusy' | 'channelSendWhileBusy' | 'peerSendWhileBusy'>
-    | undefined,
-  transport?: 'channel' | 'peer',
+  capabilities: SendCapabilities | undefined,
+  transport?: DeliveryTransport,
 ): boolean {
   return Boolean(
     capabilities?.sendWhileBusy ||
     (transport === 'channel' && capabilities?.channelSendWhileBusy) ||
-    (transport === 'peer' && capabilities?.peerSendWhileBusy),
+    (transport === 'peer' && capabilities?.peerSendWhileBusy) ||
+    (transport === 'tmux' && capabilities?.tmuxSendWhileBusy),
   );
+}
+export type SendGate = 'send' | 'block';
+/**
+ * Whether a send may go out in this coding state. A terminal send is checked against the screen when it is sent, so
+ * an open dialog or approval prompt shows the terminal there instead of blocking here; channel and peer messages
+ * queue inside Claude, so a dialog does not stop them either.
+ */
+export function sendGate(
+  state: CodingState,
+  capabilities: SendCapabilities | undefined,
+  transport?: DeliveryTransport,
+): SendGate {
+  if (state === 'disconnected') return 'block';
+  if (state === 'idle') return 'send';
+  if (transport === 'tmux' && (state === 'approval-required' || state === 'dialog-open'))
+    return 'send';
+  if (state === 'approval-required') return 'block';
+  return canSendWhileWorking(capabilities, transport) ? 'send' : 'block';
 }
 export interface AgentCapabilities {
   imageAttachments?: boolean;
@@ -104,6 +167,8 @@ export interface AgentCapabilities {
   channelSendWhileBusy?: boolean;
   /** Claude queues peer messages that arrive during a turn, so a peer send may go out while 'working'. */
   peerSendWhileBusy?: boolean;
+  /** Claude queues text typed into its terminal during a turn, so a terminal send may go out while 'working'. */
+  tmuxSendWhileBusy?: boolean;
   acknowledgement: 'none' | 'queued' | 'accepted';
 }
 export type AgentEvent =
@@ -119,7 +184,16 @@ export interface CodingConnection {
   capabilities: AgentCapabilities;
   history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }>;
   events(signal: AbortSignal): AsyncIterable<AgentEvent>;
-  reconcileDelivery?(delivery: Delivery): Promise<boolean>;
+  /**
+   * Exact native evidence only; never sends. `earlier` are the deliveries claimed before this one for the same
+   * session, oldest first, so identical typed texts confirm in send order.
+   */
+  reconcileDelivery?(
+    delivery: Delivery,
+    earlier?: readonly Delivery[],
+  ): Promise<boolean | DeliveryEvidence>;
+  /** The route a send would take now; absent for agents with a single transport. */
+  deliveryRoute?(): Promise<DeliveryRoute>;
   send(
     requestId: string,
     englishText: string,
@@ -131,12 +205,21 @@ export interface CodingConnection {
     nativeMessageId?: string;
     nativeAfterRevision?: number;
     channelGeneration?: string;
+    /** Nothing was typed because the terminal needs the user (spec 2.1): the UI shows the terminal. */
+    openTerminal?: true;
   }>;
   detach(): Promise<void>;
 }
 export interface SendContext {
   panelSessionId: string;
-  transport: 'channel' | 'peer';
+  transport: DeliveryTransport;
+  /** Deliveries claimed before this one for the same session, oldest first. */
+  earlier?: readonly Delivery[] | undefined;
+  /**
+   * Called once just before a terminal paste; it persists TYPING_STARTED_REASON. A throw cancels the send untyped.
+   * Synchronous: a terminal send without it types nothing.
+   */
+  onTyping?: ((evidence: { nativeAfterRevision: number }) => undefined) | undefined;
 }
 export interface AgentAdapter {
   kind: AgentKind;

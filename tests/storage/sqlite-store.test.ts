@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ConversationSnapshot, Delivery } from '../../src/core/contracts.js';
+import {
+  CHECKING_TERMINAL_REASON,
+  NOT_TYPED_AT_RESTART_REASON,
+  TYPING_STARTED_REASON,
+  type ConversationSnapshot,
+  type Delivery,
+} from '../../src/core/contracts.js';
 import { MAX_FILE_REVIEW_CACHE_ROWS } from '../../src/core/content-policy.js';
 import type { FileReviewKey } from '../../src/core/file-review-contracts.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
@@ -386,5 +392,59 @@ it('repairs inherited reply images without changing original images or prepared 
   expect(restored.discussion[1]?.attachments).toEqual(attachments);
   expect(restored.discussion[3]?.attachments).toBeUndefined();
   expect(restored.currentDraft).toEqual(state.currentDraft);
+  reopened.close();
+});
+
+it('recovers a terminal send stopped before typing, and a held row from a pre-release build, as not sent', () => {
+  const path = databasePath();
+  const store = new SqliteStore(path);
+  store.save(snapshot());
+  const checking: Delivery = {
+    ...delivery,
+    state: 'sending',
+    reason: CHECKING_TERMINAL_REASON,
+    transport: 'tmux',
+  };
+  const held: Delivery = { ...delivery, id: 'delivery-held', revision: 3, transport: 'tmux' };
+  const typing: Delivery = {
+    ...delivery,
+    id: 'delivery-typing',
+    revision: 4,
+    reason: TYPING_STARTED_REASON,
+    transport: 'tmux',
+    nativeAfterRevision: 10,
+  };
+  // Synthetic: the not-typed rule is for terminal sends only; a channel send in flight stays uncertain.
+  const channel: Delivery = {
+    ...delivery,
+    id: 'delivery-channel',
+    revision: 5,
+    state: 'sending',
+    reason: CHECKING_TERMINAL_REASON,
+    transport: 'channel',
+  };
+  for (const item of [checking, held, typing, channel])
+    expect(store.claimDelivery(item)).toBe(true);
+  store.close();
+  // Only builds of plan 2 before 2026-10-17 wrote `held`; the type no longer has it.
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE deliveries SET state = 'held' WHERE id = ?").run(held.id);
+  raw.close();
+  const reopened = new SqliteStore(path);
+  expect(reopened.recoverInFlightDeliveries()).toBe(4);
+  for (const revision of [2, 3])
+    expect(reopened.getDelivery('draft-1', revision)).toMatchObject({
+      state: 'failed',
+      reason: NOT_TYPED_AT_RESTART_REASON,
+    });
+  expect(reopened.getDelivery('draft-1', 4)).toMatchObject({
+    state: 'unconfirmed',
+    reason: TYPING_STARTED_REASON,
+    nativeAfterRevision: 10,
+  });
+  expect(reopened.getDelivery('draft-1', 5)).toMatchObject({
+    state: 'unconfirmed',
+    transport: 'channel',
+  });
   reopened.close();
 });

@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { canSendWhileWorking, orderAgentMessages } from '../core/contracts.js';
+import { orderAgentMessages, sendGate } from '../core/contracts.js';
 import type {
   AgentCapabilities,
   AgentEvent,
@@ -31,7 +31,8 @@ export interface AdapterOptions {
   sourceSink?: SourceSink;
   /** A server-owned verified liveness probe. Never trust a browser-provided boolean. */
   observeLive?: (target: Target) => Promise<boolean>;
-  clock?: { sleep(ms: number, signal: AbortSignal): Promise<void> };
+  /** `now` (epoch milliseconds) defaults to `Date.now`; a test clock that skips its sleeps supplies its own. */
+  clock?: { sleep(ms: number, signal: AbortSignal): Promise<void>; now?(): number };
 }
 export interface SourceSink {
   send(message: {
@@ -261,6 +262,7 @@ export class Transcript {
     line: Buffer,
     position: number,
     fail: (reason: string) => never = (reason) => this.failure(reason),
+    parse: RecordParser = this.parse,
   ): Parsed {
     if (!line.toString('utf8').trim()) return {};
     let record: JsonRecord | undefined;
@@ -271,7 +273,7 @@ export class Transcript {
     }
     if (!record) return fail('Malformed transcript record');
     try {
-      return this.parse(record, position);
+      return parse(record, position);
     } catch {
       return fail('Malformed record or transcript identity mismatch');
     }
@@ -345,7 +347,11 @@ export class Transcript {
       await file.close();
     }
   }
-  async history(cursor?: string): Promise<{ messages: AgentMessage[]; next?: string }> {
+  /** `parse` reads this history with another parser over the same file, identity checks and revisions. */
+  async history(
+    cursor?: string,
+    parse: RecordParser = this.parse,
+  ): Promise<{ messages: AgentMessage[]; next?: string }> {
     const { file, size } = await this.checkedFile();
     try {
       let end = size;
@@ -388,8 +394,11 @@ export class Transcript {
         // Normalize this bounded window forward before selecting the latest records backward.
         // Otherwise the last identical physical row would invent a newer semantic revision.
         const normalized = rows.map((row) => {
-          const message = this.decode(row.line, row.start, (reason) =>
-            this.lookbackFailure(reason),
+          const message = this.decode(
+            row.line,
+            row.start,
+            (reason) => this.lookbackFailure(reason),
+            parse,
           ).message;
           return {
             start: row.start,
@@ -615,10 +624,8 @@ export async function transcriptConnection(spec: {
       pendingEvents.push(...(await refresh()));
       if (!transcript.caughtUp)
         return { state: 'failed', reason: 'Transcript is still syncing; instruction preserved' };
-      if (
-        lastState !== 'idle' &&
-        !(lastState === 'working' && canSendWhileWorking(spec.capabilities, context?.transport))
-      )
+      const gate = sendGate(lastState ?? 'disconnected', spec.capabilities, context?.transport);
+      if (gate === 'block')
         return {
           state: 'failed',
           reason: 'Agent is disconnected, busy, or requires native approval',

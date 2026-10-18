@@ -59,6 +59,9 @@ export function createSessionManager(options: {
   createWorkflowForSession(record: SessionRecord): Promise<Workflow>;
 }): SessionManager {
   const { store } = options;
+  // Recover before any workflow can load deliveries: the server may serve an action before restore runs, and a
+  // workflow opened then would keep an interrupted send as still in progress. Restore repeats it harmlessly.
+  store.recoverInFlightDeliveries();
   const epoch = randomUUID();
   const workflows = new Map<string, Workflow>();
   const opening = new Map<string, Promise<Workflow>>();

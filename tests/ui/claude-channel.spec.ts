@@ -1,8 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { DeliveryRoute } from '../../src/core/contracts.js';
 import { basicSnapshot, mockSession } from './session-fixture.js';
 import { sessionFixture } from './multi-session-fixture.js';
 import { selectSession } from './session-fixture.js';
-async function fixture(page: Page, initial = 'setup-required', deliveryState = 'unconfirmed') {
+/** `route` fixes the delivery route before the page loads; otherwise it follows the channel state. */
+async function fixture(
+  page: Page,
+  initial = 'setup-required',
+  deliveryState = 'unconfirmed',
+  route?: DeliveryRoute,
+) {
   const snapshot: any = {
     ...basicSnapshot(),
     target: {
@@ -16,6 +23,12 @@ async function fixture(page: Page, initial = 'setup-required', deliveryState = '
   let state = initial;
   let sequence = 0;
   let setups = 0;
+  const currentRoute = (): DeliveryRoute =>
+    route ??
+    (state === 'connected'
+      ? { transport: 'channel' }
+      : { transport: null, reason: 'Gloss can’t reach this session yet.' });
+  await page.route('**/api/sessions/*/claude-route', (r) => r.fulfill({ json: currentRoute() }));
   await mockSession(page, () => snapshot);
   await page.route('**/api/sessions/*/events', (route) =>
     route.fulfill({ contentType: 'text/event-stream', body: '' }),
@@ -45,7 +58,7 @@ async function fixture(page: Page, initial = 'setup-required', deliveryState = '
         draftId: 'composer-' + action.requestId,
         revision: 1,
         state: deliveryState,
-        transport: action.transport,
+        transport: action.transport ?? currentRoute().transport ?? undefined,
       });
     if (action.type === 'release-composer') delete snapshot.composerDraft;
     if (action.type === 'send-review')
@@ -54,7 +67,7 @@ async function fixture(page: Page, initial = 'setup-required', deliveryState = '
         draftId: action.draftId,
         revision: action.revision,
         state: 'unconfirmed',
-        transport: action.transport,
+        transport: action.transport ?? currentRoute().transport ?? undefined,
       });
     return route.fulfill({ json: { sessionId: snapshot.id, sequence: ++sequence, snapshot } });
   });
@@ -187,18 +200,19 @@ test('discovery is not send readiness; explicit setup is collapsible and shows a
   }
   expect(f.actions).toEqual([]);
 });
-test('peer is explicit per send; uncertain release preserves edited Hebrew and never sticks after reload', async ({
+test('a peer-route send keeps edited Hebrew after an uncertain release and reload', async ({
   page,
 }) => {
-  const f = await fixture(page);
+  const f = await fixture(page, undefined, undefined, { transport: 'peer' });
+  await expect(page.locator('.route-line > summary')).toHaveText('Peer — limited');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
   await input.fill('שלום לעולם');
-  await page.getByRole('button', { name: 'Send as peer', exact: true }).click();
+  await page.getByRole('button', { name: 'Send to Terminal in English', exact: true }).click();
   await expect(page.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-composer')).toMatchObject({
-    transport: 'peer',
     text: 'שלום לעולם',
   });
+  expect(f.actions.find((a) => a.type === 'send-composer')).not.toHaveProperty('transport');
   await input.fill('טיוטה חדשה');
   page.once('dialog', async (dialog) => {
     expect(dialog.message()).toMatch(/may still arrive/);
@@ -211,10 +225,10 @@ test('peer is explicit per send; uncertain release preserves edited Hebrew and n
   await expect(input).toHaveValue('טיוטה חדשה');
   await expect(
     page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   expect(f.actions.filter((a) => a.type === 'send-composer')).toHaveLength(1);
 });
-test('normal connected composer send explicitly uses channel and preserves uncertainty', async ({
+test('a connected composer send leaves the route to the server and preserves uncertainty', async ({
   page,
 }) => {
   const f = await fixture(page, 'connected');
@@ -222,14 +236,14 @@ test('normal connected composer send explicitly uses channel and preserves uncer
   await page.getByRole('button', { name: 'Send to Terminal in English', exact: true }).click();
   await expect(page.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-composer')).toMatchObject({
-    transport: 'channel',
     text: 'בדיקה',
   });
+  expect(f.actions.find((a) => a.type === 'send-composer')).not.toHaveProperty('transport');
 });
-test('prepared review offers separate peer action while normal channel send is unavailable', async ({
+test('a prepared review sends through the peer route with the one Send button', async ({
   page,
 }) => {
-  const f = await fixture(page);
+  const f = await fixture(page, undefined, undefined, { transport: 'peer' });
   f.snapshot.currentDraft = {
     id: 'review',
     revision: 1,
@@ -242,15 +256,13 @@ test('prepared review offers separate peer action while normal channel send is u
   await page.reload();
   await page.getByRole('button', { name: 'Resume review' }).click();
   const dialog = page.getByRole('dialog', { name: 'Review instruction' });
-  await expect(
-    dialog.getByRole('button', { name: 'Send to Terminal', exact: true }),
-  ).toBeDisabled();
-  await dialog.getByRole('button', { name: 'Send as peer', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Send as peer' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Send to Terminal', exact: true }).click();
   await expect(dialog.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-review')).toMatchObject({
-    transport: 'peer',
     draftId: 'review',
   });
+  expect(f.actions.find((a) => a.type === 'send-review')).not.toHaveProperty('transport');
 });
 
 test('connected review uses channel and a failed send does not fall back or discard Hebrew edits', async ({
@@ -284,7 +296,6 @@ test('connected review uses channel and a failed send does not fall back or disc
       draftId: 'review',
       revision: 1,
       localizedText: 'הוראה ערוכה',
-      transport: 'channel',
     },
   ]);
   await dialog.getByRole('button', { name: 'Close review' }).click();
@@ -332,8 +343,8 @@ test('connected sends keep file and image reference IDs and a read-only delivery
   await expect(page.getByText('Awaiting Claude confirmation', { exact: false })).toBeVisible();
   expect(f.actions.find((a) => a.type === 'send-composer')).toMatchObject({
     attachmentIds: ['file-1', 'image-1'],
-    transport: 'channel',
   });
+  expect(f.actions.find((a) => a.type === 'send-composer')).not.toHaveProperty('transport');
   await page.getByRole('button', { name: 'Check delivery', exact: true }).click();
   expect(f.actions.filter((a) => a.type === 'send-composer')).toHaveLength(1);
   expect(f.actions.some((a) => a.type === 'check-composer')).toBe(true);
@@ -359,6 +370,13 @@ test('same-name destinations retain isolated status and late status cannot enabl
     }
     return route.fulfill({ json: { state: 'setup-required' } });
   });
+  await context.route('**/api/sessions/*/claude-route', (route) =>
+    route.fulfill({
+      json: route.request().url().includes('/A/')
+        ? { transport: 'channel' }
+        : { transport: null, reason: 'Gloss can’t reach this session yet.' },
+    }),
+  );
   await page.goto('/#capability=test');
   await expect.poll(() => !!finish).toBe(true);
   await selectSession(page, 'B');
@@ -403,6 +421,9 @@ test('an already-open tab keeps edited text after another tab releases and sends
   f.workspaces.A!.data.composerAttempt = { requestId: 'old', text: 'original', attachmentIds: [] };
   await context.route('**/api/sessions/*/claude-channel', (route) =>
     route.fulfill({ json: { state: 'connected' } }),
+  );
+  await context.route('**/api/sessions/*/claude-route', (route) =>
+    route.fulfill({ json: { transport: 'channel' } }),
   );
   let released!: () => void;
   const releaseDone = new Promise<void>((resolve) => {
@@ -453,15 +474,12 @@ test('an already-open tab keeps edited text after another tab releases and sends
   expect(sent).toMatchObject({
     sessionId: 'A',
     text: 'בקשה חדשה מהכרטיסייה הפתוחה',
-    transport: 'channel',
   });
   expect(sent.requestId).not.toBe('old');
   await other.close();
 });
 
-test('channel-connected Claude working: Send to agent enabled, peer send stays disabled', async ({
-  page,
-}) => {
+test('a working Claude keeps Send on the channel route; approval disables it', async ({ page }) => {
   const f = await fixture(page, 'connected', 'queued');
   f.snapshot.codingState = 'working';
   f.snapshot.capabilities = {
@@ -476,7 +494,7 @@ test('channel-connected Claude working: Send to agent enabled, peer send stays d
   await expect(
     page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
   ).toBeEnabled();
-  await expect(page.getByRole('button', { name: /Send as peer/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Send as peer/ })).toHaveCount(0);
   f.snapshot.codingState = 'approval-required';
   await page.reload();
   await page.getByRole('textbox', { name: 'Discuss with language assistant' }).fill('הודעה');
@@ -523,7 +541,7 @@ test('walks an outside session from registration to the short command', async ({
 test('explains peer sending and allows it for all sessions on an explicit click', async ({
   page,
 }) => {
-  await fixture(page);
+  await fixture(page, undefined, undefined, { transport: 'peer' });
   let user = 'unset';
   const posts: unknown[] = [];
   await page.route('**/api/sessions/*/claude-peer', async (route) => {
@@ -533,6 +551,7 @@ test('explains peer sending and allows it for all sessions on an explicit click'
     }
     await route.fulfill({ json: { user } });
   });
+  await page.locator('.route-line > summary').click();
   await page.getByText('How to allow', { exact: true }).click();
   await page.getByRole('button', { name: 'Allow for all sessions' }).click();
   await expect(page.getByRole('button', { name: 'Allow for all sessions' })).toHaveCount(0);
@@ -541,10 +560,11 @@ test('explains peer sending and allows it for all sessions on an explicit click'
 });
 
 test('a forced peer setting shows the reason instead of the allow button', async ({ page }) => {
-  await fixture(page);
+  await fixture(page, undefined, undefined, { transport: 'peer' });
   await page.route('**/api/sessions/*/claude-peer', (route) =>
     route.fulfill({ json: { user: 'unset', forcedBy: 'repository', forced: 'hold' } }),
   );
+  await page.locator('.route-line > summary').click();
   await page.getByText('How to allow', { exact: true }).click();
   await expect(page.getByText('by your repository', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Allow for all sessions' })).toHaveCount(0);
@@ -553,7 +573,7 @@ test('a forced peer setting shows the reason instead of the allow button', async
 test('peer send stays available while Claude works when Claude queues peer messages', async ({
   page,
 }) => {
-  const f = await fixture(page, 'connected', 'queued');
+  const f = await fixture(page, 'connected', 'queued', { transport: 'peer' });
   f.snapshot.codingState = 'working';
   f.snapshot.capabilities = {
     sendWhileBusy: false,
@@ -565,5 +585,7 @@ test('peer send stays available while Claude works when Claude queues peer messa
   await page
     .getByRole('textbox', { name: 'Discuss with language assistant' })
     .fill('הודעה בזמן עבודה');
-  await expect(page.getByRole('button', { name: 'Send as peer', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Send to Terminal in English', exact: true }),
+  ).toBeEnabled();
 });

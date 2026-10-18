@@ -3,11 +3,17 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createConnection } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   REQUEST_ID_SOURCE,
+  isAwaitingEvidence,
+  isDeliveryTransport,
   type AgentAdapter,
   type Attachment,
   type CodingState,
+  type Delivery,
+  type DeliveryRoute,
+  type SendContext,
   type Target,
 } from '../../core/contracts.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
@@ -26,11 +32,54 @@ import { collectProcess, runProcess } from '../../runtime/process-runner.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
+import { claudeActivity } from './activity.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { ChannelStore } from './channel-store.js';
 import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
+import { SESSION_GONE_REASON, selectClaudeRoute } from './route.js';
+import {
+  NO_TYPING_RECORD_REASON,
+  SESSION_SWITCHED_REASON,
+  TERMINAL_GONE_REASON,
+  TMUX_CONFIRM_POLL_MS,
+  TMUX_CONFIRM_TIMEOUT_MS,
+  TMUX_UNCONFIRMED_REASON,
+  assignTypedMessages,
+  createTypingQueue,
+  sameTypedText,
+  typeIntoTerminal,
+  typedMessagesAfter,
+  type GlossTerminal,
+  type TypedSend,
+} from './tmux-delivery.js';
+
+/** A typed delivery's evidence names the transcript record that showed it. */
+const TYPED_EVIDENCE_PREFIX = 'transcript:';
+/** A message this adapter typed into a session, and the transcript record that confirmed it once one did. */
+interface TypedInFlight {
+  send: TypedSend;
+  sourceId?: string | undefined;
+}
+/**
+ * Messages typed into one session, including pastes whose outcome is uncertain. The workflow's `earlier` is a
+ * snapshot taken when a send is claimed, so it can miss a send typed just before; this keeps identical texts
+ * confirming in typing order. Kept while any terminal send to the session is in progress (queued for its typing turn,
+ * typing, or waiting for confirmation) and for a grace period after the last one returns.
+ */
+interface SessionTyping {
+  typed: Map<string, TypedInFlight>;
+  /** Terminal sends to the session that have not returned yet. */
+  inProgress: number;
+  /** When the last of them returned, in epoch milliseconds. */
+  idleSince: number;
+}
+/**
+ * How long a session's typing memory outlives its last terminal send, in milliseconds. It only has to bridge the
+ * moment between a later send's claim (its snapshot) and its arrival at the adapter; generous on purpose.
+ */
+const TYPED_MEMORY_GRACE_MS = 30_000;
 
 /** Known local versions, retained for diagnostics; version is not a compatibility gate. */
 export const CLAUDE_PROTOCOL = {
@@ -49,18 +98,14 @@ interface Registry {
   version: string;
   messagingSocketPath?: string | undefined;
   status?: string | undefined;
+  waitingFor?: unknown;
   peerProtocol?: number | undefined;
   entrypoint?: string | undefined;
   startedAt?: number | undefined;
   updatedAt?: number | undefined;
   name?: unknown;
 }
-export function claudeActivity(status: unknown): CodingState {
-  if (status === 'idle') return 'idle';
-  if (status === 'approval-required' || status === 'waiting_for_approval')
-    return 'approval-required';
-  return 'working';
-}
+export { claudeActivity } from './activity.js';
 type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
 function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
   return createClaudeLiveness({
@@ -99,6 +144,10 @@ async function psOwnsPid(
     result.lines.some((line) => names.includes(basename(line.trim())))
   );
 }
+/** A session's messaging socket can be written: with own-child credentials, or directly on a Unix platform. */
+function canWritePeerSocket(hasCredentials: boolean): boolean {
+  return hasCredentials || process.platform === 'darwin' || process.platform === 'linux';
+}
 export interface ClaudeCredentials {
   sessionRef: string;
   projectId: string;
@@ -119,6 +168,8 @@ export interface ClaudeAdapterOptions extends AdapterOptions {
   transcriptPath?: (target: Target) => Promise<string>;
   /** Own-child credentials, supplied by trusted server bootstrap; never a browser API. */
   credentials?: (target: Target) => Promise<ClaudeCredentials | undefined>;
+  /** Trusted server hook: the tmux pane Gloss launched this session in, while it lives. Never from a browser. */
+  glossTerminal?: (sessionRef: string) => Promise<GlossTerminal | undefined>;
   /**
    * Pre-check before the socket-owner probe; only "gone" is decided here. Defaults to
    * `kill(pid, 0)`, or to "exists" when `runner` is injected, because an injected
@@ -131,6 +182,41 @@ function optional(value: unknown, type: 'number'): number | undefined;
 function optional(value: unknown, type: 'string' | 'number') {
   return typeof value === type ? value : undefined;
 }
+/** One `sessions/*.json` record; undefined when it is missing, too large or malformed. */
+async function readRegistry(path: string): Promise<Registry | undefined> {
+  try {
+    if ((await stat(path)).size > 65_536) return undefined;
+    const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
+    if (
+      typeof r?.sessionId === 'string' &&
+      typeof r.cwd === 'string' &&
+      typeof r.pid === 'number' &&
+      Number.isInteger(r.pid) &&
+      r.pid > 0 &&
+      typeof r.version === 'string' &&
+      // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
+      (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
+      (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
+    )
+      return {
+        sessionId: r.sessionId,
+        cwd: r.cwd,
+        pid: r.pid,
+        version: r.version,
+        messagingSocketPath: optional(r.messagingSocketPath, 'string'),
+        status: optional(r.status, 'string'),
+        waitingFor: r.waitingFor,
+        peerProtocol: optional(r.peerProtocol, 'number'),
+        entrypoint: optional(r.entrypoint, 'string'),
+        startedAt: optional(r.startedAt, 'number'),
+        updatedAt: optional(r.updatedAt, 'number'),
+        name: r.name,
+      };
+  } catch {
+    /* Unreadable metadata does not establish a target. */
+  }
+  return undefined;
+}
 async function registries(config: string): Promise<Registry[]> {
   let names: string[];
   try {
@@ -141,39 +227,18 @@ async function registries(config: string): Promise<Registry[]> {
   if (names.length > 10_000) throw new Error('Session metadata enumeration exceeds bound');
   const records: Registry[] = [];
   for (const name of names.filter((n) => n.endsWith('.json'))) {
-    try {
-      const path = join(config, 'sessions', name);
-      if ((await stat(path)).size > 65_536) continue;
-      const r = recordOf(JSON.parse(await readFile(path, 'utf8')));
-      if (
-        typeof r?.sessionId === 'string' &&
-        typeof r.cwd === 'string' &&
-        typeof r.pid === 'number' &&
-        Number.isInteger(r.pid) &&
-        r.pid > 0 &&
-        typeof r.version === 'string' &&
-        // Preserve legacy missing fields without turning malformed values into discovery fallbacks.
-        (!('entrypoint' in r) || typeof r.entrypoint === 'string') &&
-        (!('messagingSocketPath' in r) || typeof r.messagingSocketPath === 'string')
-      )
-        records.push({
-          sessionId: r.sessionId,
-          cwd: r.cwd,
-          pid: r.pid,
-          version: r.version,
-          messagingSocketPath: optional(r.messagingSocketPath, 'string'),
-          status: optional(r.status, 'string'),
-          peerProtocol: optional(r.peerProtocol, 'number'),
-          entrypoint: optional(r.entrypoint, 'string'),
-          startedAt: optional(r.startedAt, 'number'),
-          updatedAt: optional(r.updatedAt, 'number'),
-          name: r.name,
-        });
-    } catch {
-      /* Unreadable metadata does not establish a target. */
-    }
+    const record = await readRegistry(join(config, 'sessions', name));
+    if (record) records.push(record);
   }
   return records;
+}
+/**
+ * Whether the process `pid` runs session `sessionRef` now, by Claude's own record for it, `sessions/<pid>.json`.
+ * `/resume` and `/clear` switch sessions inside the same process: the pid stays and the record names the new session.
+ */
+async function pidRunsSession(config: string, pid: number, sessionRef: string): Promise<boolean> {
+  const record = await readRegistry(join(config, 'sessions', `${pid}.json`));
+  return record?.pid === pid && record.sessionId === sessionRef;
 }
 async function locateTranscript(config: string, id: string): Promise<string> {
   const root = join(config, 'projects');
@@ -241,7 +306,7 @@ export async function discoverOpenClaude(
         continue;
       }
       const target: Target = { agent: 'claude', sessionRef: record.sessionId, projectId };
-      const activity = claudeActivity(record.status);
+      const activity = claudeActivity(record.status, record.waitingFor);
       const sessionTitle = normalizeSessionTitle(record.name);
       result.candidates.push({
         target,
@@ -350,6 +415,38 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
     ...(deliveryId ? { delivery: deliveryId } : {}),
   };
 }
+/**
+ * What can confirm a message typed into Gloss's terminal: the user records the conversation shows, and, from Claude
+ * 2.1.302 (tests/fixtures/tmux-screens/claude-queued-tool-2.1.302.jsonl), a prompt a person typed while Claude ran a
+ * tool call. Claude folds that prompt into the running turn as a `queued_command` attachment and writes no user
+ * record for it. Only terminal confirmation reads this; the conversation view reads `parseClaudeRecord`.
+ */
+export function parseTypedEvidence(record: JsonRecord, offset: number, sessionRef: string): Parsed {
+  const parsed = parseClaudeRecord(record, offset, sessionRef);
+  if (record.type !== 'attachment' || parsed.channelSeen) return parsed;
+  const attachment = recordOf(record.attachment);
+  const prompt = attachment?.prompt;
+  if (
+    attachment?.type !== 'queued_command' ||
+    recordOf(attachment.origin)?.kind !== 'human' ||
+    typeof prompt !== 'string' ||
+    // A channel message's wrapper is never a person's typing, whatever origin the record names.
+    CHANNEL_REQUEST_MARKER.test(prompt) ||
+    record.sessionId !== sessionRef ||
+    typeof record.uuid !== 'string'
+  )
+    return parsed;
+  return {
+    message: {
+      sourceId: record.uuid,
+      revision: offset + 1,
+      role: 'user',
+      text: prompt,
+      complete: true,
+      ...(typeof record.timestamp === 'string' ? { timestamp: record.timestamp } : {}),
+    },
+  };
+}
 export function claudeMessage(text: string, attachments: Attachment[] = []): string {
   if (!attachments.length) return text;
   if (attachments.every(isFileReference)) return `${text}\n\n${attachmentManifest(attachments)}`;
@@ -395,6 +492,17 @@ async function socketWrite(
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAdapter {
   const config = claudeConfigDir(options.configDir);
   const liveness = claudeLiveness(options);
+  /** Shared by every connection to a session, so two sends never type into the same pane at once. */
+  const typeInTurn = createTypingQueue();
+  const typingBySession = new Map<string, SessionTyping>();
+  const now = () => options.clock?.now?.() ?? Date.now();
+  /** The session's typing memory, dropping any session idle past the grace period. */
+  const typingMemory = (sessionRef: string): SessionTyping | undefined => {
+    for (const [ref, session] of typingBySession)
+      if (!session.inProgress && now() - session.idleSince > TYPED_MEMORY_GRACE_MS)
+        typingBySession.delete(ref);
+    return typingBySession.get(sessionRef);
+  };
   async function exact(target: Target): Promise<Registry> {
     validateTarget(target, 'claude');
     const project = await projectIdentity(target.projectId);
@@ -466,6 +574,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         (record, offset) => parseClaudeRecord(record, offset, target.sessionRef),
         options.pageSize,
       );
+      /** Reads the transcript for terminal confirmation only, where a queued prompt also counts. */
+      const parseTyped = (record: JsonRecord, offset: number) =>
+        parseTypedEvidence(record, offset, target.sessionRef);
       const stateDir = options.stateDir ?? join(homedir(), '.language-assistant');
       const channelRegistry =
         options.channelRegistry ??
@@ -610,6 +721,185 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       };
+      /** Claude's record for the pane's process still names this session; `/resume` and `/clear` keep the pid. */
+      const paneRunsSession = (terminal: GlossTerminal) =>
+        pidRunsSession(config, terminal.panePid, target.sessionRef);
+      /** Gloss's own pane for this session, and whether the process in it still runs this session. */
+      const glossPane = async (current: Registry) => {
+        const terminal = await options.glossTerminal?.(target.sessionRef).catch(() => undefined);
+        if (!terminal) return undefined;
+        return {
+          terminal,
+          runsSession: terminal.panePid === current.pid && (await paneRunsSession(terminal)),
+        };
+      };
+      const typedSend = (delivery: Delivery): TypedSend | undefined =>
+        delivery.transport === 'tmux' && delivery.nativeAfterRevision !== undefined
+          ? {
+              id: delivery.id,
+              body: claudeMessage(delivery.englishText, delivery.attachments),
+              after: delivery.nativeAfterRevision,
+            }
+          : undefined;
+      /**
+       * Other typed sends known for this session: the workflow's snapshot first (claimed before `send`), then this
+       * adapter's memory in typing order. `precedes` marks the ones typed before `send`, which take records first.
+       */
+      const otherTyped = (send: TypedSend, earlier: readonly Delivery[]) => {
+        const entries = new Map<string, TypedInFlight & { awaiting: boolean; precedes: boolean }>();
+        for (const delivery of earlier) {
+          const typed = typedSend(delivery);
+          if (!typed || typed.id === send.id) continue;
+          const sourceId =
+            delivery.state === 'sent' && delivery.nativeMessageId?.startsWith(TYPED_EVIDENCE_PREFIX)
+              ? delivery.nativeMessageId.slice(TYPED_EVIDENCE_PREFIX.length)
+              : undefined;
+          entries.set(typed.id, {
+            send: typed,
+            sourceId,
+            awaiting: isAwaitingEvidence(delivery),
+            precedes: true,
+          });
+        }
+        const remembered = [...(typingMemory(target.sessionRef)?.typed.values() ?? [])];
+        const position = remembered.findIndex((entry) => entry.send.id === send.id);
+        remembered.forEach((entry, index) => {
+          if (entry.send.id === send.id) return;
+          const known = entries.get(entry.send.id);
+          // The snapshot decides for a delivery it describes; memory only adds a confirmation it has not seen yet.
+          if (known) {
+            if (!known.sourceId && entry.sourceId)
+              entries.set(entry.send.id, { ...known, sourceId: entry.sourceId, awaiting: false });
+            return;
+          }
+          // Without `send` in memory (it settled earlier), only a strictly earlier paste can come before it.
+          const precedes = position >= 0 ? index < position : entry.send.after < send.after;
+          entries.set(entry.send.id, { ...entry, awaiting: !entry.sourceId, precedes });
+        });
+        return [...entries.values()];
+      };
+      /** The transcript record confirming `send`: earlier identical sends still pending take records first. */
+      const confirmTyped = async (
+        send: TypedSend,
+        earlier: readonly Delivery[],
+      ): Promise<string | undefined> => {
+        const identical = otherTyped(send, earlier).filter((entry) =>
+          sameTypedText(entry.send.body, send.body),
+        );
+        const taken = new Set(identical.flatMap(({ sourceId }) => (sourceId ? [sourceId] : [])));
+        const sends = [
+          ...identical
+            .filter((entry) => entry.precedes && entry.awaiting)
+            .map((entry) => entry.send),
+          send,
+        ];
+        const messages = await typedMessagesAfter(
+          (cursor) => transcript.history(cursor, parseTyped),
+          Math.min(...sends.map((item) => item.after)),
+        );
+        return assignTypedMessages(sends, messages, taken).get(send.id);
+      };
+      /** Keeps the session's memory while this send is in progress, from before it queues for its turn until it returns. */
+      const beginTerminalSend = (): SessionTyping => {
+        const session = typingMemory(target.sessionRef) ?? {
+          typed: new Map(),
+          inProgress: 0,
+          idleSince: 0,
+        };
+        session.inProgress += 1;
+        typingBySession.set(target.sessionRef, session);
+        return session;
+      };
+      const endTerminalSend = (session: SessionTyping) => {
+        session.inProgress -= 1;
+        if (!session.inProgress) session.idleSince = now();
+      };
+      /** Ends the confirmation wait when the connection detaches. */
+      const confirmationStop = new AbortController();
+      const pause = (ms: number) =>
+        (options.clock
+          ? options.clock.sleep(ms, confirmationStop.signal)
+          : delay(ms, undefined, { signal: confirmationStop.signal })
+        ).catch(() => undefined);
+      /**
+       * Spec 2.2-2.3: type once into Gloss's pane, then wait up to 30 s for the transcript to show it. The record and
+       * the screen are read inside the session's typing turn, after any earlier message's Enter; the wait is not.
+       */
+      const sendThroughTerminal = async (
+        requestId: string,
+        text: string,
+        attachments: Attachment[],
+        sendContext: SendContext,
+      ) => {
+        const { onTyping } = sendContext;
+        if (!onTyping) return { state: 'failed' as const, reason: NO_TYPING_RECORD_REASON };
+        const session = beginTerminalSend();
+        try {
+          return await typeAndConfirm(session, requestId, claudeMessage(text, attachments), {
+            onTyping,
+            earlier: sendContext.earlier ?? [],
+          });
+        } finally {
+          endTerminalSend(session);
+        }
+      };
+      const typeAndConfirm = async (
+        session: SessionTyping,
+        requestId: string,
+        body: string,
+        {
+          onTyping,
+          earlier,
+        }: { onTyping: NonNullable<SendContext['onTyping']>; earlier: readonly Delivery[] },
+      ) => {
+        const typed = await typeInTurn(target.sessionRef, async () => {
+          const current = await exact(target);
+          const pane = await glossPane(current);
+          if (!pane) return { state: 'failed' as const, reason: TERMINAL_GONE_REASON };
+          if (!pane.runsSession)
+            return { state: 'failed' as const, reason: SESSION_SWITCHED_REASON };
+          const { terminal } = pane;
+          const result = await typeIntoTerminal({
+            terminal,
+            requestId,
+            body,
+            session: current,
+            paneRunsSession: () => paneRunsSession(terminal),
+            transcriptSize: async () => (await stat(path)).size,
+            onTyping,
+            clock: { now, sleep: pause },
+          });
+          // Registered inside the turn, so the next send's confirmation already sees this one. An uncertain paste may
+          // still reach Claude, so it keeps its place in typing order and can take its record from a later send.
+          if (result.state === 'typed' || result.state === 'unconfirmed')
+            session.typed.set(requestId, {
+              send: { id: requestId, body, after: result.nativeAfterRevision },
+            });
+          return result;
+        });
+        if (typed.state !== 'typed') return typed;
+        const send = { id: requestId, body, after: typed.nativeAfterRevision };
+        const deadline = now() + TMUX_CONFIRM_TIMEOUT_MS;
+        for (;;) {
+          const sourceId = await confirmTyped(send, earlier).catch(() => undefined);
+          if (sourceId) {
+            const entry = session.typed.get(requestId);
+            if (entry) entry.sourceId = sourceId;
+            return {
+              state: 'sent' as const,
+              nativeAfterRevision: send.after,
+              nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId,
+            };
+          }
+          if (now() >= deadline || confirmationStop.signal.aborted) break;
+          await pause(TMUX_CONFIRM_POLL_MS);
+        }
+        return {
+          state: 'unconfirmed' as const,
+          reason: TMUX_UNCONFIRMED_REASON,
+          nativeAfterRevision: send.after,
+        };
+      };
       const status = async (): Promise<CodingState> => {
         const current = await exact(target);
         if (
@@ -621,7 +911,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           ? await options.observeLive(target)
           : (await liveClaude(current, liveness, options.runner)) === 'alive';
         if (!live) return 'disconnected';
-        return claudeActivity(current.status);
+        return claudeActivity(current.status, current.waitingFor);
       };
       // A send must not rely on a cached answer: the session may have closed inside the window.
       const beforeSend = async (): Promise<string | undefined> => {
@@ -649,14 +939,14 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           sendWhileBusy: false,
           channelSendWhileBusy: true,
           peerSendWhileBusy: true,
+          tmuxSendWhileBusy: true,
           acknowledgement: 'accepted',
         },
         async dispatch(requestId, text, attachments = [], sendContext) {
-          if (
-            sendContext?.transport !== undefined &&
-            !['channel', 'peer'].includes(sendContext.transport)
-          )
+          if (sendContext?.transport !== undefined && !isDeliveryTransport(sendContext.transport))
             return { state: 'failed', reason: 'Invalid Claude transport' };
+          if (sendContext?.transport === 'tmux')
+            return sendThroughTerminal(requestId, text, attachments, sendContext);
           if (sendContext?.transport !== 'peer') {
             if (
               !context?.panelSessionId ||
@@ -730,10 +1020,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
               state: 'failed',
               reason: 'Claude session credentials do not match; instruction preserved',
             };
-          if (
-            !registry.messagingSocketPath ||
-            (!credential && process.platform !== 'darwin' && process.platform !== 'linux')
-          )
+          if (!registry.messagingSocketPath || !canWritePeerSocket(!!credential))
             return {
               state: 'failed',
               reason: 'Claude live messaging connection unavailable; instruction preserved',
@@ -758,13 +1045,19 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       });
-      connection.reconcileDelivery = async (delivery) => {
+      connection.reconcileDelivery = async (delivery, earlier) => {
         if (
           delivery.target.agent !== target.agent ||
           delivery.target.sessionRef !== target.sessionRef ||
           delivery.target.projectId !== target.projectId
         )
           return false;
+        if (delivery.transport === 'tmux') {
+          const send = typedSend(delivery);
+          if (!send) return false;
+          const sourceId = await confirmTyped(send, earlier ?? []);
+          return sourceId ? { nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId } : false;
+        }
         if (delivery.transport === 'channel') {
           if (!context?.panelSessionId) return false;
           const reader = ledger();
@@ -804,8 +1097,23 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         } while (cursor && matches < 2);
         return matches === 1;
       };
+      connection.deliveryRoute = async (): Promise<DeliveryRoute> => {
+        const current = await exact(target).catch(() => undefined);
+        if (!current) return { transport: null, reason: SESSION_GONE_REASON };
+        const channel = await channelRegistry.resolveChannel(target).then(
+          (record) => !!record,
+          () => false,
+        );
+        return selectClaudeRoute({
+          entrypoint: current.entrypoint,
+          glossTerminal: !!(await glossPane(current))?.runsSession,
+          channel: channel && !!context?.panelSessionId,
+          peer: !!current.messagingSocketPath && canWritePeerSocket(!!options.credentials),
+        });
+      };
       const detach = connection.detach.bind(connection);
       connection.detach = async () => {
+        confirmationStop.abort();
         await detach();
         ownedLedger?.close();
         ownedLedger = undefined;

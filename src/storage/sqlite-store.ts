@@ -15,6 +15,7 @@ import type {
   Target,
   TranslationKey,
 } from '../core/contracts.js';
+import { CHECKING_TERMINAL_REASON, NOT_TYPED_AT_RESTART_REASON } from '../core/contracts.js';
 import {
   clampLayoutSize,
   defaultWorkspace,
@@ -30,7 +31,7 @@ import { MIGRATIONS } from './migrations.js';
 import { MAX_FILE_REVIEW_CACHE_ROWS } from '../core/content-policy.js';
 import { fileReviewCacheKey, type FileReviewKey } from '../core/file-review-contracts.js';
 import { summaryCacheKey, type SummaryKey } from '../core/summary-contracts.js';
-import { orderAgentMessages } from '../core/contracts.js';
+import { isDeliveryTransport, orderAgentMessages } from '../core/contracts.js';
 import type { SeenStore } from '../core/session-catalog.js';
 import {
   INITIAL_LANGUAGE_DEFAULTS,
@@ -711,9 +712,7 @@ export class SqliteStore
         target: parse<Target>(item.target_json),
         englishText: String(item.english_text),
         state: String(item.state) as Delivery['state'],
-        ...(item.transport === 'channel' || item.transport === 'peer'
-          ? { transport: item.transport }
-          : {}),
+        ...(isDeliveryTransport(item.transport) ? { transport: item.transport } : {}),
         ...(typeof item.channel_generation === 'string'
           ? { channelGeneration: item.channel_generation }
           : {}),
@@ -995,9 +994,7 @@ export class SqliteStore
       target: parse<Target>(item.target_json),
       englishText: String(item.english_text),
       state: String(item.state) as Delivery['state'],
-      ...(item.transport === 'channel' || item.transport === 'peer'
-        ? { transport: item.transport }
-        : {}),
+      ...(isDeliveryTransport(item.transport) ? { transport: item.transport } : {}),
       ...(typeof item.channel_generation === 'string'
         ? { channelGeneration: item.channel_generation }
         : {}),
@@ -1018,7 +1015,17 @@ export class SqliteStore
   }
 
   recoverInFlightDeliveries(): number {
-    const result = this.database
+    // A terminal send still showing the check reason never reached typing-started, so nothing was typed; `held` rows
+    // come only from pre-release builds of plan 2 and were never typed either.
+    const notTyped = this.database
+      .prepare(
+        `
+      UPDATE deliveries SET state = 'failed', reason = ?
+      WHERE state = 'held' OR (state = 'sending' AND transport = 'tmux' AND reason = ?)
+    `,
+      )
+      .run(NOT_TYPED_AT_RESTART_REASON, CHECKING_TERMINAL_REASON);
+    const interrupted = this.database
       .prepare(
         `
       UPDATE deliveries SET state = 'unconfirmed',
@@ -1027,7 +1034,7 @@ export class SqliteStore
     `,
       )
       .run();
-    return Number(result.changes);
+    return Number(notTyped.changes) + Number(interrupted.changes);
   }
 
   getTranslation(key: TranslationKey): string | undefined {
