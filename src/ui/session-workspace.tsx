@@ -554,6 +554,13 @@ export function SessionWorkspace({
   const [filesOpen, setFilesOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const filesToggle = useRef<HTMLButtonElement>(null);
+  const filesSideToggle = useRef<HTMLButtonElement>(null);
+  const refocusFilesSide = useRef(false);
+  useLayoutEffect(() => {
+    if (!refocusFilesSide.current) return;
+    refocusFilesSide.current = false;
+    filesSideToggle.current?.focus();
+  }, [preferences.filesSide]);
   // Focus returns here when the popup closes: the column row, the composer for @-mentions, or the link.
   const filesOpener = useRef<HTMLElement | null>(null);
   const showPreview = () => {
@@ -1587,6 +1594,24 @@ export function SessionWorkspace({
       </form>
     </ReadingPane>
   );
+  // The column comes before or after the workspace in the DOM, so Tab order matches its side. Flipping the side
+  // remounts the column (the workspace itself never moves), so the side button is refocused after the flip.
+  const filesColumn = filesOpen && (
+    <FileBrowser
+      client={client}
+      revealedFile={revealedFile}
+      onPreview={(path) => openPreview(path)}
+      column={{
+        side: preferences.filesSide,
+        sideButton: filesSideToggle,
+        onSide: (filesSide) => {
+          refocusFilesSide.current = true;
+          setPreferences((value) => ({ ...value, filesSide }));
+        },
+        onClose: () => closeFiles(),
+      }}
+    />
+  );
   return (
     <FileLinkContext.Provider value={{ root: record.canonicalRoot, open: openFileLink }}>
       <RunCommandContext.Provider value={{ run: onRun }}>
@@ -1615,18 +1640,7 @@ export function SessionWorkspace({
           </div>
           <QuotaBreakDialog provider={record.target.agent} usage={usage?.[record.target.agent]} />
           <div className="file-workspace" data-side={preferences.filesSide}>
-            {filesOpen && (
-              <FileBrowser
-                client={client}
-                revealedFile={revealedFile}
-                onPreview={(path) => openPreview(path)}
-                column={{
-                  side: preferences.filesSide,
-                  onSide: (filesSide) => setPreferences((value) => ({ ...value, filesSide })),
-                  onClose: () => closeFiles(),
-                }}
-              />
-            )}
+            {preferences.filesSide === 'left' && filesColumn}
             <main className="app" dir="rtl">
               <MovableWorkspace
                 assistantMode={assistantMode}
@@ -1744,6 +1758,7 @@ export function SessionWorkspace({
                 clear={clearSelection}
               />
             </main>
+            {preferences.filesSide === 'right' && filesColumn}
           </div>
           {previewOpen && (
             <FilesWindow

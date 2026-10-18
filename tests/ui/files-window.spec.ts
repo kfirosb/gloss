@@ -126,12 +126,42 @@ test('the Files column moves to the right and stays there after reload', async (
     column.getByRole('button', { name: 'Move files to the left', exact: true }),
   ).toBeFocused();
 
+  // On the right the column follows the workspace in the DOM too, so Tab reaches the workspace first.
+  expect(
+    await page.evaluate(() => {
+      const main = document.querySelector('.file-workspace > main.app')!;
+      const aside = document.querySelector('.file-workspace > aside')!;
+      return Boolean(main.compareDocumentPosition(aside) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+  ).toBe(true);
+  const border = await column.evaluate((e) => {
+    const style = getComputedStyle(e);
+    return { left: style.borderLeftWidth, right: style.borderRightWidth };
+  });
+  expect(border).toEqual({ left: '1px', right: '0px' });
+
   await page.reload();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(page.locator('.file-workspace')).toHaveAttribute('data-side', 'right');
   expect((await column.boundingBox())!.x).toBeGreaterThan((await app.boundingBox())!.x);
+  // A popup opened on the right sits beside the column, and follows the agent area when the side flips.
+  await column.getByRole('button', { name: 'Preview a.md', exact: true }).click();
+  const win = page.getByRole('dialog', { name: 'Files' });
+  await expect(win.locator('.files-window-preview')).toContainText('content of a.md');
+  let box = (await column.boundingBox())!;
+  let popup = (await win.boundingBox())!;
+  expect(Math.round(popup.x + popup.width)).toBeLessThanOrEqual(Math.round(box.x));
   await column.getByRole('button', { name: 'Move files to the left', exact: true }).click();
   expect((await column.boundingBox())!.x).toBeLessThan((await app.boundingBox())!.x);
+  await expect(
+    column.getByRole('button', { name: 'Move files to the right', exact: true }),
+  ).toBeFocused();
+  box = (await column.boundingBox())!;
+  await expect
+    .poll(async () => Math.round((await win.boundingBox())!.x))
+    .toBeGreaterThanOrEqual(Math.round(box.x + box.width));
+  popup = (await win.boundingBox())!;
+  expect(popup.x + popup.width).toBeLessThanOrEqual(1280);
 });
 
 test('on a narrow viewport the column floats at its edge, under the popup', async ({ page }) => {

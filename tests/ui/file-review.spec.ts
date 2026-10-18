@@ -172,7 +172,9 @@ test('changing the session languages resets the open file review', async ({ page
   await expect(translateChip).toHaveCount(0);
   await replies.selectOption('he');
   await expect(page.getByRole('button', { name: 'Session languages HE→EN→HE' })).toBeVisible();
-  await page.keyboard.press('Escape');
+  // Escape from inside the popover closes it; the popover would otherwise sit over the popup's chips.
+  await replies.press('Escape');
+  await expect(languages).toHaveCount(0);
   await expect(translateChip).not.toHaveAttribute('data-saved', 'true');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
   await translateChip.click();

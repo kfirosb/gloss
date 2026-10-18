@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import type { BrowserEntry, FilePreview } from '../core/file-references.js';
 import { FileTree, FileRow } from './file-tree.js';
 import { FileReview } from './file-review.js';
@@ -11,6 +11,8 @@ export const FILE_DRAG_TYPE = 'application/x-session-file';
 /** The docked column's header controls; the Files window's own list has no header. */
 interface FileColumnControls {
   side: FilesSide;
+  /** The side toggle, so the workspace can refocus it after the flip remounts the column. */
+  sideButton?: Ref<HTMLButtonElement>;
   onSide(side: FilesSide): void;
   onClose(): void;
 }
@@ -129,13 +131,19 @@ export function FileBrowser({
     </aside>
   );
 }
-function FileColumnHeader({ side, onSide, onClose }: FileColumnControls) {
+function FileColumnHeader({ side, sideButton, onSide, onClose }: FileColumnControls) {
   const other: FilesSide = side === 'left' ? 'right' : 'left';
   const moveLabel = `Move files to the ${other}`;
   return (
     <div className="file-toolbar">
       <strong>Files</strong>
-      <button type="button" onClick={() => onSide(other)} aria-label={moveLabel} title={moveLabel}>
+      <button
+        ref={sideButton}
+        type="button"
+        onClick={() => onSide(other)}
+        aria-label={moveLabel}
+        title={moveLabel}
+      >
         ⇄
       </button>
       <button type="button" onClick={onClose} aria-label="Close files" title="Close files">

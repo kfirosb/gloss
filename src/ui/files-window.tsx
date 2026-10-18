@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from 'react';
 import type { LanguageSettings } from '../core/language-settings.js';
 import { FileBrowser, FilePreviewPane } from './file-browser.js';
 import {
@@ -16,11 +23,52 @@ import './files-window.css';
 const SPLIT_KEY_STEP = 20;
 
 const readViewport = (): Viewport => ({ width: innerWidth, height: innerHeight });
+const AGENT_AREA = '.session-column main.app';
 /** The agent area beside the Files column that the default window centres over; the whole viewport when absent. */
 const readAgentArea = (): ViewportArea | undefined => {
-  const rect = document.querySelector('.session-column main.app')?.getBoundingClientRect();
+  const rect = document.querySelector(AGENT_AREA)?.getBoundingClientRect();
   return rect && { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 };
+const sameArea = (a: ViewportArea | undefined, b: ViewportArea | undefined) =>
+  a === b ||
+  (!!a &&
+    !!b &&
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height);
+
+/**
+ * Tracks the agent area. It is re-read after mount, because the Files column may be added in the same commit
+ * that mounts the window; when the area resizes (the column opening or closing, the viewport or sidebar changing);
+ * and when the column is added, removed or moves to the other side, which can move the area without resizing it.
+ */
+function useAgentArea(): ViewportArea | undefined {
+  const [area, setArea] = useState(readAgentArea);
+  useLayoutEffect(() => {
+    const update = () => {
+      const next = readAgentArea();
+      setArea((current) => (sameArea(current, next) ? current : next));
+    };
+    update();
+    const element = document.querySelector(AGENT_AREA);
+    if (!element) return;
+    const resized = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    resized?.observe(element);
+    const moved = new MutationObserver(update);
+    if (element.parentElement)
+      moved.observe(element.parentElement, {
+        childList: true,
+        attributes: true,
+        attributeFilter: ['data-side'],
+      });
+    return () => {
+      resized?.disconnect();
+      moved.disconnect();
+    };
+  }, []);
+  return area;
+}
 const splitLimits = (paneWidth: number) => ({
   min: FILES_WINDOW_MIN.list,
   max: Math.max(FILES_WINDOW_MIN.list, paneWidth - FILES_WINDOW_MIN.preview),
@@ -103,13 +151,10 @@ export function FilesWindow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
-  const [agentArea, setAgentArea] = useState(readAgentArea);
+  const agentArea = useAgentArea();
   const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const resize = () => {
-      setViewport(readViewport());
-      setAgentArea(readAgentArea());
-    };
+    const resize = () => setViewport(readViewport());
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
   }, []);

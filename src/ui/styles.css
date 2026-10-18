@@ -1771,7 +1771,7 @@ pre {
   overflow-wrap: anywhere;
 }
 
-/* The docked Files column sits beside the workspace; data-side picks the edge. */
+/* The docked Files column sits beside the workspace, before or after it in the DOM per data-side. */
 .file-workspace {
   display: flex;
   min-width: 0;
@@ -1794,7 +1794,6 @@ pre {
   background: light-dark(#fff, var(--dk-bg-ffffff));
 }
 .file-workspace[data-side='right'] > .file-sidebar {
-  order: 1;
   border-right: 0;
   border-left: 1px solid light-dark(#cfd6e5, var(--dk-bg-cfd6e5));
 }

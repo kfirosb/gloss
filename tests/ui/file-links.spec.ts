@@ -34,10 +34,19 @@ for (const href of ['/project/docs/plan.md:12', 'docs/plan.md', 'file:///project
         },
       });
     });
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/#capability=test');
     await page.getByRole('link', { name: 'תוכנית המימוש מוכנה' }).click();
     const dialog = page.getByRole('dialog', { name: 'Files' });
     await expect(dialog.getByRole('heading', { name: 'Implementation plan' })).toBeVisible();
+    // The column opens in the same click as the popup; the popup's default still sits beside it.
+    const column = (await page
+      .locator('.file-workspace')
+      .getByRole('complementary', { name: 'Session files' })
+      .boundingBox())!;
+    expect(Math.round((await dialog.boundingBox())!.x)).toBeGreaterThanOrEqual(
+      Math.round(column.x + column.width),
+    );
     expect(context.pages()).toHaveLength(1);
     // The list stays beside the preview, so the revealed row is checked without closing anything.
     await expect(
