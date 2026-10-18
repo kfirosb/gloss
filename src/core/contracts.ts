@@ -194,6 +194,8 @@ export interface CodingConnection {
     nativeMessageId?: string;
     nativeAfterRevision?: number;
     channelGeneration?: string;
+    /** Nothing was typed because the terminal needs the user (spec 2.1): the UI shows the terminal. */
+    openTerminal?: true;
   }>;
   detach(): Promise<void>;
 }

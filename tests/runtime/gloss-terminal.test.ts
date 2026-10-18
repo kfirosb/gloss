@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTmux, locateTmux, type Tmux } from '../../src/runtime/tmux.js';
 import { glossTerminalFor } from '../../src/runtime/launch-services.js';
-import { UNSENT_TEXT_REASON, typeIntoTerminal } from '../../src/agents/claude/tmux-delivery.js';
+import { typeIntoTerminal } from '../../src/agents/claude/tmux-delivery.js';
 
 const available = await locateTmux().then(
   () => true,
@@ -22,8 +22,8 @@ afterEach(async () => {
   }
 });
 
-describe.skipIf(!available)('typing into a real tmux pane', () => {
-  it('holds while the input has a draft, then types the message exactly once after it is cleared', async () => {
+describe.skipIf(!available)('typing into a real tmux pane at Send', () => {
+  async function draftPane(draft?: string) {
     const home = await realpath(await mkdtemp(join(tmpdir(), 'la-type-')));
     const tmux = await createTmux({ stateDir: home });
     started.push({ tmux, home });
@@ -33,9 +33,9 @@ describe.skipIf(!available)('typing into a real tmux pane', () => {
       process.execPath,
       tui,
       log,
-      'draft',
+      ...(draft ? [draft] : []),
     ]);
-    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('❯ draft');
+    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('❯');
     const terminal = glossTerminalFor(tmux, { id: 'type', panePid });
     const typingStarted: number[] = [];
     const send = () =>
@@ -51,15 +51,22 @@ describe.skipIf(!available)('typing into a real tmux pane', () => {
           return undefined;
         },
       });
-    expect(await send()).toEqual({ state: 'held', reason: UNSENT_TEXT_REASON });
-    expect(typingStarted).toEqual([]);
-    await tmux.sendKeys('la-type', ['C-u']);
-    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).not.toContain('draft');
+    return { tmux, send, typingStarted, read: () => readFile(log, 'utf8').catch(() => '') };
+  }
+  const PASTED = '\u001b[200~line one\nline two\u001b[201~\r';
+  it('sets a draft aside with one Ctrl+S, then types the message exactly once', async () => {
+    const { tmux, send, typingStarted, read } = await draftPane('draft');
     expect(await send()).toEqual({ state: 'typed', nativeAfterRevision: 0 });
     expect(typingStarted).toEqual([0]);
-    const read = () => readFile(log, 'utf8').catch(() => '');
-    await expect
-      .poll(read, { timeout: 5000 })
-      .toBe('\u0015\u001b[200~line one\nline two\u001b[201~\r');
+    await expect.poll(read, { timeout: 5000 }).toBe('\u0013' + PASTED);
+    // The synthetic program puts the stash back on Enter, as Claude does.
+    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('❯ draft');
+  });
+  it('with a stash and an empty box, presses Ctrl+S twice so the stash goes back before typing', async () => {
+    const { tmux, send, read } = await draftPane('mine');
+    await tmux.pressStash('la-type');
+    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('› stashed');
+    expect(await send()).toEqual({ state: 'typed', nativeAfterRevision: 0 });
+    await expect.poll(read, { timeout: 5000 }).toBe('\u0013' + '\u0013\u0013' + PASTED);
   });
 });

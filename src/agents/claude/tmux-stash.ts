@@ -13,9 +13,9 @@ export type StashStep = 'wait' | 'press-again' | 'paste';
  */
 export function nextStashStep(start: StashStart, presses: 1 | 2, now: ReadableWindow): StashStep {
   // Stash and an empty box: the press pops the stash into the box. Until the marker goes, the screen still looks like
-  // it did before the press, so only its disappearance shows Claude handled it.
+  // it did before the press, so only its disappearance shows Claude handled it; a real pop always fills the box.
   if (presses === 1 && start.stashed && start.emptyAtPrompt)
-    return now.stashed ? 'wait' : 'press-again';
+    return !now.stashed && !now.emptyAtPrompt ? 'press-again' : 'wait';
   if (!now.emptyAtPrompt) return 'wait';
   if (now.stashed) return 'paste';
   // Without the marker only an empty box with no stash may look unchanged: Ctrl+S on it does nothing.

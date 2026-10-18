@@ -20,11 +20,11 @@ import {
   TERMINAL_READ_REASON,
   TYPING_UNCERTAIN_REASON,
   UNKNOWN_VERSION_REASON,
+  KEY_SETTLE_MIN_MS,
+  KEYS_SETTLE_MS,
   UNSAFE_TEXT_REASON,
-  UNSENT_TEXT_REASON,
   assignTypedMessages,
   checkAtSend,
-  checkTerminal,
   createTypingQueue,
   pasteBufferName,
   sameTypedText,
@@ -34,6 +34,11 @@ import {
   type TerminalFacts,
   type TypingClock,
 } from '../../src/agents/claude/tmux-delivery.js';
+import {
+  INPUT_NOT_READY_REASON,
+  INPUT_UNREADABLE_REASON,
+  STASHED_TEXT_NOTE,
+} from '../../src/agents/claude/tmux-stash.js';
 import {
   CAPTURED,
   CAPTURED_LONG,
@@ -155,78 +160,9 @@ describe('check at Send', () => {
   });
 });
 
-describe.each(FIXTURE_VERSIONS)('terminal checks on captured Claude %s screens', (version) => {
-  it('is ready on an empty input', async () => {
-    expect(await checkTerminal(fixtureTerminal(version, 'empty').terminal, idle(version))).toEqual({
-      ready: true,
-    });
-  });
-  it('is ready on the empty input below a message queued while Claude works', async () => {
-    expect(
-      await checkTerminal(fixtureTerminal(version, 'working-queued').terminal, {
-        status: 'busy',
-        version,
-      }),
-    ).toEqual({ ready: true });
-  });
-  it('holds typed text as unsent text', async () => {
-    expect(await checkTerminal(fixtureTerminal(version, 'typed').terminal, idle(version))).toEqual({
-      ready: false,
-      reason: UNSENT_TEXT_REASON,
-    });
-  });
-  it.each(['multiline', 'pasted-chip', 'bash', 'working-typed'])('holds %s', async (state) => {
-    expect(
-      (await checkTerminal(fixtureTerminal(version, state).terminal, idle(version))).ready,
-    ).toBe(false);
-  });
-  it('holds the dialog and the permission prompt that Claude itself reported', async () => {
-    for (const state of ['dialog', 'permission'] as const)
-      expect(
-        await checkTerminal(fixtureTerminal(version, state).terminal, readRecord(version, state)),
-      ).toEqual({ ready: false, reason: DIALOG_OPEN_REASON });
-  });
-  it('holds the dialog and the permission prompt from the screen alone', async () => {
-    for (const state of ['dialog', 'permission'])
-      expect(
-        (await checkTerminal(fixtureTerminal(version, state).terminal, idle(version))).ready,
-      ).toBe(false);
-  });
-});
-
-describe('terminal checks', () => {
-  it('holds for a dialog named only in the record, a scrolled pane, and an unknown version', async () => {
-    const { terminal } = fixtureTerminal('2.1.301', 'empty');
-    expect(
-      await checkTerminal(terminal, {
-        status: 'busy',
-        waitingFor: 'dialog open',
-        version: '2.1.301',
-      }),
-    ).toEqual({ ready: false, reason: DIALOG_OPEN_REASON });
-    expect(
-      await checkTerminal(
-        fixtureTerminal('2.1.301', 'empty', { inMode: true }).terminal,
-        idle('2.1.301'),
-      ),
-    ).toEqual({ ready: false, reason: SCROLLED_REASON });
-    expect(await checkTerminal(terminal, idle('2.1.200'))).toEqual({
-      ready: false,
-      reason: UNKNOWN_VERSION_REASON,
-    });
-  });
-  it('holds when the box reads empty but the cursor is anywhere but right after the prompt', async () => {
-    for (const cursorShift of [1, -1]) {
-      const moved = fixtureTerminal('2.1.301', 'empty', { cursorShift });
-      expect(await checkTerminal(moved.terminal, idle('2.1.301'))).toEqual({
-        ready: false,
-        reason: UNSENT_TEXT_REASON,
-      });
-    }
-  });
-});
-
 describe('typing into the terminal', () => {
+  /** One window read before the press, two after it (the second shows the screen settled). */
+  const STASH_TURN = ['cursor', 'rows', 'key:C-s', 'cursor', 'rows', 'cursor', 'rows'];
   const send = (
     terminal: GlossTerminal,
     body: string,
@@ -247,7 +183,7 @@ describe('typing into the terminal', () => {
       onTyping,
       clock,
     });
-  it('checks, loads the buffer, records typing-started, pastes, sees the paste and presses Enter, in that order', async () => {
+  it('checks, loads the buffer, stashes, records typing-started, pastes, sees the paste and presses Enter, in that order', async () => {
     const { terminal, log } = fixtureTerminal('2.1.301', 'empty');
     const typing: number[] = [];
     const result = await send(terminal, 'line one\nline two', (evidence) => {
@@ -259,6 +195,7 @@ describe('typing into the terminal', () => {
       'capture',
       'cursor',
       'load:gloss-delivery-1',
+      ...STASH_TURN,
       'typing',
       'paste:gloss-delivery-1',
       'capture',
@@ -282,7 +219,14 @@ describe('typing into the terminal', () => {
       'capture',
       'enter',
     ]);
-    expect(sleeps).toEqual([PASTE_SETTLE_POLL_MS, PASTE_SETTLE_POLL_MS, PASTE_SETTLE_POLL_MS]);
+    // The first two are the stash settle.
+    expect(sleeps).toEqual([
+      KEY_SETTLE_MIN_MS,
+      PASTE_SETTLE_POLL_MS,
+      PASTE_SETTLE_POLL_MS,
+      PASTE_SETTLE_POLL_MS,
+      PASTE_SETTLE_POLL_MS,
+    ]);
   });
   it('presses Enter once anyway when the paste never shows within the bound', async () => {
     const { terminal, log } = fixtureTerminal('2.1.301', 'empty', { pastedState: null });
@@ -291,7 +235,9 @@ describe('typing into the terminal', () => {
       state: 'typed',
       nativeAfterRevision: 1234,
     });
-    expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(PASTE_SETTLE_MS);
+    expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(
+      KEY_SETTLE_MIN_MS + PASTE_SETTLE_POLL_MS + PASTE_SETTLE_MS,
+    );
     expect(log.calls.filter((call) => call === 'enter')).toHaveLength(1);
     expect(log.calls.at(-1)).toBe('enter');
   });
@@ -326,11 +272,6 @@ describe('typing into the terminal', () => {
       expect(log.calls).toEqual(['capture', 'cursor']);
     }
   });
-  it('types nothing when the terminal is not clear', async () => {
-    const { terminal, log } = fixtureTerminal('2.1.301', 'typed');
-    expect(await send(terminal, 'hello')).toEqual({ state: 'held', reason: UNSENT_TEXT_REASON });
-    expect(log.calls).toEqual(['capture', 'cursor']);
-  });
   it.each([
     ['\u001b[201~rm -rf ~\r', UNSAFE_TEXT_REASON],
     ['a\u0007b', UNSAFE_TEXT_REASON],
@@ -363,11 +304,12 @@ describe('typing into the terminal', () => {
     const result = await send(terminal, 'hello', () => {
       throw new Error('disk full');
     });
-    expect(result).toEqual({ state: 'failed', reason: PASTE_PREPARE_REASON });
+    expect(result).toEqual({ state: 'failed', reason: PASTE_PREPARE_REASON, openTerminal: true });
     expect(log.calls).toEqual([
       'capture',
       'cursor',
       'load:gloss-delivery-1',
+      ...STASH_TURN,
       'delete:gloss-delivery-1',
     ]);
   });
@@ -408,9 +350,165 @@ describe('typing into the terminal', () => {
     expect(typed).toBe(false);
     expect(log.calls.some((call) => call.startsWith('paste:') || call === 'enter')).toBe(false);
   });
-  it('holds when the terminal cannot be read', async () => {
-    const { terminal } = fixtureTerminal('2.1.301', 'empty', { fail: 'capture' });
-    expect(await send(terminal, 'hello')).toEqual({ state: 'held', reason: TERMINAL_READ_REASON });
+  const keysAndTyping = (calls: readonly string[]) =>
+    calls.filter(
+      (c) => c === 'key:C-s' || c === 'typing' || c.startsWith('paste:') || c === 'enter',
+    );
+  it.each([
+    ['no stash, an empty box', 'stash-empty', ['stash-empty-after'], 1],
+    ['no stash, text', 'stash-typed', ['stash-stashed'], 1],
+    ['a stash and text, which replaces it', 'stash-stashed-typed', ['stash-replaced'], 1],
+    [
+      'a stash and an empty box, popped and stashed again',
+      'stash-replaced',
+      ['stash-popped', 'stash-restashed'],
+      2,
+    ],
+  ] as const)(
+    'with %s, presses Ctrl+S, checks the cursor, then types once',
+    async (_, state, afterStash, presses) => {
+      const { terminal, log } = fixtureTerminal('2.1.302', state, { afterStash });
+      const result = await send(terminal, 'hello', () => void log.calls.push('typing'));
+      expect(result).toEqual({ state: 'typed', nativeAfterRevision: 1234 });
+      expect(keysAndTyping(log.calls)).toEqual([
+        ...Array.from({ length: presses }, () => 'key:C-s'),
+        'typing',
+        'paste:gloss-delivery-1',
+        'enter',
+      ]);
+    },
+  );
+  it('does not take a press Claude has not drawn yet for its result', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-replaced', {
+      afterStash: ['stash-popped', 'stash-restashed'],
+      stashDrawnAfter: 3,
+    });
+    expect((await send(terminal, 'hello')).state).toBe('typed');
+    expect(log.calls.filter((c) => c === 'key:C-s')).toHaveLength(2);
+  });
+  it.each([
+    ['text Ctrl+S did not set aside', 'stash-typed', [], INPUT_NOT_READY_REASON, 1],
+    [
+      'a stash Ctrl+S did not bring back',
+      'stash-replaced',
+      [],
+      `${INPUT_NOT_READY_REASON}. ${STASHED_TEXT_NOTE}`,
+      1,
+    ],
+    [
+      'a popped stash Ctrl+S did not put back',
+      'stash-replaced',
+      ['stash-popped'],
+      INPUT_NOT_READY_REASON,
+      2,
+    ],
+  ] as const)(
+    'with %s, waits the bound, pastes nothing and opens the terminal',
+    async (_, state, afterStash, reason, presses) => {
+      const { terminal, log } = fixtureTerminal('2.1.302', state, { afterStash });
+      const { clock } = stepClock();
+      let typed = false;
+      const result = await send(
+        terminal,
+        'hello',
+        () => {
+          typed = true;
+        },
+        undefined,
+        { clock },
+      );
+      expect(result).toEqual({ state: 'failed', reason, openTerminal: true });
+      expect(typed).toBe(false);
+      expect(log.calls.filter((c) => c === 'key:C-s')).toHaveLength(presses);
+      expect(log.calls.some((c) => c.startsWith('paste:') || c === 'enter')).toBe(false);
+      expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+    },
+  );
+  it('stops waiting after the bound', async () => {
+    const { terminal } = fixtureTerminal('2.1.302', 'stash-typed');
+    const { clock, sleeps } = stepClock();
+    await send(terminal, 'hello', undefined, undefined, { clock });
+    expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(KEY_SETTLE_MIN_MS + KEYS_SETTLE_MS);
+  });
+  it('ends the wait after a Ctrl+S even when the clock stops', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed');
+    const stopped: TypingClock = { now: () => 0, sleep: async () => undefined };
+    expect(await send(terminal, 'hello', undefined, undefined, { clock: stopped })).toEqual({
+      state: 'failed',
+      reason: INPUT_NOT_READY_REASON,
+      openTerminal: true,
+    });
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+  });
+  it('pastes nothing when the box reads empty but the cursor is not right after the prompt', async () => {
+    for (const cursorShift of [1, -1]) {
+      const { terminal, log } = fixtureTerminal('2.1.301', 'empty', { cursorShift });
+      expect(await send(terminal, 'hello'), String(cursorShift)).toEqual({
+        state: 'failed',
+        reason: INPUT_NOT_READY_REASON,
+        openTerminal: true,
+      });
+      expect(log.calls.some((c) => c.startsWith('paste:') || c === 'enter')).toBe(false);
+    }
+  });
+  it('presses nothing when the input window cannot be read, and opens the terminal', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-empty', { fail: 'rows' });
+    expect(await send(terminal, 'hello')).toEqual({
+      state: 'failed',
+      reason: INPUT_UNREADABLE_REASON,
+      openTerminal: true,
+    });
+    expect(log.calls).not.toContain('key:C-s');
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+  });
+  it('pastes nothing when Ctrl+S cannot be pressed', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', { fail: 'stash' });
+    expect(await send(terminal, 'hello')).toMatchObject({ state: 'failed', openTerminal: true });
+    expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
+  });
+  it('types nothing when the pane switched to another session while Ctrl+S settled', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', {
+      afterStash: ['stash-stashed'],
+    });
+    let asked = 0;
+    let typed = false;
+    const result = await send(
+      terminal,
+      'hello',
+      () => {
+        typed = true;
+      },
+      undefined,
+      { paneRunsSession: async () => ++asked === 1 },
+    );
+    expect(result).toEqual({
+      state: 'failed',
+      reason: SESSION_SWITCHED_REASON,
+      openTerminal: true,
+    });
+    expect(typed).toBe(false);
+    expect(log.calls.filter((c) => c === 'key:C-s')).toHaveLength(1);
+    expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+  });
+  it('opens the terminal and touches nothing for a dialog, shell mode or an unreadable screen', async () => {
+    // The dialog screen alone may read as a dialog or as no input box; either opens the terminal.
+    for (const [state, options, reason] of [
+      ['dialog', {}, expect.any(String)],
+      ['bash', {}, OTHER_MODE_REASON],
+      ['empty', { fail: 'capture' }, TERMINAL_READ_REASON],
+    ] as const) {
+      const { terminal, log } = fixtureTerminal('2.1.301', state, options);
+      expect(await send(terminal, 'hello'), state).toEqual({
+        state: 'failed',
+        reason,
+        openTerminal: true,
+      });
+      expect(
+        log.calls.filter((c) => c !== 'capture' && c !== 'cursor'),
+        state,
+      ).toEqual([]);
+    }
   });
   it('names the paste buffer after the request', () => {
     expect(pasteBufferName('delivery-1')).toBe('gloss-delivery-1');

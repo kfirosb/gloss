@@ -2,7 +2,21 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../core/contracts.js';
 import { classifyScreen, markersFor } from '../../runtime/attention-markers.js';
 import { claudeActivity } from './activity.js';
-import { inputBoxRules, parseStyledScreen, readInputBox, screenText } from './tmux-screen.js';
+import {
+  inputBoxRules,
+  inputWindowRows,
+  parseStyledScreen,
+  readInputBox,
+  readInputWindow,
+  screenText,
+  type InputWindow,
+} from './tmux-screen.js';
+import {
+  INPUT_UNREADABLE_REASON,
+  nextStashStep,
+  notReadyReason,
+  type StashStart,
+} from './tmux-stash.js';
 
 export interface PaneCursor {
   x: number;
@@ -45,12 +59,18 @@ export const TMUX_CONFIRM_POLL_MS = 500;
 export const PASTE_SETTLE_MS = 2_000;
 /** How often the screen is read meanwhile, in milliseconds. */
 export const PASTE_SETTLE_POLL_MS = 50;
+/**
+ * At least this long after a Ctrl+S before Gloss reads Claude's redraw, in milliseconds: twice the slowest redraw Task 1
+ * measured (45 ms on 2.1.296 and 2.1.302), at least 100, rounded up to 50.
+ */
+export const KEY_SETTLE_MIN_MS = 100;
+/** How long Gloss waits after a Ctrl+S for the input to settle in the expected state, in milliseconds. */
+export const KEYS_SETTLE_MS = 2_000;
 
-export const UNSENT_TEXT_REASON = 'There is unsent text in the terminal';
 export const NO_INPUT_BOX_REASON = 'The terminal isn’t showing Claude’s input box';
 export const SCROLLED_REASON = 'The terminal is scrolled back; return it to the prompt';
 export const UNKNOWN_VERSION_REASON = 'Gloss can’t read this Claude version’s terminal';
-export const TERMINAL_READ_REASON = 'Gloss couldn’t read the terminal; it will check again';
+export const TERMINAL_READ_REASON = 'Gloss couldn’t read the terminal';
 export const UNSAFE_TEXT_REASON =
   'The message contains control characters a terminal would act on; nothing was typed';
 export const COMMAND_PREFIX_REASON =
@@ -73,31 +93,6 @@ const COMMAND_PREFIX = /^\s*[!/#]/;
 export const pasteBufferName = (requestId: string) => 'gloss-' + requestId;
 
 export type TerminalCheck = { ready: true } | { ready: false; reason: string };
-/** Spec 2.1: the session record, the screen, then an empty input by colour and by cursor. Only ever holds. */
-export async function checkTerminal(
-  terminal: GlossTerminal,
-  session: TerminalSession,
-): Promise<TerminalCheck> {
-  const activity = claudeActivity(session.status, session.waitingFor);
-  if (activity === 'dialog-open' || activity === 'approval-required')
-    return { ready: false, reason: DIALOG_OPEN_REASON };
-  const markers = markersFor('claude', session.version);
-  if (!markers) return { ready: false, reason: UNKNOWN_VERSION_REASON };
-  const screen = await terminal.capture();
-  const cursor = await terminal.cursor();
-  if (cursor.inMode) return { ready: false, reason: SCROLLED_REASON };
-  const lines = parseStyledScreen(screen);
-  if (!lines) return { ready: false, reason: NO_INPUT_BOX_REASON };
-  if (classifyScreen(markers, screenText(lines)) !== 'none')
-    return { ready: false, reason: DIALOG_OPEN_REASON };
-  const box = readInputBox(lines);
-  if (box.state === 'missing') return { ready: false, reason: NO_INPUT_BOX_REASON };
-  // The cursor check is required, not a refinement: dim text at the caret reads as Claude's placeholder by style
-  // alone, and only a cursor that sits right after the prompt shows that nothing was typed.
-  if (box.state !== 'empty' || cursor.x !== box.column || cursor.y !== box.row)
-    return { ready: false, reason: UNSENT_TEXT_REASON };
-  return { ready: true };
-}
 
 /** What Gloss reads at Send for step 1. A screen or cursor that could not be read is undefined. */
 export interface TerminalFacts {
@@ -138,7 +133,11 @@ export interface TypingClock {
   sleep(ms: number): Promise<void>;
 }
 const realTime: TypingClock = { now: () => Date.now(), sleep: (ms) => delay(ms) };
-/** Claude's input box shows something: the pasted text, or the chip for a long paste. A failed read shows nothing. */
+/**
+ * Claude's input box shows something: the pasted text, or the chip for a long paste. A failed read shows nothing.
+ * `other-mode` counts as not shown: the cursor check put the cursor after an empty `❯` and the body never starts with
+ * `!`, so only a screen Gloss does not recognise reads that way, and Enter after the bound is the existing fallback.
+ */
 async function pasteShown(terminal: GlossTerminal): Promise<boolean> {
   try {
     const lines = parseStyledScreen(await terminal.capture());
@@ -158,16 +157,101 @@ async function waitForPaste(terminal: GlossTerminal, clock: TypingClock): Promis
   }
 }
 
+/** The screen and the cursor for step 1; both undefined when either cannot be read. */
+async function readTerminal(
+  terminal: GlossTerminal,
+): Promise<{ screen: string | undefined; cursor: PaneCursor | undefined }> {
+  try {
+    const screen = await terminal.capture();
+    return { screen, cursor: await terminal.cursor() };
+  } catch {
+    return { screen: undefined, cursor: undefined };
+  }
+}
+/** One read of the rows around the cursor; `key` (cursor and text) tells two reads apart. Undefined when it fails. */
+async function readWindowOf(
+  terminal: GlossTerminal,
+): Promise<{ key: string; window: InputWindow } | undefined> {
+  try {
+    const cursor = await terminal.cursor();
+    const { start, end } = inputWindowRows(cursor.y);
+    const text = await terminal.captureRows(start, end);
+    const lines = cursor.inMode ? undefined : parseStyledScreen(text);
+    return {
+      key: `${cursor.x} ${cursor.y} ${cursor.inMode}\n${text}`,
+      window: lines ? readInputWindow(lines, cursor.y - start, cursor.x) : { readable: false },
+    };
+  } catch {
+    return undefined;
+  }
+}
+/**
+ * After a Ctrl+S: waits KEY_SETTLE_MIN_MS, then until two reads in a row are identical and show the step's expected
+ * state, bounded by KEYS_SETTLE_MS (a clock that stops advancing still ends it).
+ */
+async function settleAfterStash(
+  terminal: GlossTerminal,
+  clock: TypingClock,
+  start: StashStart,
+  presses: 1 | 2,
+): Promise<{ step: 'paste' | 'press-again' | 'timeout'; last: InputWindow | undefined }> {
+  await clock.sleep(KEY_SETTLE_MIN_MS);
+  const deadline = clock.now() + KEYS_SETTLE_MS;
+  const maxPolls = Math.ceil(KEYS_SETTLE_MS / PASTE_SETTLE_POLL_MS);
+  let previous: string | undefined;
+  for (let polls = 0; ; polls += 1) {
+    const read = await readWindowOf(terminal);
+    if (read?.window.readable && read.key === previous) {
+      const step = nextStashStep(start, presses, read.window);
+      if (step !== 'wait') return { step, last: read.window };
+    }
+    previous = read?.key;
+    if (clock.now() >= deadline || polls >= maxPolls)
+      return { step: 'timeout', last: read?.window };
+    await clock.sleep(PASTE_SETTLE_POLL_MS);
+  }
+}
+/**
+ * Spec 2.6: sets Claude's input aside with Ctrl+S (once, or twice when the first press brought an older stash back)
+ * and checks the cursor sits right after `❯` on an empty box. The window is read before any press: unreadable, nothing
+ * is pressed. Presses nothing else, and never more than twice.
+ */
+async function stashForSend(
+  terminal: GlossTerminal,
+  clock: TypingClock,
+): Promise<{ ready: true } | { ready: false; reason: string }> {
+  const before = await readWindowOf(terminal);
+  if (!before?.window.readable) return { ready: false, reason: INPUT_UNREADABLE_REASON };
+  const start: StashStart = {
+    stashed: before.window.stashed,
+    emptyAtPrompt: before.window.emptyAtPrompt,
+  };
+  let last: InputWindow | undefined = before.window;
+  for (const presses of [1, 2] as const) {
+    try {
+      await terminal.pressStash();
+    } catch {
+      return { ready: false, reason: notReadyReason(last) };
+    }
+    const settled = await settleAfterStash(terminal, clock, start, presses);
+    last = settled.last ?? last;
+    if (settled.step === 'paste') return { ready: true };
+    if (settled.step === 'timeout') break;
+  }
+  return { ready: false, reason: notReadyReason(last) };
+}
+
 export type TerminalSend =
-  | { state: 'held'; reason: string }
-  | { state: 'failed'; reason: string }
+  | { state: 'failed'; reason: string; openTerminal?: true }
   | { state: 'typed'; nativeAfterRevision: number }
   | { state: 'unconfirmed'; reason: string; nativeAfterRevision: number };
 /**
- * Types one message into Claude's input once the terminal is clear. `held` and `failed` mean nothing was typed.
- * `paneRunsSession` is asked again right before the buffer is loaded. `onTyping` runs after the buffer is ready and
- * before the paste; if it throws, nothing is typed. Enter follows once the paste shows. Windows line endings are
- * typed as line feeds; any other carriage return is refused like the other control characters.
+ * Types one message into Claude's input at Send (spec 2.1, 2.2, 2.6). `failed` means nothing of the message was
+ * typed; with `openTerminal` the terminal needs the user. `paneRunsSession` is asked before the buffer is loaded and
+ * again after the stash, which can take seconds. The stash runs after the buffer is ready; `onTyping` runs after the
+ * cursor check, right before the paste, and if it throws nothing is typed. Enter follows once the paste shows.
+ * Windows line endings are typed as line feeds; any other carriage return is refused like the other control
+ * characters.
  */
 export async function typeIntoTerminal(input: {
   terminal: GlossTerminal;
@@ -184,41 +268,46 @@ export async function typeIntoTerminal(input: {
   const body = input.body.replace(/\r\n/g, '\n');
   if (TERMINAL_CONTROL_CHARACTER.test(body)) return { state: 'failed', reason: UNSAFE_TEXT_REASON };
   if (COMMAND_PREFIX.test(body)) return { state: 'failed', reason: COMMAND_PREFIX_REASON };
-  let check: TerminalCheck;
-  try {
-    check = await checkTerminal(input.terminal, input.session);
-  } catch {
-    return { state: 'held', reason: TERMINAL_READ_REASON };
-  }
-  if (!check.ready) return { state: 'held', reason: check.reason };
+  const { terminal } = input;
+  const clock = input.clock ?? realTime;
+  const check = checkAtSend({ session: input.session, ...(await readTerminal(terminal)) });
+  if (!check.ready) return { state: 'failed', reason: check.reason, openTerminal: true };
+  const runsSession = () => input.paneRunsSession().catch(() => false);
   // `/resume` or `/clear` may have switched the pane to another session while the screen was read.
-  if (!(await input.paneRunsSession().catch(() => false)))
-    return { state: 'failed', reason: SESSION_SWITCHED_REASON };
+  if (!(await runsSession())) return { state: 'failed', reason: SESSION_SWITCHED_REASON };
   const buffer = pasteBufferName(input.requestId);
   // Best effort: the buffer holds only this message's text, and a leftover is never pasted by anything else.
-  const discard = () => input.terminal.deleteBuffer(buffer).catch(() => undefined);
+  const discard = () => terminal.deleteBuffer(buffer).catch(() => undefined);
   let nativeAfterRevision: number;
   try {
     nativeAfterRevision = await input.transcriptSize();
-    await input.terminal.loadBuffer(buffer, body);
+    await terminal.loadBuffer(buffer, body);
   } catch {
     await discard();
     return { state: 'failed', reason: PASTE_PREPARE_REASON };
   }
+  // From here Ctrl+S may have run, so the terminal can show a stash: every refusal shows it to the user.
+  const refuse = async (reason: string): Promise<TerminalSend> => {
+    await discard();
+    return { state: 'failed', reason, openTerminal: true };
+  };
+  const stash = await stashForSend(terminal, clock);
+  if (!stash.ready) return refuse(stash.reason);
+  if (!(await runsSession())) return refuse(SESSION_SWITCHED_REASON);
   try {
     input.onTyping({ nativeAfterRevision });
   } catch {
-    await discard();
-    return { state: 'failed', reason: PASTE_PREPARE_REASON };
+    return refuse(PASTE_PREPARE_REASON);
   }
   try {
-    await input.terminal.pasteBuffer(buffer);
-    await waitForPaste(input.terminal, input.clock ?? realTime);
-    await input.terminal.pressEnter();
+    await terminal.pasteBuffer(buffer);
+    await waitForPaste(terminal, clock);
+    await terminal.pressEnter();
   } catch {
     await discard();
     return { state: 'unconfirmed', reason: TYPING_UNCERTAIN_REASON, nativeAfterRevision };
   }
+  // Claude restores its stash into the box by itself; Gloss never presses Ctrl+S after the paste.
   return { state: 'typed', nativeAfterRevision };
 }
 

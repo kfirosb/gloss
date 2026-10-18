@@ -88,6 +88,10 @@ describe('stash steps on synthetic window readings', () => {
     expect(nextStashStep({ stashed: true, emptyAtPrompt: true }, 2, window(false, true))).toBe(
       'wait',
     );
+    // A pop always fills the box: an empty box without the marker after the first press is not one.
+    expect(nextStashStep({ stashed: true, emptyAtPrompt: true }, 1, window(false, true))).toBe(
+      'wait',
+    );
     expect(nextStashStep({ stashed: false, emptyAtPrompt: true }, 2, window(false, true))).toBe(
       'wait',
     );

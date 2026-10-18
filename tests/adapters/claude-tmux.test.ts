@@ -10,6 +10,7 @@ import {
   NO_TYPING_RECORD_REASON,
   SESSION_SWITCHED_REASON,
   TERMINAL_GONE_REASON,
+  TMUX_CONFIRM_POLL_MS,
   TMUX_UNCONFIRMED_REASON,
   TYPING_UNCERTAIN_REASON,
   type GlossTerminal,
@@ -71,15 +72,21 @@ const channelRecord = (h: Harness): ChannelRecord => ({
   channelStartedAt: 'start',
 });
 type Clock = NonNullable<ClaudeAdapterOptions['clock']>;
-/** Test time: each sleep moves the clock forward by its length, once `ready` lets it. */
+/**
+ * Test time: each sleep moves the clock forward by its length. A confirmation poll first waits until `ready` lets
+ * it; the shorter waits inside the typing turn (after Ctrl+S, for the paste) return at once. `sleeps` lists only
+ * the confirmation polls.
+ */
 function testClock(ready: (signal: AbortSignal) => Promise<void> = async () => {}) {
   let time = 0;
   const sleeps: number[] = [];
   const clock: Clock = {
     now: () => time,
     sleep: async (ms, signal) => {
-      sleeps.push(ms);
-      await ready(signal);
+      if (ms === TMUX_CONFIRM_POLL_MS) {
+        sleeps.push(ms);
+        await ready(signal);
+      }
       time += ms;
     },
   };
@@ -191,8 +198,9 @@ it('types into the terminal, reports typing-started first, and confirms by the t
   expect(result).toMatchObject({ state: 'sent', nativeAfterRevision: before });
   expect(result.nativeMessageId).toMatch(/^transcript:/);
   expect(typing).toEqual([before]);
+  expect(log.calls.indexOf('load:gloss-delivery-1')).toBeLessThan(log.calls.indexOf('key:C-s'));
   expect(log.calls.slice(-5)).toEqual([
-    'load:gloss-delivery-1',
+    'rows',
     'typing',
     'paste:gloss-delivery-1',
     'capture',
@@ -241,6 +249,13 @@ it('types one message at a time into the same terminal, checking it again before
     'capture',
     'cursor',
     'load:gloss-delivery-1',
+    'cursor',
+    'rows',
+    'key:C-s',
+    'cursor',
+    'rows',
+    'cursor',
+    'rows',
     'typing',
     'paste:gloss-delivery-1',
     'capture',
@@ -248,6 +263,13 @@ it('types one message at a time into the same terminal, checking it again before
     'capture',
     'cursor',
     'load:gloss-delivery-2',
+    'cursor',
+    'rows',
+    'key:C-s',
+    'cursor',
+    'rows',
+    'cursor',
+    'rows',
     'typing',
     'paste:gloss-delivery-2',
     'capture',
@@ -383,10 +405,15 @@ it('measures the confirmation wait in elapsed time, not in polls', async () => {
   const { terminal } = fixtureTerminal('2.1.301', 'empty');
   let time = 0;
   let sleeps = 0;
-  // Each poll interval here takes ten seconds, as after a laptop sleep or a slow transcript read.
+  // Each confirmation poll interval here takes ten seconds, as after a laptop sleep or a slow transcript read; the
+  // short waits inside the typing turn take their own length.
   const slow: Clock = {
     now: () => time,
-    sleep: async () => {
+    sleep: async (ms) => {
+      if (ms !== TMUX_CONFIRM_POLL_MS) {
+        time += ms;
+        return;
+      }
       sleeps += 1;
       time += 10_000;
     },
@@ -418,6 +445,19 @@ it('ends the confirmation wait as unconfirmed when the connection detaches', asy
   await connection.detach();
   expect(await result).toMatchObject({ state: 'unconfirmed', reason: TMUX_UNCONFIRMED_REASON });
   expect(sleeps).toHaveLength(1);
+});
+it('stashes the text in Claude’s box with one Ctrl+S, types the message once, and never presses Ctrl+S after it', async () => {
+  const h = await claudeSession({ version: '2.1.302' });
+  const { terminal, log } = fixtureTerminal('2.1.302', 'stash-typed', {
+    afterStash: ['stash-stashed'],
+    onEnter: recordTyped(h),
+  });
+  const connection = await connect(h, terminal);
+  expect(await connection.send('delivery-1', 'Hi', [], tmux)).toMatchObject({ state: 'sent' });
+  expect(log.calls.filter((c) => c === 'key:C-s')).toHaveLength(1);
+  expect(log.calls.lastIndexOf('key:C-s')).toBeLessThan(
+    log.calls.indexOf('paste:gloss-delivery-1'),
+  );
 });
 it('offers no route, without failing, once the session record is gone', async () => {
   const h = await claudeSession();
