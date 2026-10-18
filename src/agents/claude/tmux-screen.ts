@@ -119,7 +119,11 @@ const lineText = (line: readonly ScreenCell[]) => line.map((cell) => cell.char).
 export const screenText = (lines: readonly ScreenLine[]) => lines.map(lineText).join('\n');
 
 export type InputBox =
-  { state: 'missing' } | { state: 'not-empty' } | { state: 'empty'; row: number; column: number };
+  | { state: 'missing' }
+  /** Claude's input is in another mode: a prompt other than `❯` (shell mode `!`) or vim mode. */
+  | { state: 'other-mode' }
+  | { state: 'not-empty' }
+  | { state: 'empty'; row: number; column: number };
 const PROMPT_MARK = '❯';
 /** Claude 2.1.299-2.1.301 follow `❯` with a no-break space (U+00A0); a plain space is accepted as well. */
 const PROMPT_GAPS = new Set([' ', '\u00a0']);
@@ -177,13 +181,70 @@ export function readInputBox(lines: readonly ScreenLine[]): InputBox {
     if (isRule(lines[row] ?? [])) rules.push(row);
   const [bottom, top] = rules;
   if (bottom === undefined || top === undefined || bottom - top < 2) return { state: 'missing' };
-  if (bottom - top > 2) return { state: 'not-empty' };
   if (lines.slice(bottom).some((line) => VIM_MODE.test(lineText(line))))
-    return { state: 'not-empty' };
+    return { state: 'other-mode' };
   const row = top + 1;
   const line = lines[row] ?? [];
-  if (!startsWithPrompt(line)) return { state: 'not-empty' };
+  if (!startsWithPrompt(line)) return { state: 'other-mode' };
+  if (bottom - top > 2) return { state: 'not-empty' };
   return isEmptyInput(line.slice(PROMPT_CELLS))
     ? { state: 'empty', row, column: PROMPT_CELLS }
     : { state: 'not-empty' };
+}
+
+/** Rows read above the cursor: for a one-row box, the box's top rule (every captured empty and typed screen). */
+export const INPUT_ROWS_ABOVE_CURSOR = 1;
+/**
+ * Rows read below the cursor: the box's bottom rule, Claude's footer, and one more row that shows nothing continues
+ * under the footer. In every stash capture on 2.1.296 and 2.1.302 the rule is at cursor + 1, the footer at cursor + 2
+ * and cursor + 3 is blank; an `@` popup takes the footer's place, and a `/` menu runs on to the pane's bottom.
+ */
+export const INPUT_ROWS_BELOW_CURSOR = 3;
+/**
+ * The rows around Claude's input box, anchored at the cursor: Claude draws the box right below the conversation, so
+ * on a short conversation the pane's last rows are blank. tmux clamps `end` to the pane.
+ */
+export const inputWindowRows = (cursorY: number) => ({
+  start: Math.max(0, cursorY - INPUT_ROWS_ABOVE_CURSOR),
+  end: cursorY + INPUT_ROWS_BELOW_CURSOR,
+});
+/** Claude 2.1.296-2.1.302 show `› stashed` on the footer while its one stash slot holds text (stash fixtures). */
+const STASH_MARKER = /›\s*stashed\b/u;
+/**
+ * Claude's normal footer row, told by its shape and never by its words (they change with the permission mode and
+ * the notices): indented two cells, then a character that does not open a popup row. An `@` popup row is indented
+ * four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`.
+ */
+const isFooterRow = (text: string) => /^ {2}[^\s❯+]/u.test(text);
+export interface ReadableWindow {
+  readable: true;
+  /** Claude's footer shows that its stash slot holds text. */
+  stashed: boolean;
+  /** A one-row normal box that reads empty, with the cursor right after `❯`: a paste lands alone. */
+  emptyAtPrompt: boolean;
+}
+/** Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's normal footer (a popup). */
+export type InputWindow = { readable: false } | ReadableWindow;
+/**
+ * Reads the rows Gloss captured around the cursor (`cursorRow` is the cursor's row within them): the bottom rule
+ * right under the cursor, the normal footer under the rule, and nothing under the footer. A row missing from the
+ * capture (the pane ends there) counts as blank. Anything else, a wrapped footer included, is unreadable.
+ */
+export function readInputWindow(
+  lines: readonly ScreenLine[],
+  cursorRow: number,
+  cursorColumn: number,
+): InputWindow {
+  const footer = lineText(lines[cursorRow + 2] ?? []);
+  const belowFooter = lineText(lines[cursorRow + 3] ?? []);
+  if (!isRule(lines[cursorRow + 1] ?? []) || !isFooterRow(footer) || belowFooter.trim() !== '')
+    return { readable: false };
+  const prompt = lines[cursorRow] ?? [];
+  const emptyAtPrompt =
+    isRule(lines[cursorRow - 1] ?? []) &&
+    !VIM_MODE.test(footer) &&
+    startsWithPrompt(prompt) &&
+    cursorColumn === PROMPT_CELLS &&
+    isEmptyInput(prompt.slice(PROMPT_CELLS));
+  return { readable: true, stashed: STASH_MARKER.test(footer), emptyAtPrompt };
 }

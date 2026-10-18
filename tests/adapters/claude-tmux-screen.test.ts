@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { classifyScreen, markersFor } from '../../src/runtime/attention-markers.js';
 import {
+  INPUT_ROWS_BELOW_CURSOR,
+  inputWindowRows,
   parseStyledScreen,
   readInputBox,
+  readInputWindow,
   screenText,
   type ScreenLine,
 } from '../../src/agents/claude/tmux-screen.js';
-import { FIXTURE_VERSIONS, readCursor, readScreen } from './tmux-fixtures.js';
+import {
+  FIXTURE_VERSIONS,
+  STASH_FIXTURE_VERSIONS,
+  STASH_READINGS,
+  readCursor,
+  readScreen,
+  readWindow,
+} from './tmux-fixtures.js';
 
 const parsed = (screen: string): ScreenLine[] => {
   const lines = parseStyledScreen(screen);
@@ -48,14 +58,17 @@ describe('Claude input box (synthetic)', () => {
       column: 2,
     });
   });
-  it('counts typed text, a lone inverted letter, multi-line input, bash and vim modes as not empty', () => {
+  it('counts typed text, a lone inverted letter and multi-line input as not empty, bash and vim as another mode', () => {
     expect(readInputBox(parsed(box('❯ hello')))).toEqual({ state: 'not-empty' });
     expect(readInputBox(parsed(box('❯ \u001b[7ma\u001b[27m')))).toEqual({ state: 'not-empty' });
     expect(readInputBox(parsed(`${rule}\n❯ one\n  two\n${rule}\n`))).toEqual({
       state: 'not-empty',
     });
-    expect(readInputBox(parsed(box('! ls')))).toEqual({ state: 'not-empty' });
-    expect(readInputBox(parsed(box('❯ ', '  -- INSERT --')))).toEqual({ state: 'not-empty' });
+    expect(readInputBox(parsed(box('! ls')))).toEqual({ state: 'other-mode' });
+    expect(readInputBox(parsed(box('❯ ', '  -- INSERT --')))).toEqual({ state: 'other-mode' });
+    expect(readInputBox(parsed(`${rule}\n! one\n  two\n${rule}\n`))).toEqual({
+      state: 'other-mode',
+    });
   });
   it('counts typed text drawn dim, coloured or bold, and text after or apart from the placeholder, as not empty', () => {
     expect(readInputBox(parsed(box('❯ x')))).toEqual({ state: 'not-empty' });
@@ -93,6 +106,67 @@ describe('Claude input box (synthetic)', () => {
       state: 'missing',
     });
   });
+  // Synthetic windows: row 0 is the row above the cursor, the cursor is on row 1, column 2.
+  const window = (...rows: string[]) => parsed(rows.join('\n') + '\n');
+  const footer = '  ? for shortcuts';
+  it('reads the stash marker only on the footer below the bottom rule, and an empty one-row box at the cursor', () => {
+    expect(readInputWindow(window(rule, '❯ ', rule, '  › stashed'), 1, 2)).toEqual({
+      readable: true,
+      stashed: true,
+      emptyAtPrompt: true,
+    });
+    expect(readInputWindow(window(rule, '❯ › stashed', rule, footer), 1, 13)).toEqual({
+      readable: true,
+      stashed: false,
+      emptyAtPrompt: false,
+    });
+  });
+  it('is not ready for a cursor elsewhere, a prompt-less row or vim mode', () => {
+    expect(readInputWindow(window(rule, '❯ ', rule, footer), 1, 3)).toMatchObject({
+      readable: true,
+      emptyAtPrompt: false,
+    });
+    expect(readInputWindow(window('  one', '  two', rule, footer), 1, 5)).toMatchObject({
+      readable: true,
+      emptyAtPrompt: false,
+    });
+    expect(readInputWindow(window(rule, '❯ ', rule, '  -- INSERT --'), 1, 2)).toMatchObject({
+      readable: true,
+      emptyAtPrompt: false,
+    });
+  });
+  it('cannot read a window whose rows under the cursor are not a rule and then the normal footer', () => {
+    // No bottom rule right under the cursor: no rule at all, or a box that continues below the cursor.
+    expect(readInputWindow(window(rule, '❯ ', '', ''), 1, 2)).toEqual({ readable: false });
+    expect(readInputWindow(window(rule, '❯ ', '  more', rule), 1, 2)).toEqual({ readable: false });
+    // A popup or menu in the footer's place: an `@` file list (one match), a `/` command list, nothing at all.
+    expect(readInputWindow(window(rule, '❯ @READ', rule, '    + README.md'), 1, 7)).toEqual({
+      readable: false,
+    });
+    expect(
+      readInputWindow(
+        window(rule, '❯ /mo', rule, '  ❯ /model   Set the AI model', '    /mobile'),
+        1,
+        5,
+      ),
+    ).toEqual({ readable: false });
+    expect(readInputWindow(window(rule, '❯ ', rule, ''), 1, 2)).toEqual({ readable: false });
+    // A footer that goes on below its row (a list under it, or a footer wrapped on a narrow pane).
+    expect(readInputWindow(window(rule, '❯ ', rule, footer, '  › stashed'), 1, 2)).toEqual({
+      readable: false,
+    });
+  });
+  it("reads a footer on the pane's last row, with nothing captured below it", () => {
+    expect(readInputWindow(parsed([rule, '❯ ', rule, '  › stashed'].join('\n')), 1, 2)).toEqual({
+      readable: true,
+      stashed: true,
+      emptyAtPrompt: true,
+    });
+  });
+  it('anchors the window one row above the cursor, never above the pane', () => {
+    expect(inputWindowRows(6)).toEqual({ start: 5, end: 6 + INPUT_ROWS_BELOW_CURSOR });
+    expect(inputWindowRows(0)).toEqual({ start: 0, end: INPUT_ROWS_BELOW_CURSOR });
+  });
 });
 
 const EMPTY = [
@@ -102,7 +176,7 @@ const EMPTY = [
   'empty-after-chip',
   'working-queued',
 ] as const;
-const NOT_EMPTY = ['typed', 'multiline', 'pasted-chip', 'bash', 'working-typed'] as const;
+const NOT_EMPTY = ['typed', 'multiline', 'pasted-chip', 'working-typed'] as const;
 describe.each(FIXTURE_VERSIONS)('captured Claude %s screens', (version) => {
   it.each(EMPTY)('reads %s as empty, with the terminal cursor right after the prompt', (state) => {
     const cursor = readCursor(version, state);
@@ -116,6 +190,8 @@ describe.each(FIXTURE_VERSIONS)('captured Claude %s screens', (version) => {
   it.each(NOT_EMPTY)('reads %s as not empty', (state) => {
     expect(readInputBox(parsed(readScreen(version, state))).state).not.toBe('empty');
   });
+  it('reads shell mode as another mode', () =>
+    expect(readInputBox(parsed(readScreen(version, 'bash')))).toEqual({ state: 'other-mode' }));
   it('finds the permission prompt with the attention markers', () => {
     const table = markersFor('claude', version);
     expect(table).toBeDefined();
@@ -125,3 +201,35 @@ describe.each(FIXTURE_VERSIONS)('captured Claude %s screens', (version) => {
       );
   });
 });
+
+describe.each(STASH_FIXTURE_VERSIONS)(
+  'input window of captured Claude %s stash screens',
+  (version) => {
+    const read = (state: string, source?: 'window' | 'screen') => {
+      const w = readWindow(version, state, source);
+      return readInputWindow(parsed(w.text), w.cursorRow, w.cursorColumn);
+    };
+    it.each(Object.entries(STASH_READINGS))('reads %s', (state, reading) => {
+      expect(read(state)).toEqual({ readable: true, ...reading });
+    });
+    it.each([...Object.keys(STASH_READINGS), 'stash-at-popup', 'stash-history'])(
+      'reads %s the same from rows cut out of the full screen',
+      (state) => {
+        expect(read(state, 'screen')).toEqual(read(state));
+      },
+    );
+    it("reads the same while Claude works, though the footer's notices may change between reads", () => {
+      expect(read('stash-working-later')).toEqual(read('stash-working'));
+    });
+    it('cannot read the window while the `@` popup replaces the footer and hides the marker', () => {
+      expect(read('stash-at-popup')).toEqual({ readable: false });
+    });
+    it('never reads a box ready to paste without the marker after Ctrl+S closed the popup', () => {
+      const w = read('stash-at-popup-after');
+      expect(!w.readable || !w.emptyAtPrompt || w.stashed).toBe(true);
+    });
+    it('cannot read the history picker, whose cursor is on the footer row', () => {
+      expect(read('stash-history')).toEqual({ readable: false });
+    });
+  },
+);

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { recordOf } from '../../src/core/json-record.js';
 import type { GlossTerminal } from '../../src/agents/claude/tmux-delivery.js';
+import { inputWindowRows } from '../../src/agents/claude/tmux-screen.js';
 
 /** Captured by scripts/probes/capture-claude-input-screens.mjs from throwaway sessions (tmux delivery plan, Task 1). */
 export const FIXTURE_DIR = 'tests/fixtures/tmux-screens';
@@ -66,6 +67,38 @@ export const CAPTURED_STASH = {
   busy: 'Count from 1 to 1000, one number per line.',
   message: 'Reply with the single word OK.',
 } as const;
+/** What Gloss must read in each captured stash state's input window (Task 1 states with a single right answer). */
+export const STASH_READINGS = {
+  'stash-empty': { stashed: false, emptyAtPrompt: true },
+  'stash-empty-after': { stashed: false, emptyAtPrompt: true },
+  'stash-typed': { stashed: false, emptyAtPrompt: false },
+  'stash-stashed': { stashed: true, emptyAtPrompt: true },
+  'stash-stashed-typed': { stashed: true, emptyAtPrompt: false },
+  'stash-replaced': { stashed: true, emptyAtPrompt: true },
+  'stash-popped': { stashed: false, emptyAtPrompt: false },
+  'stash-restashed': { stashed: true, emptyAtPrompt: true },
+  'stash-working': { stashed: true, emptyAtPrompt: true },
+  'stash-working-later': { stashed: true, emptyAtPrompt: true },
+  'stash-restored': { stashed: false, emptyAtPrompt: false },
+  'stash-ctrl-y': { stashed: true, emptyAtPrompt: true },
+} as const;
+/**
+ * The rows Gloss reads around the cursor of a captured screen: the real `-S/-E` capture (`window`, the default), or
+ * the same rows cut from the full capture (`screen`), which is what fixtureTerminal serves.
+ */
+export function readWindow(version: string, state: string, source: 'window' | 'screen' = 'window') {
+  const cursor = readCursor(version, state);
+  const { start, end } = inputWindowRows(cursor.y);
+  const rows =
+    source === 'window'
+      ? readFileSync(join(FIXTURE_DIR, `claude-${version}-${state}.window.ansi`), 'utf8')
+          .split('\n')
+          .slice(0, end - start + 1)
+      : readScreen(version, state)
+          .split('\n')
+          .slice(start, end + 1);
+  return { text: rows.join('\n'), cursorRow: cursor.y - start, cursorColumn: cursor.x };
+}
 export interface TerminalLog {
   calls: string[];
   loaded: string[];

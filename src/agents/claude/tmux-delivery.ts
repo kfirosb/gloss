@@ -89,7 +89,7 @@ export async function checkTerminal(
   if (box.state === 'missing') return { ready: false, reason: NO_INPUT_BOX_REASON };
   // The cursor check is required, not a refinement: dim text at the caret reads as Claude's placeholder by style
   // alone, and only a cursor that sits right after the prompt shows that nothing was typed.
-  if (box.state === 'not-empty' || cursor.x !== box.column || cursor.y !== box.row)
+  if (box.state !== 'empty' || cursor.x !== box.column || cursor.y !== box.row)
     return { ready: false, reason: UNSENT_TEXT_REASON };
   return { ready: true };
 }
