@@ -256,6 +256,9 @@ it('types one message at a time into the same terminal, checking it again before
     'rows',
     'cursor',
     'rows',
+    // Read once more right before typing: the input still reads as it settled.
+    'cursor',
+    'rows',
     'typing',
     'paste:gloss-delivery-1',
     'capture',
@@ -268,6 +271,9 @@ it('types one message at a time into the same terminal, checking it again before
     'key:C-s',
     'cursor',
     'rows',
+    'cursor',
+    'rows',
+    // Read once more right before typing: the input still reads as it settled.
     'cursor',
     'rows',
     'typing',

@@ -12,6 +12,8 @@ import {
   type InputWindow,
 } from './tmux-screen.js';
 import {
+  INPUT_CHANGED_REASON,
+  INPUT_NOT_READY_REASON,
   INPUT_UNREADABLE_REASON,
   nextStashStep,
   notReadyReason,
@@ -171,10 +173,14 @@ async function readTerminal(
     return { screen: undefined, cursor: undefined };
   }
 }
-/** One read of the rows around the cursor; `key` (cursor and text) tells two reads apart. Undefined when it fails. */
-async function readWindowOf(
-  terminal: GlossTerminal,
-): Promise<{ key: string; window: InputWindow } | undefined> {
+interface WindowRead {
+  /** Cursor and text: tells two reads apart. */
+  key: string;
+  cursor: PaneCursor;
+  window: InputWindow;
+}
+/** One read of the rows around the cursor. Undefined when it fails. */
+async function readWindowOf(terminal: GlossTerminal): Promise<WindowRead | undefined> {
   try {
     const cursor = await terminal.cursor();
     const { start, end } = inputWindowRows(cursor.y);
@@ -182,11 +188,23 @@ async function readWindowOf(
     const lines = cursor.inMode ? undefined : parseStyledScreen(text);
     return {
       key: `${cursor.x} ${cursor.y} ${cursor.inMode}\n${text}`,
+      cursor,
       window: lines ? readInputWindow(lines, cursor.y - start, cursor.x) : { readable: false },
     };
   } catch {
     return undefined;
   }
+}
+/** The cursor is where it was and the box and the stash marker read the same. */
+function sameInput(settled: WindowRead, now: WindowRead | undefined): boolean {
+  if (!now?.window.readable || !settled.window.readable) return false;
+  return (
+    now.cursor.x === settled.cursor.x &&
+    now.cursor.y === settled.cursor.y &&
+    now.cursor.inMode === settled.cursor.inMode &&
+    now.window.emptyAtPrompt === settled.window.emptyAtPrompt &&
+    now.window.stashed === settled.window.stashed
+  );
 }
 /**
  * After a Ctrl+S: waits KEY_SETTLE_MIN_MS, then until two reads in a row are identical and show the step's expected
@@ -197,7 +215,10 @@ async function settleAfterStash(
   clock: TypingClock,
   start: StashStart,
   presses: 1 | 2,
-): Promise<{ step: 'paste' | 'press-again' | 'timeout'; last: InputWindow | undefined }> {
+): Promise<
+  | { step: 'paste'; last: InputWindow; read: WindowRead }
+  | { step: 'press-again' | 'timeout'; last: InputWindow | undefined }
+> {
   await clock.sleep(KEY_SETTLE_MIN_MS);
   const deadline = clock.now() + KEYS_SETTLE_MS;
   const maxPolls = Math.ceil(KEYS_SETTLE_MS / KEYS_SETTLE_POLL_MS);
@@ -206,6 +227,7 @@ async function settleAfterStash(
     const read = await readWindowOf(terminal);
     if (read?.window.readable && read.key === previous) {
       const step = nextStashStep(start, presses, read.window);
+      if (step === 'paste') return { step, last: read.window, read };
       if (step !== 'wait') return { step, last: read.window };
     }
     previous = read?.key;
@@ -223,7 +245,9 @@ async function settleAfterStash(
 async function stashForSend(
   terminal: GlossTerminal,
   clock: TypingClock,
-): Promise<{ ready: true; last: InputWindow } | { ready: false; reason: string }> {
+): Promise<
+  { ready: true; last: InputWindow; settled: WindowRead } | { ready: false; reason: string }
+> {
   const before = await readWindowOf(terminal);
   if (!before?.window.readable) return { ready: false, reason: INPUT_UNREADABLE_REASON };
   const start: StashStart = {
@@ -235,12 +259,16 @@ async function stashForSend(
     try {
       await terminal.pressStash();
     } catch {
-      return { ready: false, reason: notReadyReason(last) };
+      // A first press that failed set nothing aside, whatever an older stash's marker shows.
+      return {
+        ready: false,
+        reason: presses === 1 ? INPUT_NOT_READY_REASON : notReadyReason(last),
+      };
     }
     const settled = await settleAfterStash(terminal, clock, start, presses);
     // An unparsable last poll must not hide the marker an earlier read showed.
     if (settled.last?.readable) last = settled.last;
-    if (settled.step === 'paste') return { ready: true, last };
+    if (settled.step === 'paste') return { ready: true, last, settled: settled.read };
     if (settled.step === 'timeout') break;
   }
   return { ready: false, reason: notReadyReason(last) };
@@ -254,7 +282,8 @@ export type TerminalSend =
  * Types one message into Claude's input at Send (spec 2.1, 2.2, 2.6). `failed` means nothing of the message was
  * typed; with `openTerminal` the terminal needs the user. `paneRunsSession` is asked before the buffer is loaded and
  * again after the stash, which can take seconds. The stash runs after the buffer is ready; `onTyping` runs after the
- * cursor check, right before the paste, and if it throws nothing is typed. Enter follows once the paste shows.
+ * cursor check and a last read that finds the input as it settled, right before the paste, and if it throws nothing is
+ * typed. Enter follows once the paste shows.
  * Windows line endings are typed as line feeds; any other carriage return is refused like the other control
  * characters.
  */
@@ -300,6 +329,9 @@ export async function typeIntoTerminal(input: {
   if (!stash.ready) return refuse(stash.reason);
   // The user's draft may now be in Claude's stash: say so whenever the settled window shows the marker.
   if (!(await runsSession())) return refuse(withStashNote(SESSION_SWITCHED_REASON, stash.last));
+  // The user may have typed in the terminal while the session was checked: paste only into the box as it settled.
+  if (!sameInput(stash.settled, await readWindowOf(terminal)))
+    return refuse(withStashNote(INPUT_CHANGED_REASON, stash.last));
   try {
     input.onTyping({ nativeAfterRevision });
   } catch {

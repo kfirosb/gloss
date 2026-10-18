@@ -36,6 +36,7 @@ import {
   type TypingClock,
 } from '../../src/agents/claude/tmux-delivery.js';
 import {
+  INPUT_CHANGED_REASON,
   INPUT_NOT_READY_REASON,
   INPUT_UNREADABLE_REASON,
   STASHED_TEXT_NOTE,
@@ -162,8 +163,21 @@ describe('check at Send', () => {
 });
 
 describe('typing into the terminal', () => {
-  /** One window read before the press, two after it (the second shows the screen settled). */
-  const STASH_TURN = ['cursor', 'rows', 'key:C-s', 'cursor', 'rows', 'cursor', 'rows'];
+  /**
+   * One window read before the press, two after it (the second shows the screen settled), and one more after the
+   * session check, right before typing.
+   */
+  const STASH_TURN = [
+    'cursor',
+    'rows',
+    'key:C-s',
+    'cursor',
+    'rows',
+    'cursor',
+    'rows',
+    'cursor',
+    'rows',
+  ];
   const send = (
     terminal: GlossTerminal,
     body: string,
@@ -529,6 +543,70 @@ describe('typing into the terminal', () => {
     });
     expect(typed).toBe(false);
     expect(log.calls.filter((c) => c === 'key:C-s')).toHaveLength(1);
+    expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
+    expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+  });
+  it.each([
+    ['without a stash', '2.1.301', 'empty', [], 'typed', INPUT_CHANGED_REASON],
+    [
+      'after Ctrl+S stashed the draft',
+      '2.1.302',
+      'stash-typed',
+      ['stash-stashed'],
+      'stash-stashed-typed',
+      `${INPUT_CHANGED_REASON}. ${STASHED_TEXT_NOTE}`,
+    ],
+  ] as const)(
+    'types nothing when the input changes after it settled, %s',
+    async (_, version, state, afterStash, typedState, reason) => {
+      const fixture = fixtureTerminal(version, state, { afterStash });
+      let typedMeanwhile = false;
+      // The user types into the terminal while Gloss checks the session a second time.
+      const terminal: GlossTerminal = {
+        ...fixture.terminal,
+        cursor: async () => {
+          if (!typedMeanwhile) return fixture.terminal.cursor();
+          fixture.log.calls.push('cursor');
+          return readCursor(version, typedState);
+        },
+        captureRows: async (start, end) => {
+          if (!typedMeanwhile) return fixture.terminal.captureRows(start, end);
+          fixture.log.calls.push('rows');
+          return readScreen(version, typedState)
+            .split('\n')
+            .slice(start, end + 1)
+            .join('\n');
+        },
+      };
+      let asked = 0;
+      let typed = false;
+      const result = await send(
+        terminal,
+        'hello',
+        () => {
+          typed = true;
+        },
+        undefined,
+        {
+          paneRunsSession: async () => {
+            if (++asked === 2) typedMeanwhile = true;
+            return true;
+          },
+        },
+      );
+      expect(result).toEqual({ state: 'failed', reason, openTerminal: true });
+      expect(typed).toBe(false);
+      expect(fixture.log.calls.some((c) => c.startsWith('paste:') || c === 'enter')).toBe(false);
+      expect(fixture.log.calls.at(-1)).toBe('delete:gloss-delivery-1');
+    },
+  );
+  it('does not say the text is set aside when the first Ctrl+S cannot be pressed over an older stash', async () => {
+    const { terminal, log } = fixtureTerminal('2.1.302', 'stash-stashed-typed', { fail: 'stash' });
+    expect(await send(terminal, 'hello')).toEqual({
+      state: 'failed',
+      reason: INPUT_NOT_READY_REASON,
+      openTerminal: true,
+    });
     expect(log.calls.some((c) => c.startsWith('paste:'))).toBe(false);
     expect(log.calls.at(-1)).toBe('delete:gloss-delivery-1');
   });

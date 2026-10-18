@@ -24,6 +24,9 @@ export function nextStashStep(start: StashStart, presses: 1 | 2, now: ReadableWi
 export const INPUT_UNREADABLE_REASON = 'Gloss couldn’t read the terminal’s input; nothing was sent';
 export const INPUT_NOT_READY_REASON =
   'The terminal’s input wasn’t ready for the message; nothing was sent';
+/** The input window changed between the cursor check and the paste: the user may be typing in the terminal. */
+export const INPUT_CHANGED_REASON =
+  'The terminal’s input changed before Gloss could type; nothing was sent';
 /** Spec 2.6 step 5, added when the marker shows: the user's draft is in Claude's stash slot, not lost. */
 export const STASHED_TEXT_NOTE =
   'Your text is set aside: Claude puts it back after your next message, or press Ctrl+S in the terminal';
