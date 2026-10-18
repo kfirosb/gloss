@@ -70,8 +70,14 @@ export function sessionRecordOf(value: unknown): ClaudeSessionRecord | undefined
  * The record's process start time, when it can be compared with this Mac's `ps`: the record says its pid is a
  * macOS pid. Anything else cannot tell a reused pid apart, so it is not trusted.
  */
-export function trustedProcStart(record: ClaudeSessionRecord): string | undefined {
+export function trustedProcStart(
+  record: Pick<ClaudeSessionRecord, 'pidDomain' | 'procStart'>,
+): string | undefined {
   return record.pidDomain === 'darwin' ? record.procStart : undefined;
+}
+/** A session run in a terminal: Claude Desktop and SDK language workers write other entrypoints; older Claude wrote none. */
+export function isTerminalRecord(record: Pick<ClaudeSessionRecord, 'entrypoint'>): boolean {
+  return record.entrypoint === undefined || record.entrypoint === 'cli';
 }
 /** One `sessions/*.json` record; undefined when it is missing, too large or malformed. */
 export async function readSessionRecord(path: string): Promise<ClaudeSessionRecord | undefined> {

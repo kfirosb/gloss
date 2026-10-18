@@ -35,7 +35,12 @@ import { claudeActivity } from './activity.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { isClaudeExecutable, readProcess } from './process-probe.js';
-import { pidRunsSession, readSessionRecords, type ClaudeSessionRecord } from './session-records.js';
+import {
+  isTerminalRecord,
+  pidRunsSession,
+  readSessionRecords,
+  type ClaudeSessionRecord,
+} from './session-records.js';
 import { ChannelStore } from './channel-store.js';
 import { isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
@@ -191,7 +196,7 @@ export async function discoverOpenClaude(
   }
   const result: OpenSessionScan = { candidates: [], complete: true };
   // Language workers run Claude through the SDK entrypoint; only terminal sessions are destinations.
-  const terminals = records.filter((r) => r.entrypoint === undefined || r.entrypoint === 'cli');
+  const terminals = records.filter(isTerminalRecord);
   // One batched socket-owner probe covers every terminal that has a socket.
   const socketed = terminals.flatMap((record) =>
     record.messagingSocketPath

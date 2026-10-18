@@ -3,7 +3,7 @@ import { recordOf, type JsonRecord } from '../../core/json-record.js';
 import type { ChannelRecord } from './channel-types.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
 import { isClaudeExecutable, readProcess, type ProcessInfo } from './process-probe.js';
-import { sessionRecordOf, trustedProcStart } from './session-records.js';
+import { isTerminalRecord, sessionRecordOf, trustedProcStart } from './session-records.js';
 import { constants } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -170,7 +170,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
           !positivePid(r.pid) ||
           !isAbsolute(r.cwd) ||
           !r.version ||
-          (r.entrypoint !== undefined && r.entrypoint !== 'cli')
+          !isTerminalRecord(r)
         )
           continue;
         const live = await probe(r.pid, signal);
