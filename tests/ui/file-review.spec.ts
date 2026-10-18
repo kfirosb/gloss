@@ -103,3 +103,78 @@ test('review errors preserve the original and let the user retry', async ({ page
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByLabel('File summary')).toContainText('תקציר');
 });
+
+test('changing the session languages resets the open file review', async ({ page }) => {
+  // Tall enough that the centred window leaves the header's language chip uncovered.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  let sequence = 1;
+  let snapshot = {
+    ...basicSnapshot(),
+    languageSettings: { write: 'he', send: 'en', reply: 'he', assist: 'he' },
+    discussion: [{ role: 'assistant', text: '[Open plan](/project/docs/long-plan.md)' }],
+  };
+  await mockSession(page, () => snapshot);
+  // Each reconnect delivers the current snapshot, so a language change reaches the workspace.
+  await page.route('**/api/sessions/*/events', (r) =>
+    r.fulfill({
+      contentType: 'text/event-stream',
+      body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence, snapshot }) + '\n\n',
+    }),
+  );
+  await page.route('**/api/sessions/*/language', (r) => {
+    const override = r.request().method() === 'PUT' ? r.request().postDataJSON() : {};
+    const defaults = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
+    const effective = { ...defaults, ...override };
+    if (r.request().method() === 'PUT') {
+      snapshot = { ...snapshot, languageSettings: effective };
+      sequence++;
+    }
+    return r.fulfill({ json: { defaults, override, effective } });
+  });
+  await page.route('**/files/browse?*', (r) =>
+    r.fulfill({ json: { entries: [], limited: false } }),
+  );
+  await page.route('**/files/preview?*', (r) =>
+    r.fulfill({
+      json: {
+        name: 'long-plan.md',
+        relativePath: 'docs/long-plan.md',
+        state: 'text',
+        text: '# Original plan\n\nLong content',
+        size: 29,
+        version: 'v1',
+      },
+    }),
+  );
+  await page.route('**/files/review-status?*', (r) =>
+    r.fulfill({ json: { summary: false, translation: false } }),
+  );
+  const modes: string[] = [];
+  await page.route('**/files/review', (r) => {
+    const body = r.request().postDataJSON();
+    modes.push(body.mode);
+    return r.fulfill({ json: { path: body.path, mode: body.mode, text: 'תוצאה ' + modes.length } });
+  });
+  await page.goto('/#capability=test');
+  await page.getByRole('link', { name: 'Open plan' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Files' });
+  const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
+  await translateChip.click();
+  await expect(dialog.getByLabel('File translation')).toContainText('תוצאה 1');
+  await expect(translateChip).toHaveAttribute('data-saved', 'true');
+  await page.getByRole('button', { name: /Session languages/ }).click();
+  const languages = page.getByRole('dialog', { name: 'Languages for this session' });
+  // English replies hide Translate; switching back to Hebrew shows it again for the new settings.
+  const replies = languages.getByLabel('Show agent replies in');
+  await replies.selectOption('en');
+  await expect(page.getByRole('button', { name: 'Session languages HE→EN→EN' })).toBeVisible();
+  await expect(translateChip).toHaveCount(0);
+  await replies.selectOption('he');
+  await expect(page.getByRole('button', { name: 'Session languages HE→EN→HE' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(translateChip).not.toHaveAttribute('data-saved', 'true');
+  await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
+  await translateChip.click();
+  await expect(dialog.getByLabel('File translation')).toContainText('תוצאה 2');
+  expect(modes).toEqual(['translation', 'translation']);
+});

@@ -34,22 +34,27 @@ export function FileReview({
   const [saved, setSaved] = useState<Partial<Record<Mode, boolean>>>({});
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
-  const { relativePath, version } = preview;
+  const { relativePath, version, state } = preview;
   useEffect(() => {
-    if (!version) return;
+    // Only text previews show the chips, so other files need no status request.
+    if (!version || state !== 'text') return;
     const controller = new AbortController();
     client
       .fileReviewStatus(relativePath, version, controller.signal)
       .then((status) => {
         if (controller.signal.aborted) return;
-        setSaved({ summary: status.summary, translation: status.translation });
+        // Merge: a review finished meanwhile must keep its mark against a slow status response.
+        setSaved((current) => ({
+          summary: current.summary || status.summary,
+          translation: current.translation || status.translation,
+        }));
       })
       .catch(() => {
         // Best-effort: the marks are only a hint, and a failed status request must not
         // disturb the preview; the chips simply stay unmarked.
       });
     return () => controller.abort();
-  }, [client, relativePath, version]);
+  }, [client, relativePath, version, state]);
   const review = async (next: Mode) => {
     if (loading) return;
     if (results[next]) {

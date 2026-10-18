@@ -121,7 +121,10 @@ export function createSessionManager(options: {
         !version
       )
         throw new Error('Invalid file review request');
-      return (await manager.ensure(id)).fileReviewStatus({
+      // Marks are a hint for a live workflow; previewing must not start one for a saved session.
+      const workflow = workflows.get(id);
+      if (!workflow) return { summary: false, translation: false };
+      return workflow.fileReviewStatus({
         scope: record.canonicalRoot,
         path,
         version,

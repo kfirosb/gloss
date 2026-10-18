@@ -169,7 +169,14 @@ export function FilePreviewPane({
         </div>
       ) : (
         <FileReview
-          key={client.sessionId + ':' + path + ':' + (preview.version ?? preview.text ?? '')}
+          // Results are per file version and language, so a language change starts a fresh review.
+          key={[
+            client.sessionId,
+            path,
+            preview.version ?? preview.text ?? '',
+            languageSettings.assist,
+            languageSettings.reply,
+          ].join(':')}
           client={client}
           preview={preview}
           languageSettings={languageSettings}
@@ -181,7 +188,15 @@ export function FilePreviewPane({
       {attachError && <p role="alert">{attachError}</p>}
       <div className="file-toolbar">
         <span>Read-only preview</span>
-        <button type="button" disabled={!preview || busy} onClick={onAttach}>
+        {/* aria-disabled, not disabled: disabling the focused button would drop focus to the body,
+            where the window's Escape handler no longer sees the key. */}
+        <button
+          type="button"
+          aria-disabled={!preview || busy}
+          onClick={() => {
+            if (preview && !busy) onAttach();
+          }}
+        >
           Attach file
         </button>
       </div>
