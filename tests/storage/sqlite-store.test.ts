@@ -75,6 +75,14 @@ describe('SqliteStore', () => {
     expect(store.load(state.id)!.discussion[1]).toEqual(first.discussion[1]);
     store.close();
   });
+  it('does not persist activity', () => {
+    const store = new SqliteStore(databasePath());
+    const state = snapshot();
+    state.activity = { calls: [], tasks: [], running: 0, gaps: [] };
+    store.save(state);
+    expect(store.load(state.id)).not.toHaveProperty('activity');
+  });
+
   it('isolates cached summaries by session source content model and prompt', () => {
     const store = new SqliteStore(databasePath());
     const key = {

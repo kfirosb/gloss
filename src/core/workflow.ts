@@ -44,6 +44,7 @@ import {
   type LanguageSettings,
 } from './language-settings.js';
 import { translateMessageResult } from './translations.js';
+import { applyActivityEvent, emptyActivity } from './activity.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
 
 export interface WorkflowDependencies {
@@ -85,6 +86,7 @@ export interface Workflow {
   translateComposer(text: string): Promise<string>;
   refreshLanguageSettings(): void;
   translateMessage(sourceId: string): Promise<void>;
+  translateActivityReport(taskId: string): Promise<void>;
   prepareDirect(indices: number[], expected?: { id: string; revision: number }): Promise<Draft>;
   sendReview(
     id: string,
@@ -421,6 +423,15 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
   /** Channel deliveries Claude has read into its context and not yet answered with a finished turn. */
   const seenChannel = new Set<string>();
   const consumeEvent = async (event: AgentEvent, active: CodingConnection) => {
+    if (event.type === 'activity') {
+      // Activity is derived from the transcript on every attach, so it is published but never persisted.
+      const next = applyActivityEvent(state.activity ?? emptyActivity(), event.event);
+      if (next !== state.activity) {
+        state.activity = next;
+        publish(false);
+      }
+      return;
+    }
     if (event.type === 'usage') {
       deps.onUsage?.(event.usage);
       return;
@@ -609,6 +620,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!sameTarget(attached.target, target))
         throw new Error('Adapter attached to a different target');
       connection = attached;
+      state.activity = emptyActivity();
       state.capabilities = copy(attached.capabilities);
       delete state.historyCursor;
       const targetUnchanged = state.target !== undefined && sameTarget(state.target, target);
@@ -1466,6 +1478,48 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error('Message unavailable for translation');
       if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
       translateIfNeeded(message);
+    },
+
+    async translateActivityReport(taskId) {
+      requireOpen();
+      const task = state.activity?.tasks.find((candidate) => candidate.id === taskId);
+      const report = task?.report;
+      if (!task || !report) throw new Error('Report unavailable for translation');
+      if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
+      if (task.reportTranslation?.status === 'complete') return;
+      if (task.reportTranslation?.status === 'pending') return;
+      task.reportTranslation = { text: report, status: 'pending' };
+      publish(false);
+      const generation = connectionGeneration;
+      const target = settings.reply;
+      const abort = new AbortController();
+      activeLanguageOperations.add(abort);
+      try {
+        const result = await translateMessageResult(
+          {
+            sourceScope: `${state.id}:activity`,
+            sourceId: taskId,
+            sourceRevision: task.position,
+            text: report,
+            complete: true,
+            language: target,
+            promptLanguage: languageName(target),
+            model: state.languageModel,
+            promptVersion: TRANSLATION_PROMPT_VERSION,
+            signal: abort.signal,
+          },
+          { store: deps.store, session: deps.languageSession },
+        );
+        const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
+        if (closed || generation !== connectionGeneration || !current) return;
+        current.reportTranslation = {
+          text: result.text,
+          status: result.status === 'complete' ? 'complete' : 'error',
+        };
+        publish(false);
+      } finally {
+        activeLanguageOperations.delete(abort);
+      }
     },
 
     subscribe(listener) {
