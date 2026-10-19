@@ -1568,8 +1568,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const previous = settings;
       settings = readSettings();
       if (JSON.stringify(previous) === JSON.stringify(settings)) return;
-      if (previous.reply !== settings.reply) {
-      }
       if (!needsReplyTranslation(settings)) dropPendingTranslations();
       if (
         needsReplyTranslation(settings) &&
