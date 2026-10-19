@@ -2,9 +2,9 @@
 //
 //   node scripts/homebrew-cask.mjs [--version 0.16.2] [--tap ~/project/homebrew-tap]
 //
-// The version defaults to package.json. The DMG checksum is read from the
-// `.sha256` asset of the matching GitHub release, so the release must be
-// published first. With --tap the cask is written to <tap>/Casks/gloss.rb;
+// The version defaults to package.json. The checksum of each architecture's
+// DMG (arm64 and x64) is read from its `.sha256` asset of the matching GitHub
+// release, so the release must be published first with both DMGs. With --tap the cask is written to <tap>/Casks/gloss.rb;
 // without it the cask is printed to stdout. Committing and pushing the tap is
 // left to the release protocol.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -15,13 +15,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const repository = 'kfirosb/gloss';
 const releaseVersion = /^\d+\.\d+\.\d+$/;
 const sha256Hex = /^[0-9a-f]{64}$/;
+// Homebrew's `arch` stanza names (arm, intel) and the electron-builder suffix of each DMG.
+const architectures = { arm: 'arm64', intel: 'x64' };
 
-export function dmgName(version) {
-  return `Gloss-${version}-arm64.dmg`;
+export function dmgName(version, architecture) {
+  return `Gloss-${version}-${architectures[architecture]}.dmg`;
 }
 
-export function checksumUrl(version) {
-  return `https://github.com/${repository}/releases/download/v${version}/${dmgName(version)}.sha256`;
+export function checksumUrl(version, architecture) {
+  return `https://github.com/${repository}/releases/download/v${version}/${dmgName(version, architecture)}.sha256`;
 }
 
 // Parses the `shasum -a 256` line published beside the DMG. The file name is
@@ -36,14 +38,21 @@ export function parseChecksum(text, expectedFile) {
   return digest.toLowerCase();
 }
 
+/** `sha256` holds one digest per architecture ({ arm, intel }); the cask picks the DMG for the Mac it runs on. */
 export function renderCask({ version, sha256 }) {
   if (!releaseVersion.test(version)) throw new Error(`Not a release version: ${version}`);
-  if (!sha256Hex.test(sha256)) throw new Error(`Not a SHA-256 digest: ${sha256}`);
+  for (const architecture of Object.keys(architectures)) {
+    const digest = sha256?.[architecture];
+    if (!sha256Hex.test(digest))
+      throw new Error(`Not a SHA-256 digest for ${architecture}: ${digest}`);
+  }
   return `cask "gloss" do
   version "${version}"
-  sha256 "${sha256}"
+  sha256 arm:   "${sha256.arm}",
+         intel: "${sha256.intel}"
 
-  url "https://github.com/${repository}/releases/download/v#{version}/Gloss-#{version}-arm64.dmg"
+  arch arm: "arm64", intel: "x64"
+  url "https://github.com/${repository}/releases/download/v#{version}/Gloss-#{version}-#{arch}.dmg"
   name "Gloss"
   desc "Talk to Claude Code and Codex in Hebrew or any language from your terminal"
   homepage "https://github.com/${repository}"
@@ -53,7 +62,6 @@ export function renderCask({ version, sha256 }) {
     strategy :github_latest
   end
 
-  depends_on arch: :arm64
   depends_on macos: :ventura
 
   app "Gloss.app"
@@ -88,18 +96,28 @@ function parseArgs(argv) {
   return options;
 }
 
-async function fetchChecksum(version) {
-  const url = checksumUrl(version);
+async function fetchChecksum(version, architecture) {
+  const url = checksumUrl(version, architecture);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-  return parseChecksum(await response.text(), dmgName(version));
+  return parseChecksum(await response.text(), dmgName(version, architecture));
+}
+
+async function fetchChecksums(version) {
+  const entries = await Promise.all(
+    Object.keys(architectures).map(async (architecture) => [
+      architecture,
+      await fetchChecksum(version, architecture),
+    ]),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const packagePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
   const version = options.version ?? JSON.parse(readFileSync(packagePath, 'utf8')).version;
-  const cask = renderCask({ version, sha256: await fetchChecksum(version) });
+  const cask = renderCask({ version, sha256: await fetchChecksums(version) });
   if (!options.tap) {
     process.stdout.write(cask);
     return;

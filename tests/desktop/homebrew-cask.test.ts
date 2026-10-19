@@ -1,20 +1,32 @@
 import { expect, it } from 'vitest';
 // @ts-expect-error untyped release script
-import { parseChecksum, renderCask } from '../../scripts/homebrew-cask.mjs';
+import { checksumUrl, dmgName, parseChecksum, renderCask } from '../../scripts/homebrew-cask.mjs';
 
-const digest = 'a'.repeat(64);
+const arm = 'a'.repeat(64);
+const intel = 'b'.repeat(64);
+const digest = arm;
 
-it('renders a cask pinned to the release DMG and its checksum', () => {
-  const cask = renderCask({ version: '0.16.2', sha256: digest });
+it('renders a cask that picks the DMG and checksum for the running architecture', () => {
+  const cask = renderCask({ version: '0.17.0', sha256: { arm, intel } });
   expect(cask).toContain('cask "gloss" do');
-  expect(cask).toContain('version "0.16.2"');
-  expect(cask).toContain(`sha256 "${digest}"`);
+  expect(cask).toContain('version "0.17.0"');
+  expect(cask).toContain(`sha256 arm:   "${arm}",\n         intel: "${intel}"`);
+  expect(cask).toContain('arch arm: "arm64", intel: "x64"');
   expect(cask).toContain(
-    'url "https://github.com/kfirosb/gloss/releases/download/v#{version}/Gloss-#{version}-arm64.dmg"',
+    'url "https://github.com/kfirosb/gloss/releases/download/v#{version}/Gloss-#{version}-#{arch}.dmg"',
   );
-  expect(cask).toContain('depends_on arch: :arm64');
+  expect(cask).not.toContain('depends_on arch');
+  expect(cask).toContain('depends_on macos: :ventura');
   expect(cask).toContain('app "Gloss.app"');
   expect(cask.endsWith('end\n')).toBe(true);
+});
+
+it('names each release asset by architecture', () => {
+  expect(dmgName('0.17.0', 'arm')).toBe('Gloss-0.17.0-arm64.dmg');
+  expect(dmgName('0.17.0', 'intel')).toBe('Gloss-0.17.0-x64.dmg');
+  expect(checksumUrl('0.17.0', 'intel')).toBe(
+    'https://github.com/kfirosb/gloss/releases/download/v0.17.0/Gloss-0.17.0-x64.dmg.sha256',
+  );
 });
 
 it('reads the digest from the published shasum line for the expected file only', () => {
@@ -27,7 +39,9 @@ it('reads the digest from the published shasum line for the expected file only',
 });
 
 it('refuses versions that are not plain release numbers', () => {
-  expect(() => renderCask({ version: 'v0.16.2', sha256: digest })).toThrow(/version/);
-  expect(() => renderCask({ version: '0.16.2"; system("x', sha256: digest })).toThrow(/version/);
-  expect(() => renderCask({ version: '0.16.2', sha256: 'zz' })).toThrow(/digest/);
+  const sha256 = { arm, intel };
+  expect(() => renderCask({ version: 'v0.16.2', sha256 })).toThrow(/version/);
+  expect(() => renderCask({ version: '0.16.2"; system("x', sha256 })).toThrow(/version/);
+  expect(() => renderCask({ version: '0.16.2', sha256: { arm, intel: 'zz' } })).toThrow(/digest/);
+  expect(() => renderCask({ version: '0.16.2', sha256: { arm } })).toThrow(/digest/);
 });

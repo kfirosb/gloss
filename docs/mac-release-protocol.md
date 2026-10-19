@@ -121,7 +121,7 @@ Describe the result as a **local DMG release**. Do not claim it was uploaded. Cu
 
 ## 7. Update the Homebrew tap after publishing
 
-Users can install with `brew install --cask kfirosb/tap/gloss`; the cask lives in the separate public repository `kfirosb/homebrew-tap` (checked out at `~/project/homebrew-tap` on this Mac; clone it there if missing). Update it only after the GitHub release with the DMG and its `.sha256` asset is published, since the script reads the checksum from that release:
+Users can install with `brew install --cask kfirosb/tap/gloss`; the cask lives in the separate public repository `kfirosb/homebrew-tap` (checked out at `~/project/homebrew-tap` on this Mac; clone it there if missing). The cask serves both architectures (`arch arm:/intel:` with one checksum each), so update it only after the GitHub release with both DMGs and their `.sha256` assets is published, since the script reads both checksums from that release:
 
 ```sh
 node scripts/homebrew-cask.mjs --tap ~/project/homebrew-tap
@@ -132,7 +132,7 @@ git commit -am 'Update gloss to <version>'
 git push
 ```
 
-`brew audit --online` downloads the DMG and verifies the pinned checksum. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
+`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
 
 ## 8. Replace the installed app only when requested
 
