@@ -1243,8 +1243,8 @@ export function SessionWorkspace({
           <ActivityView
             client={client}
             activity={snapshot.activity}
+            codingState={snapshot.codingState}
             agentIsClaude={isClaude}
-            disconnected={snapshot.codingState === 'disconnected'}
           />
         )}
         {liveView !== 'terminal' && liveView !== 'activity' && (

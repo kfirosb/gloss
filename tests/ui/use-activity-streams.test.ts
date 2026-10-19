@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityCall, ActivityEvent } from '../../src/core/activity-contracts.js';
 import { emptyActivity } from '../../src/core/activity-reducer.js';
-import { StreamSlots, foldStreamEvents } from '../../src/ui/use-activity-streams.js';
+import {
+  StreamSlots,
+  foldStreamEvents,
+  recallStream,
+  rememberStream,
+} from '../../src/ui/use-activity-streams.js';
 
 const call = (id: string, position: number): ActivityCall => ({
   id,
@@ -54,8 +59,13 @@ describe('activity stream slots', () => {
   const slots = () => new StreamSlots(3);
   const claim = (s: StreamSlots, priority: 1 | 2 | 3) => {
     const states: boolean[] = [];
-    const release = s.claim((o) => states.push(o), priority);
-    return { states, release, open: () => states.at(-1) === true };
+    const held = s.claim((o) => states.push(o), priority);
+    return {
+      states,
+      release: held.release,
+      prioritize: held.prioritize,
+      open: () => states.at(-1) === true,
+    };
   };
   it('holds at most three streams open at once', () => {
     const s = slots();
@@ -145,5 +155,47 @@ describe('activity stream slots', () => {
     expect(holders.map((x) => x.states)).toEqual([[true], [true], [true]]);
     holders[0]?.release();
     expect(again.open()).toBe(true);
+  });
+  it('a waiting claim raised to expanded preempts the least important holder', () => {
+    const s = slots();
+    const sub = claim(s, 2),
+      strip1 = claim(s, 3),
+      strip2 = claim(s, 3);
+    const strip3 = claim(s, 3);
+    expect(strip3.states).toEqual([false]);
+    strip3.prioritize(1);
+    expect(strip3.open()).toBe(true);
+    expect(strip1.states).toEqual([true, false]);
+    expect(strip2.states).toEqual([true]);
+    expect(sub.states).toEqual([true]);
+  });
+  it('a holder changing priority keeps its slot and its connection', () => {
+    const s = slots();
+    const strip = claim(s, 3);
+    claim(s, 2);
+    claim(s, 2);
+    strip.prioritize(1);
+    strip.prioritize(3);
+    expect(strip.states).toEqual([true]);
+    const clicked = claim(s, 1);
+    expect(clicked.open()).toBe(true);
+    expect(strip.states).toEqual([true, false]);
+  });
+});
+
+describe('seen subagent actions', () => {
+  const state = (id: string) => ({ ...emptyActivity(), calls: [call(id, 10)] });
+  it('recalls what was remembered under the same key', () => {
+    rememberStream('cache-s:a1', state('c1'));
+    expect(recallStream('cache-s:a1')?.calls.map((c) => c.id)).toEqual(['c1']);
+  });
+  it('knows nothing about an unseen key', () => {
+    expect(recallStream('cache-s:never')).toBeUndefined();
+  });
+  it('keeps the newest fifty and drops the oldest', () => {
+    for (let index = 0; index < 51; index++) rememberStream(`evict:${index}`, state(`c${index}`));
+    expect(recallStream('evict:0')).toBeUndefined();
+    expect(recallStream('evict:1')?.calls[0]?.id).toBe('c1');
+    expect(recallStream('evict:50')?.calls[0]?.id).toBe('c50');
   });
 });

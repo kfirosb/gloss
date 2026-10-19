@@ -4074,20 +4074,6 @@ button.dictation-finishing .dictation-icon {
   text-align: left;
   background: light-dark(#eef1f7, var(--dk-bg-eef1f7));
 }
-.activity-tasks,
-.activity-main {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.activity-label {
-  margin: 4px 0 0;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: light-dark(#647089, var(--dk-fg-647089));
-}
 .activity-empty,
 .activity-gap,
 .activity-meta {
@@ -4095,18 +4081,20 @@ button.dictation-finishing .dictation-icon {
   color: light-dark(#647089, var(--dk-fg-647089));
   font-size: 0.8rem;
 }
-.activity-card {
+.activity-agent {
   border: 1px solid light-dark(#e0e4ed, var(--dk-bg-e0e4ed));
   border-radius: 8px;
   padding: 8px 10px;
   background: light-dark(#fff, var(--dk-bg-ffffff));
   overflow-wrap: anywhere;
 }
-.activity-card[data-status='finished'],
-.activity-card[data-status='failed'] {
+.activity-agent[data-status='finished'],
+.activity-agent[data-status='failed'],
+.activity-agent[data-status='unknown'],
+.activity-strip-row[data-status='unknown'] {
   opacity: 0.72;
 }
-.activity-card-head {
+.activity-agent-head {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -4114,7 +4102,7 @@ button.dictation-finishing .dictation-icon {
   gap: 4px 8px;
   width: 100%;
 }
-button.activity-card-head {
+button.activity-agent-head {
   border: 0;
   padding: 0;
   background: none;
@@ -4122,14 +4110,123 @@ button.activity-card-head {
   font: inherit;
   text-align: left;
 }
-.activity-card[data-status='running'] .activity-title b {
-  color: light-dark(#1a7f37, var(--dk-fg-1a7f37));
+.activity-agent-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  min-width: 0;
 }
-.activity-card[data-status='unknown'] .activity-title b {
-  color: light-dark(#8a5a00, var(--dk-fg-8a5a00));
-}
-.activity-title b {
+.activity-agent-name b {
   font-weight: 600;
+}
+.activity-agent-head > .activity-meta {
+  margin-inline-start: auto;
+}
+.activity-tag {
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 0.68rem;
+  color: #fff;
+  background: light-dark(#6b7280, var(--dk-bg-6b7280));
+}
+.activity-agent[data-agent='main'] .activity-tag {
+  background: light-dark(#2d6cdf, var(--dk-bg-2d6cdf));
+}
+.activity-agent[data-agent]:not([data-agent='main']) .activity-tag {
+  background: #8b4fd6;
+}
+/* A live dot pulses green; idle, finished and unknown ones are grey. */
+.activity .activity-dot {
+  align-self: center;
+  background: light-dark(#9aa4b8, var(--dk-bg-9aa4b8));
+}
+.activity [data-status='running'] > .activity-dot,
+.activity [data-status='running'] > .activity-agent-head .activity-dot,
+.activity [data-status='working'] > .activity-agent-head .activity-dot {
+  background: #1a7f37;
+  animation: activity-pulse 1.4s infinite;
+}
+.activity [data-status='failed'] > .activity-dot,
+.activity [data-status='failed'] > .activity-agent-head .activity-dot {
+  background: #a8291f;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity .activity-dot {
+    animation: none !important;
+  }
+}
+.activity-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.activity-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 5px 9px;
+  border: 1px solid light-dark(#f0dca0, var(--dk-bg-f0dca0));
+  border-radius: 8px;
+  background: light-dark(#fff8e6, var(--dk-bg-fff8e6));
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.activity-history .activity-strip-row {
+  border-color: light-dark(#e0e4ed, var(--dk-bg-e0e4ed));
+  background: light-dark(#fff, var(--dk-bg-ffffff));
+  opacity: 0.72;
+}
+.activity-strip-name {
+  font-weight: 600;
+}
+.activity-strip-row > span:not(.activity-dot, .activity-strip-name),
+.activity-last-line {
+  color: light-dark(#647089, var(--dk-fg-647089));
+}
+.activity-last-line {
+  flex: 1 1 12ch;
+  min-width: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-link {
+  margin-inline-start: auto;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #2d6cdf;
+  font: inherit;
+  text-decoration: underline;
+}
+.activity-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed light-dark(#c9cfdc, var(--dk-bg-c9cfdc));
+}
+.activity-history-toggle {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #2d6cdf;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.activity-history-toggle::before {
+  content: '▸ ';
+}
+.activity-history-toggle[aria-expanded='true']::before {
+  content: '▾ ';
+}
+.activity-agent > .activity-button {
+  margin-top: 4px;
 }
 .activity-nested {
   margin-inline-start: 6px;
@@ -4155,11 +4252,6 @@ button.activity-card-head {
 }
 .activity-nested-task .activity-nested {
   margin-inline-start: 0;
-}
-.activity-head-end {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
 }
 .activity-button {
   padding: 1px 8px;
@@ -4197,11 +4289,6 @@ button.activity-card-head {
 .activity-output pre {
   align-self: stretch;
 }
-.activity-sub {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed light-dark(#d9deea, var(--dk-bg-d9deea));
-}
 .activity-report {
   margin-top: 6px;
   padding: 6px 8px;
@@ -4214,16 +4301,31 @@ button.activity-card-head {
 .activity-report .rich-text > :last-child {
   margin-bottom: 0;
 }
-.activity-report[dir='rtl'] {
-  text-align: right;
-}
-.activity-timeline {
+.activity-actions {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-inline-start: 8px;
-  padding-inline-start: 10px;
-  border-inline-start: 2px solid light-dark(#d9deea, var(--dk-bg-d9deea));
+  margin-top: 5px;
+}
+.activity-actions > .activity-meta,
+.activity-agent > .activity-meta,
+.activity-agent > .activity-nested-tasks {
+  margin-top: 5px;
+}
+/* The newest arrival fades from a green tint over the highlight window. */
+.activity-row-new > button {
+  background: light-dark(#eaf5ec, var(--dk-bg-eaf5ec));
+  animation: activity-row-arrived 2s ease-out forwards;
+}
+@keyframes activity-row-arrived {
+  to {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-row-new > button {
+    animation: none;
+  }
 }
 .activity-row > button {
   display: flex;

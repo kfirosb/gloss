@@ -18,6 +18,13 @@ export const ACTIVITY_STREAM_LIMIT = 3;
 /** How much a stream matters: 1 expanded by hand, 2 a running subagent card, 3 a background-command tail. */
 export type StreamPriority = 1 | 2 | 3;
 
+/** A claim on a stream slot: release it when done; a new priority applies in place. */
+export interface StreamClaim {
+  release(): void;
+  /** Never moves an open holder; a waiting claim raised above an open one takes its slot. */
+  prioritize(priority: StreamPriority): void;
+}
+
 interface StreamSlot {
   order: number; // claim order: a lower number is older
   priority: StreamPriority;
@@ -34,39 +41,51 @@ export class StreamSlots {
   private claims = 0;
   constructor(private readonly limit: number) {}
   /** `setOpen` hears whether the stream may hold its connection now and whenever that changes. */
-  claim(setOpen: (open: boolean) => void, priority: StreamPriority): () => void {
+  claim(setOpen: (open: boolean) => void, priority: StreamPriority): StreamClaim {
     const slot: StreamSlot = { order: this.claims++, priority, setOpen };
     if (this.open.length < this.limit) {
       this.open.push(slot);
       setOpen(true);
-    } else {
-      const victim = this.preemptable(priority);
-      if (victim) {
-        this.open.splice(this.open.indexOf(victim), 1);
-        this.paused.push(victim);
-        this.open.push(slot);
-        setOpen(true);
-        victim.setOpen(false);
-      } else {
-        this.paused.push(slot);
-        setOpen(false);
-      }
+    } else if (!this.takeFromLessImportant(slot)) {
+      this.paused.push(slot);
+      setOpen(false);
     }
-    return () => {
-      const pausedAt = this.paused.indexOf(slot);
-      if (pausedAt >= 0) {
+    return {
+      release: () => this.release(slot),
+      prioritize: (next) => {
+        slot.priority = next;
+        const pausedAt = this.paused.indexOf(slot);
+        if (pausedAt < 0) return;
         this.paused.splice(pausedAt, 1);
-        return;
-      }
-      const openAt = this.open.indexOf(slot);
-      if (openAt < 0) return;
-      this.open.splice(openAt, 1);
-      const next = this.nextWaiting();
-      if (!next) return;
-      this.paused.splice(this.paused.indexOf(next), 1);
-      this.open.push(next);
-      next.setOpen(true);
+        if (!this.takeFromLessImportant(slot)) this.paused.push(slot);
+      },
     };
+  }
+  /** Opens `slot` in place of the least important holder below it; false when none ranks below. */
+  private takeFromLessImportant(slot: StreamSlot): boolean {
+    const victim = this.preemptable(slot.priority);
+    if (!victim) return false;
+    this.open.splice(this.open.indexOf(victim), 1);
+    this.paused.push(victim);
+    this.open.push(slot);
+    slot.setOpen(true);
+    victim.setOpen(false);
+    return true;
+  }
+  private release(slot: StreamSlot) {
+    const pausedAt = this.paused.indexOf(slot);
+    if (pausedAt >= 0) {
+      this.paused.splice(pausedAt, 1);
+      return;
+    }
+    const openAt = this.open.indexOf(slot);
+    if (openAt < 0) return;
+    this.open.splice(openAt, 1);
+    const next = this.nextWaiting();
+    if (!next) return;
+    this.paused.splice(this.paused.indexOf(next), 1);
+    this.open.push(next);
+    next.setOpen(true);
   }
   /** The open holder of the lowest importance below `priority`, oldest first. */
   private preemptable(priority: StreamPriority): StreamSlot | undefined {
@@ -93,17 +112,28 @@ export class StreamSlots {
 }
 const activityStreamSlots = new StreamSlots(ACTIVITY_STREAM_LIMIT);
 
-/** Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming. */
+/**
+ * Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming.
+ * A priority change re-ranks the same claim, so an open stream keeps its connection.
+ */
 function useStreamSlot(active: boolean, priority: StreamPriority): boolean | undefined {
   const [open, setOpen] = useState<boolean | undefined>(undefined);
+  const claim = useRef<StreamClaim | undefined>(undefined);
+  const priorityNow = useRef(priority);
+  priorityNow.current = priority;
   useEffect(() => {
     if (!active) return;
-    const release = activityStreamSlots.claim(setOpen, priority);
+    const held = activityStreamSlots.claim(setOpen, priorityNow.current);
+    claim.current = held;
     return () => {
-      release();
+      held.release();
+      if (claim.current === held) claim.current = undefined;
       setOpen(undefined);
     };
-  }, [active, priority]);
+  }, [active]);
+  useEffect(() => {
+    claim.current?.prioritize(priority);
+  }, [priority]);
   return active ? open : undefined;
 }
 
@@ -111,7 +141,23 @@ export interface StreamState {
   key: string;
   state: ActivitySnapshot;
 }
-const streamKey = (sessionId: string, taskId: string) => `${sessionId}:${taskId}`;
+export const streamKey = (sessionId: string, taskId: string) => `${sessionId}:${taskId}`;
+
+/** Subagent activities kept after their card goes away, so History can show them without a new stream. */
+const SEEN_STREAMS_LIMIT = 50;
+const seenStreams = new Map<string, ActivitySnapshot>();
+/** Keeps the newest `SEEN_STREAMS_LIMIT` states; rewriting a key makes it the newest. */
+export function rememberStream(key: string, state: ActivitySnapshot): void {
+  seenStreams.delete(key);
+  seenStreams.set(key, state);
+  for (const oldest of seenStreams.keys()) {
+    if (seenStreams.size <= SEEN_STREAMS_LIMIT) break;
+    seenStreams.delete(oldest);
+  }
+}
+export function recallStream(key: string): ActivitySnapshot | undefined {
+  return seenStreams.get(key);
+}
 
 /**
  * Folds one event from the stream opened for `incomingKey` while the view shows `key`.
@@ -133,7 +179,10 @@ export interface SubagentStream {
   /** Wanted but closed while other activity streams hold the connections. */
   paused: boolean;
 }
-/** The activity of one subagent's own transcript, streamed while `active` and holding a slot. */
+/**
+ * The activity of one subagent's own transcript, streamed while `active` and holding a slot.
+ * While not `active` it is the activity last seen for this task, if any.
+ */
 export function useSubagentStream(
   client: Pick<SessionClient, 'subagentActivity' | 'sessionId'>,
   taskId: string,
@@ -152,7 +201,12 @@ export function useSubagentStream(
     // Each connection replays the transcript from its start, so it folds onto a fresh state.
     setStream({ key, state: emptyActivity() });
     const fold = (event: ActivityEvent) =>
-      setStream((current) => foldStreamEvents(keyNow.current, current, key, event));
+      setStream((current) => {
+        const next = foldStreamEvents(keyNow.current, current, key, event);
+        // Idempotent, so a repeated updater call in development is harmless.
+        if (next !== current) rememberStream(next.key, next.state);
+        return next;
+      });
     void (async () => {
       try {
         for await (const event of client.subagentActivity(taskId, controller.signal)) {
@@ -165,8 +219,9 @@ export function useSubagentStream(
     })();
     return () => controller.abort();
   }, [client, taskId, key, open]);
+  const live = stream.key === key ? stream.state : emptyActivity();
   return {
-    activity: stream.key === key ? stream.state : emptyActivity(),
+    activity: active ? live : (recallStream(key) ?? live),
     paused: slot === false,
   };
 }
@@ -269,6 +324,80 @@ export function useOutputTail(
     start: current.start,
     ...(current.error === undefined ? {} : { error: current.error }),
     paused: slot === false,
+    showEarlier,
+  };
+}
+
+/** Asks the window endpoint for the newest window: the server clamps `end` to the file size. */
+const LATEST_WINDOW_END = Number.MAX_SAFE_INTEGER;
+interface WindowState {
+  key: string;
+  text: string;
+  start: number;
+  error?: string;
+}
+export interface OutputWindowView {
+  text: string;
+  start: number;
+  error?: string;
+  /** Prepends the window before `start`; never rejects, a failure becomes `error`. */
+  showEarlier(): Promise<void>;
+}
+/** A finished command's output, read once through the window endpoint while `enabled`; never a stream. */
+export function useOutputWindow(
+  client: Pick<SessionClient, 'outputWindow' | 'sessionId'>,
+  taskId: string,
+  enabled: boolean,
+): OutputWindowView {
+  const key = streamKey(client.sessionId, taskId);
+  const keyNow = useRef(key);
+  keyNow.current = key;
+  const empty = (): WindowState => ({ key, text: '', start: 0 });
+  const [view, setView] = useState<WindowState>(empty);
+  const current = view.key === key ? view : empty();
+  const startNow = useRef(current.start);
+  startNow.current = current.start;
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    setView({ key, text: '', start: 0 });
+    void client.outputWindow(taskId, LATEST_WINDOW_END).then(
+      (window) => {
+        if (cancelled || keyNow.current !== key) return;
+        setView({ key, text: window.text, start: window.start });
+      },
+      () => {
+        if (cancelled || keyNow.current !== key) return;
+        setView({ key, text: '', start: 0, error: OUTPUT_UNAVAILABLE });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, taskId, key, enabled]);
+  const showEarlier = useCallback(async () => {
+    const requestedKey = key;
+    const before = startNow.current;
+    if (before <= 0) return;
+    const owns = (state: WindowState) =>
+      keyNow.current === requestedKey && state.key === requestedKey;
+    let window: Awaited<ReturnType<typeof client.outputWindow>>;
+    try {
+      window = await client.outputWindow(taskId, before);
+    } catch {
+      setView((state) => (owns(state) ? { ...state, error: EARLIER_UNAVAILABLE } : state));
+      return;
+    }
+    setView((state) =>
+      owns(state) && state.start === before && window.end === before
+        ? { ...state, text: window.text + state.text, start: window.start }
+        : state,
+    );
+  }, [client, taskId, key]);
+  return {
+    text: current.text,
+    start: current.start,
+    ...(current.error === undefined ? {} : { error: current.error }),
     showEarlier,
   };
 }
