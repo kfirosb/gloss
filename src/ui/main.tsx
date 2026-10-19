@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ConversationSnapshot } from '../core/contracts.js';
 
@@ -39,7 +39,6 @@ import {
 import { TerminalWorkspace } from './terminal-workspace.js';
 
 import { SessionTabs } from './session-tabs.js';
-import { MoveToGloss } from './claude-move.js';
 import { NewSessionDialog } from './new-session-dialog.js';
 import { useProjects } from './use-projects.js';
 import {
@@ -96,12 +95,6 @@ function App() {
   );
   const [removeError, setRemoveError] = useState('');
   const [removeBusy, setRemoveBusy] = useState(false);
-  // The tab menu's Move to Gloss dialog; a move started there is watched after it closes (I6).
-  const [moveSessionId, setMoveSessionId] = useState('');
-  const moveClient = useMemo(
-    () => (moveSessionId ? new SessionClient(moveSessionId) : undefined),
-    [moveSessionId],
-  );
   const requestRemoval = (entries: CatalogEntry[], folderName?: string) => {
     if (!entries.length) return;
     setRemoveError('');
@@ -773,7 +766,7 @@ function App() {
           }
           onEndTerminal={endTerminal}
           onRemove={requestRemoval}
-          onMoveToGloss={setMoveSessionId}
+          offerMoveToGloss
           onRetry={(launchId) => {
             setSelectionError('');
             void retryLaunch(launchId).catch((e) =>
@@ -820,11 +813,6 @@ function App() {
             >
               {removeBusy ? 'Removing…' : 'Remove from history'}
             </button>
-          </div>
-        </PanelDialog>
-        <PanelDialog title="Move to Gloss" open={!!moveClient} close={() => setMoveSessionId('')}>
-          <div className="review-body" dir="ltr">
-            {moveClient && <MoveToGloss client={moveClient} />}
           </div>
         </PanelDialog>
         {worktreeDialog?.kind === 'create' && (

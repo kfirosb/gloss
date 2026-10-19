@@ -87,35 +87,38 @@ test('Move to Gloss asks with the exact confirmation, and Cancel sends nothing',
   page,
 }) => {
   const move = await outsideSession(page, { state: 'ready', process: PROCESS });
-  await page.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
-  const confirm = page.getByRole('group', { name: 'Confirm Move to Gloss' });
-  await expect(confirm.getByText(CONFIRMATION, { exact: true })).toBeVisible();
-  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(confirm).toHaveCount(0);
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const popover = connect.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  await popover.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(popover).toHaveCount(0);
   expect(move.posts).toEqual([]);
-  await page.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
   move.afterPost({ state: 'in-gloss' });
-  await confirm.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(page.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
   expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
 });
 
 test('a working session offers Move when it finishes, which can be cancelled', async ({ page }) => {
   const move = await outsideSession(page, { state: 'busy', reason: WORKING, process: PROCESS });
-  await expect(page.getByRole('button', { name: WORKING, exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Move when it finishes', exact: true }).click();
-  const confirm = page.getByRole('group', { name: 'Confirm Move to Gloss' });
-  await expect(confirm.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  const connect = page.locator('.claude-connection');
+  await expect(connect.getByRole('button', { name: WORKING, exact: true })).toBeDisabled();
+  await connect.getByRole('button', { name: 'Move when it finishes', exact: true }).click();
+  const popover = connect.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(WORKING, { exact: true })).toBeVisible();
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
   move.afterPost({ state: 'waiting' });
-  await confirm.getByRole('button', { name: 'Move', exact: true }).click();
+  await popover.getByRole('button', { name: 'Move when it finishes', exact: true }).click();
   await expect(
-    page.getByText('Gloss will move this session when Claude finishes.', { exact: true }),
+    popover.getByText('Gloss will move this session when Claude finishes.', { exact: true }),
   ).toBeVisible();
   expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
   move.afterPost({ state: 'busy', reason: WORKING, process: PROCESS });
-  await page.getByRole('button', { name: 'Don’t move', exact: true }).click();
+  await popover.getByRole('button', { name: 'Don’t move', exact: true }).click();
   await expect(
-    page.getByRole('button', { name: 'Move when it finishes', exact: true }),
+    popover.getByRole('button', { name: 'Move when it finishes', exact: true }),
   ).toBeVisible();
   expect(move.posts.at(-1)).toEqual({ action: 'cancel' });
 });
@@ -136,28 +139,31 @@ test('the connect dialog stays until the reopen is checked, and shows a late fai
   page,
 }) => {
   const move = await outsideSession(page, { state: 'ready', process: PROCESS });
-  await page.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const popover = connect.getByRole('dialog', { name: 'Move to Gloss' });
   move.afterPost({ state: 'in-gloss' });
-  await page.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(page.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
   // The route turns to Gloss's terminal; the dialog showing the move must not disappear with it.
   move.setRoute({ transport: 'tmux' });
   await expect(page.locator('.route-line > summary')).toHaveText('Terminal');
   move.set({ state: 'unavailable', reason: 'x', failure: { reason: EXITED, manual: MANUAL } });
-  await expect(page.getByRole('alert').filter({ hasText: EXITED })).toBeVisible();
-  await expect(page.getByLabel('Claude resume command')).toHaveValue(MANUAL.cdCommand);
+  await expect(popover.getByRole('alert').filter({ hasText: EXITED })).toBeVisible();
+  await expect(popover.getByLabel('Claude resume command')).toHaveValue(MANUAL.cdCommand);
 });
 
 test('a move whose connect dialog was closed reports its outcome as the session’s notice', async ({
   page,
 }) => {
   const move = await outsideSession(page, { state: 'ready', process: PROCESS });
-  await page.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
   move.afterPost({ state: 'moving' });
-  await page.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(page.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
+  await connect.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(connect.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
   await page.getByText(/Connect this session to Gloss/).click();
-  await expect(page.getByText('Moving the session to Gloss…', { exact: true })).toHaveCount(0);
+  await expect(connect.getByText('Moving the session to Gloss…')).toHaveCount(0);
   move.set({ state: 'unavailable', reason: 'x', failure: { reason: EXITED, manual: MANUAL } });
   await expect(page.getByRole('status').filter({ hasText: EXITED })).toContainText(
     MANUAL.cdCommand,
@@ -197,7 +203,7 @@ async function tabsWithMove(context: BrowserContext) {
   };
 }
 
-test('the session tab menu offers Move to Gloss only for outside Claude sessions', async ({
+test('the session tab menu opens one small Move popover only for outside Claude sessions', async ({
   page,
   context,
 }) => {
@@ -210,17 +216,49 @@ test('the session tab menu offers Move to Gloss only for outside Claude sessions
   await page.keyboard.press('Escape');
   await tabs.getByRole('tab', { name: /Session A/ }).press('Shift+F10');
   await page.getByRole('menuitem', { name: 'Move to Gloss…' }).press('Enter');
-  const dialog = page.getByRole('dialog', { name: 'Move to Gloss' });
-  await dialog.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
-  await expect(dialog.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  const popover = page.getByRole('dialog', { name: 'Move to Gloss' });
+  // One step: the confirmation is shown at once, with no full-size dialog around it.
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  await expect(popover).toHaveClass(/move-popover/);
+  await expect(popover.getByRole('button', { name: 'Move to Gloss', exact: true })).toHaveCount(0);
+  await popover.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(popover).toHaveCount(0);
   expect(move.posts).toEqual([]);
+  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
   move.afterPost({ state: 'in-gloss' });
-  await dialog.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(dialog.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
   expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
 });
 
-test('a move whose tab-menu dialog was closed reports its outcome on that session', async ({
+test('a working session in the tab menu popover offers Move when it finishes', async ({
+  page,
+  context,
+}) => {
+  const move = await tabsWithMove(context);
+  move.set({ state: 'busy', reason: WORKING, process: PROCESS });
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
+  const popover = page.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(WORKING, { exact: true })).toBeVisible();
+  await expect(popover.getByRole('button', { name: 'Move', exact: true })).toHaveCount(0);
+  move.afterPost({ state: 'waiting' });
+  await popover.getByRole('button', { name: 'Move when it finishes', exact: true }).click();
+  await expect(
+    popover.getByText('Gloss will move this session when Claude finishes.', { exact: true }),
+  ).toBeVisible();
+  await expect(popover.getByRole('button', { name: 'Don’t move', exact: true })).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
+});
+
+test('a move whose tab-menu popover was closed reports its outcome on that session', async ({
   page,
   context,
 }) => {
@@ -229,13 +267,12 @@ test('a move whose tab-menu dialog was closed reports its outcome on that sessio
   const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
   await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move to Gloss' });
-  await dialog.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const popover = page.getByRole('dialog', { name: 'Move to Gloss' });
   move.afterPost({ state: 'moving' });
-  await dialog.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(dialog.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Close Move to Gloss', exact: true }).click();
-  await expect(dialog).toBeHidden();
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
   move.set({ state: 'unavailable', reason: 'x', failure: { reason: EXITED, manual: MANUAL } });
   await tabs.getByRole('tab', { name: /Session A/ }).click();
   await expect(page.getByRole('status').filter({ hasText: EXITED })).toContainText(
@@ -243,7 +280,7 @@ test('a move whose tab-menu dialog was closed reports its outcome on that sessio
   );
 });
 
-test('two dialogs for one session send one move, and a confirmation never outlives its status', async ({
+test('two popovers for one session send one move, and a confirmation never outlives its status', async ({
   page,
   context,
 }) => {
@@ -262,22 +299,45 @@ test('two dialogs for one session send one move, and a confirmation never outliv
   await page.getByText(/Connect this session to Gloss/).click();
   const connect = page.locator('.claude-connection');
   await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
-  const connectConfirm = connect.getByRole('group', { name: 'Confirm Move to Gloss' });
-  await expect(connectConfirm).toBeVisible();
-  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move to Gloss' });
-  await dialog.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const connectConfirm = connect.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(connectConfirm.getByRole('button', { name: 'Move', exact: true })).toBeEnabled();
+  // Keyboard only, so the connect popover is not closed by an outside click.
+  await tabs.getByRole('tab', { name: /Session A/ }).press('Shift+F10');
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).press('Enter');
+  const menuPopover = page.locator('.session-context').getByRole('dialog', {
+    name: 'Move to Gloss',
+  });
   const release = move.hold();
   move.afterPost({ state: 'in-gloss' });
-  await dialog.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(dialog.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Close Move to Gloss', exact: true }).click();
-  // While the first move is being sent, the other dialog's confirmation can't send a second one.
-  await expect(connectConfirm.getByRole('button', { name: 'Move', exact: true })).toBeDisabled();
+  await menuPopover.getByRole('button', { name: 'Move', exact: true }).press('Enter');
+  await expect(
+    menuPopover.getByText('Moving the session to Gloss…', { exact: true }),
+  ).toBeVisible();
+  // While the first move is being sent, the other popover shows it and can't send a second one.
+  await expect(
+    connectConfirm.getByText('Moving the session to Gloss…', { exact: true }),
+  ).toBeVisible();
+  await expect(connectConfirm.getByRole('button', { name: 'Move', exact: true })).toHaveCount(0);
   release();
   // The session left the state the confirmation was opened from, so it is gone, not left armed.
-  await expect(connectConfirm).toHaveCount(0);
-  await expect(connect.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  await expect(
+    connectConfirm.getByText('This session now runs in Gloss.', { exact: true }),
+  ).toBeVisible();
+  await expect(connectConfirm.getByRole('button', { name: 'Move', exact: true })).toHaveCount(0);
   expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
+});
+
+test('a popover whose status changes under it drops its confirmation and sends nothing', async ({
+  page,
+}) => {
+  const move = await outsideSession(page, { state: 'ready', process: PROCESS });
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const popover = connect.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByRole('button', { name: 'Move', exact: true })).toBeVisible();
+  // Another window moved it meanwhile.
+  move.set({ state: 'in-gloss' });
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  await expect(popover.getByRole('button', { name: 'Move', exact: true })).toHaveCount(0);
+  expect(move.posts).toEqual([]);
 });

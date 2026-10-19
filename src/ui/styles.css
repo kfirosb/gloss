@@ -2377,6 +2377,42 @@ pre {
   color: light-dark(#647089, var(--dk-fg-647089));
   font-size: 0.75rem;
 }
+.move-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(340px, calc(100vw - 32px));
+  background: light-dark(#fff, var(--dk-bg-ffffff));
+  border: 1px solid light-dark(#d9deea, var(--dk-bg-d9deea));
+  border-radius: 12px;
+  box-shadow: 0 16px 44px #17203326;
+  padding: 14px;
+  color: light-dark(#172033, var(--dk-fg-172033));
+  font-size: 0.8rem;
+  text-align: left;
+}
+/* In the connect dialog it takes its control's place; under a tab it sits in the menu's positioned box. */
+.move-popover.inline,
+.session-context .move-popover {
+  position: static;
+}
+.move-popover:focus {
+  outline: none;
+}
+.move-popover h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
+.move-popover p {
+  margin: 0 0 8px;
+}
+.move-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .language-field {
   display: grid;
   grid-template-columns: 1fr 130px;

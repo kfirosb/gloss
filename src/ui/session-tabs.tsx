@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PopupMenu } from './popup-menu.js';
+import { MovePopover } from './claude-move.js';
+import { SessionClient } from './session-client.js';
 import type { CatalogEntry } from '../core/session-catalog.js';
 import type { TerminalEntry, TerminalView } from '../core/session-contracts.js';
 import {
@@ -46,7 +48,7 @@ export function SessionTabs({
   onShowTerminal,
   onRetry,
   onRemove,
-  onMoveToGloss,
+  offerMoveToGloss = false,
   selectedTerminalId,
   onSelectTerminal,
   onExpandTerminal,
@@ -61,7 +63,7 @@ export function SessionTabs({
   onShowTerminal?(launchId: string, title: string): void;
   onRetry?(launchId: string): void;
   onRemove?(entries: CatalogEntry[]): void;
-  onMoveToGloss?(sessionId: string): void; // context menu: an outside Claude session
+  offerMoveToGloss?: boolean; // context menu: Move to Gloss for an outside Claude session
   selectedTerminalId?: string | undefined; // launchId shown in the workspace view
   onSelectTerminal?(terminal: TerminalEntry): void; // click on a terminal tab
   onExpandTerminal?(terminal: TerminalEntry): void; // context menu: Expand (popup mode) / Shrink (workspace mode)
@@ -82,6 +84,19 @@ export function SessionTabs({
   const [savedMenu, setSavedMenu] = useState<{ entry: CatalogEntry; x: number; y: number } | null>(
     null,
   );
+  // The compact Move to Gloss popover, opened from a tab's menu at the menu's place; a move started there is
+  // watched after it closes (I6).
+  const [movePopover, setMovePopover] = useState<{
+    key: string;
+    sessionId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const moveSessionId = movePopover?.sessionId;
+  const moveClient = useMemo(
+    () => (moveSessionId ? new SessionClient(moveSessionId) : undefined),
+    [moveSessionId],
+  );
   const [terminalMenu, setTerminalMenu] = useState<{
     terminal: TerminalEntry;
     x: number;
@@ -89,7 +104,7 @@ export function SessionTabs({
   } | null>(null);
   // A Claude session no Gloss launch owns can be moved into Gloss (spec 5); the server decides whether it may.
   const movable = (entry: CatalogEntry) =>
-    !!onMoveToGloss &&
+    offerMoveToGloss &&
     entry.target.agent === 'claude' &&
     !!entry.sessionId &&
     !entry.launchId &&
@@ -124,22 +139,28 @@ export function SessionTabs({
     });
   };
   const menuItems = ({
+    key,
     launchId,
     moveSessionId,
     pending,
     title,
+    x,
+    y,
   }: {
+    key: string;
     launchId?: string;
     moveSessionId?: string;
     pending: boolean;
     title: string;
+    x: number;
+    y: number;
   }) => [
-    ...(moveSessionId && onMoveToGloss
+    ...(moveSessionId
       ? [
           {
             key: 'move',
             content: 'Move to Gloss…',
-            onChoose: () => onMoveToGloss(moveSessionId),
+            onChoose: () => setMovePopover({ key, sessionId: moveSessionId, x, y }),
           },
         ]
       : []),
@@ -193,6 +214,7 @@ export function SessionTabs({
     setMenu(null);
     setSavedMenu(null);
     setTerminalMenu(null);
+    setMovePopover(null);
   }, [folder?.key]);
   useEffect(() => {
     if (menu && !open.some((e) => e.key === menu.key && e.launchId === menu.launchId))
@@ -375,6 +397,18 @@ export function SessionTabs({
             menuClassName="session-saved-menu session-context-menu"
             menuLabel="Session actions"
             items={menuItems(menu)}
+          />
+        </div>
+      )}
+      {movePopover && moveClient && (
+        <div className="session-context" style={{ left: movePopover.x, top: movePopover.y }}>
+          <MovePopover
+            client={moveClient}
+            onClose={(returnFocus) => {
+              const key = movePopover.key;
+              setMovePopover(null);
+              if (returnFocus) tabFor(key)?.focus();
+            }}
           />
         </div>
       )}
