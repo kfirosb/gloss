@@ -28,7 +28,7 @@ Gloss is an early open-source release. What is verified today:
 
 | Area | Status |
 |------|--------|
-| Platform | macOS 13 or newer, Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`) |
+| Platform | macOS 13 or newer. Every release ships two builds: Apple Silicon (`-arm64.dmg`, tested on the maintainer's Mac) and Intel (`-x64.dmg`, verified under Rosetta only; reports from Intel Macs are welcome) |
 | Codex CLI | Fully supported. Automatic session discovery is pinned to Codex 0.154.0, 0.157.1 and 0.158.0 |
 | Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
@@ -78,13 +78,13 @@ npm run build
 npm run desktop          # run the desktop app from source
 ```
 
-To build the installer:
+To build the installers (a release is always both architectures; each step cross-compiles from either kind of Mac):
 
 ```sh
-npm run build:tmux -- arm64      # or x64; each writes vendor/tmux/<arch>/bin/tmux
-npm run build:whisper -- arm64   # or x64; x64 is CPU-only (no Metal)
-npm run desktop:dmg -- --arm64   # or --x64, or both flags for two DMGs
-# the DMGs are written to release/ as Gloss-<version>-<arch>.dmg
+npm run build:tmux -- arm64 && npm run build:tmux -- x64          # vendor/tmux/<arch>/bin/tmux
+npm run build:whisper -- arm64 && npm run build:whisper -- x64    # x64 is CPU-only (no Metal)
+npm run desktop:dmg -- --arm64 --x64
+# the DMGs are written to release/ as Gloss-<version>-arm64.dmg and Gloss-<version>-x64.dmg
 ```
 
 `npm run desktop:install` builds and installs the app into *Applications* locally.
