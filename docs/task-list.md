@@ -22,6 +22,20 @@ Verification (2026-10-18):
 - Manual, isolated instance (fake `HOME`, built backend on port 4302, throwaway Claude 2.1.302 session in this worktree, driven with Playwright): badge read "Activity2" with both cards running about 2 s after the tool calls; the subagent card showed its Grep and SubagentHandback rows; the background tail stayed empty during `sleep 30`, then showed `done` and `[exited with code 0]`; the badge fell to 1 when the subagent ended and both cards went grey (finished, with durations 7 s and 30 s). A real `ls /nonexistent-gloss-check` row was marked failed at the top of the timeline and expanded to the command and `Exit code 1` output. Switching to a Codex session aborted both open streams at once, showed no Activity rows and a disabled Activity tab titled "Activity is available for Claude sessions"; switching back showed the right cards with tails closed, and a reload kept the correct badge.
 - [x] Fix found by manual acceptance (9d0ea41): Claude 2.1.302 runs subagents async and hands the report back as a peer record, so finished async cards had no report. The report is now read from the hand-back's structured `origin` fields; afterwards both real subagent cards showed their reports translated into Hebrew.
 
+Live page (2026-10-19): spec [2026-10-19-activity-live-page-design](superpowers/specs/2026-10-19-activity-live-page-design.md).
+
+- [x] 1. With one running subagent and one running background command: the strip shows the command and its last output line; two cards show (Claude, the subagent), each with at most 5 rows, newest on top; the newest row carries the highlight class briefly; the badge shows 2. No request to `translate-activity-report` exists anywhere.
+- [x] 2. "Show earlier actions (N)" on the Claude card reveals the older rows; "Show fewer" collapses them.
+- [x] 3. When the subagent finishes, its card disappears from the active list and History reads `1 finished subagent`; opening History shows its card with the English report and its last actions.
+- [x] 4. Translated, Original, Split and Terminal views and reply translation behave as before; the full unit and browser suites pass.
+- [x] 5. A Codex session shows the Activity tab disabled; a disconnected Claude session shows no live dots and opens no streams.
+
+Verification (2026-10-19):
+
+- Unit: `npm run typecheck && npx vitest run`: 1652 passed, 1 skipped (139 files passed, 1 skipped).
+- Browser: `PLAYWRIGHT_PORT=4321 npx playwright test`: 315/315 in 2.1 min, no reruns needed.
+- `npm run build` succeeds with Vite's existing chunk-size advisory.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
