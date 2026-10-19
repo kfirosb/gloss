@@ -9,6 +9,7 @@ import {
   type SessionClient,
 } from './session-client.js';
 import { errorMessage } from './error-message.js';
+import { useDisplayPreferences } from './display-preferences.js';
 import { MoveToGloss, copyCommand } from './claude-move.js';
 
 export function useClaudeConnection(client: SessionClient, enabled: boolean) {
@@ -276,7 +277,10 @@ export function PeerExplanation({ client }: { client: SessionClient }) {
   );
 }
 
-/** Settings → Claude connection (spec 3.1): status, Update for a stale entry, Remove. Acts on its own clicks. */
+/**
+ * Settings → Claude connection (spec 3.1): status, Update for a stale entry, Remove, and whether Move to Gloss asks
+ * first on this device. Acts on its own clicks.
+ */
 export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
   const [status, setStatus] = useState<RegistrationStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -310,6 +314,8 @@ export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
     }
   };
   const ours = status?.state === 'registered' || status?.state === 'stale';
+  // A display preference like the theme: it applies (and is saved on this device) as soon as it is toggled.
+  const [display, updateDisplay] = useDisplayPreferences();
   return (
     <section className="settings-section" aria-labelledby={id}>
       <h3 id={id}>Claude connection</h3>
@@ -358,6 +364,17 @@ export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
           </small>
         </>
       )}
+      <label className="move-ask-setting">
+        <input
+          type="checkbox"
+          checked={!display.moveWithoutConfirmation}
+          onChange={(e) => {
+            const ask = e.target.checked;
+            updateDisplay((value) => ({ ...value, moveWithoutConfirmation: !ask }));
+          }}
+        />{' '}
+        Ask before moving a session
+      </label>
       {error && <p role="alert">{error}</p>}
     </section>
   );

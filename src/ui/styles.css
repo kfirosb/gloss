@@ -2407,6 +2407,12 @@ pre {
 .move-popover p {
   margin: 0 0 8px;
 }
+.move-dont-ask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
 .move-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2479,7 +2485,8 @@ pre {
   margin-top: 14px;
   padding-top: 10px;
 }
-.settings-dialog .alert-settings label {
+.settings-dialog .alert-settings label,
+.settings-dialog .move-ask-setting {
   display: block;
   margin: 6px 0;
 }

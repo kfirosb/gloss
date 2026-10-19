@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PopupMenu } from './popup-menu.js';
-import { MovePopover } from './claude-move.js';
+import { MovePopover, useMoveLauncher } from './claude-move.js';
 import { SessionClient } from './session-client.js';
 import type { CatalogEntry } from '../core/session-catalog.js';
 import type { TerminalEntry, TerminalView } from '../core/session-contracts.js';
@@ -97,6 +97,7 @@ export function SessionTabs({
     () => (moveSessionId ? new SessionClient(moveSessionId) : undefined),
     [moveSessionId],
   );
+  const launchMove = useMoveLauncher();
   const [terminalMenu, setTerminalMenu] = useState<{
     terminal: TerminalEntry;
     x: number;
@@ -160,7 +161,10 @@ export function SessionTabs({
           {
             key: 'move',
             content: 'Move to Gloss…',
-            onChoose: () => setMovePopover({ key, sessionId: moveSessionId, x, y }),
+            onChoose: () =>
+              launchMove(new SessionClient(moveSessionId), () =>
+                setMovePopover({ key, sessionId: moveSessionId, x, y }),
+              ),
           },
         ]
       : []),

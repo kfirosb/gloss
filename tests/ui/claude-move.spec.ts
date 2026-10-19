@@ -413,3 +413,118 @@ test('“Move session here” for a working session offers Move when it finishes
   ).toBeVisible();
   expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
 });
+
+const DISPLAY_KEY = 'language-assistant:display:v1';
+const storedNoConfirm = (page: Page) =>
+  page.evaluate((key) => {
+    const saved: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+    return saved && typeof saved === 'object' && 'moveWithoutConfirmation' in saved
+      ? saved.moveWithoutConfirmation
+      : undefined;
+  }, DISPLAY_KEY);
+async function withoutConfirmation(target: Page | BrowserContext) {
+  await target.addInitScript(
+    (key) =>
+      localStorage.setItem(key, JSON.stringify({ version: 1, moveWithoutConfirmation: true })),
+    DISPLAY_KEY,
+  );
+}
+const liveNotice = (page: Page) => page.locator('.pane-live > .pane-toolbar').getByRole('status');
+
+test('Don’t ask again: the next click moves at once with no popover, and the notice shows the outcome', async ({
+  page,
+  context,
+}) => {
+  const move = await claudeTabsWithMove(context);
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('tab', { name: /Session A/ })
+    .click();
+  await moveHere(page).click();
+  const popover = page.locator('.pane-live').getByRole('dialog', { name: 'Move to Gloss' });
+  await popover.getByRole('checkbox', { name: 'Don’t ask again' }).check();
+  move.afterPost({ state: 'in-gloss' });
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  expect(await storedNoConfirm(page)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  // A new Claude process: the identity sent is the one in the status read for this click.
+  const next = { pid: 5151, procStart: 'Sat Oct 18 11:00:00 2026' };
+  move.set({ state: 'ready', process: next });
+  const release = move.hold();
+  move.afterPost({
+    state: 'unavailable',
+    reason: 'x',
+    failure: { reason: EXITED, manual: MANUAL },
+  });
+  await moveHere(page).click();
+  await expect(liveNotice(page)).toHaveText('Moving the session to Gloss…');
+  await expect(page.getByRole('dialog', { name: 'Move to Gloss' })).toHaveCount(0);
+  release();
+  await expect(liveNotice(page)).toContainText(EXITED);
+  await expect(liveNotice(page)).toContainText(MANUAL.cdCommand);
+  await expect(page.getByRole('dialog', { name: 'Move to Gloss' })).toHaveCount(0);
+  expect(move.posts).toEqual([
+    { action: 'move', ...PROCESS },
+    { action: 'move', ...next },
+  ]);
+});
+
+test('without asking, the tab menu waits for a working session, and an unavailable one still explains why', async ({
+  page,
+  context,
+}) => {
+  await withoutConfirmation(context);
+  const move = await claudeTabsWithMove(context);
+  move.set({ state: 'busy', reason: WORKING, process: PROCESS });
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session A/ }).click();
+  move.afterPost({ state: 'waiting' });
+  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
+  await expect(liveNotice(page)).toHaveText('Gloss will move this session when Claude finishes.');
+  await expect(page.getByRole('dialog', { name: 'Move to Gloss' })).toHaveCount(0);
+  expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
+  // The wait can still be cancelled: the popover opens for a state there is nothing to do at once.
+  await moveHere(page).click();
+  const popover = page.locator('.pane-live').getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByRole('button', { name: 'Don’t move', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // The waited-for session closed: the wait ends with the reason as the notice, and a new click explains it.
+  move.set({
+    state: 'unavailable',
+    reason: 'This Claude session isn’t running in a terminal now.',
+  });
+  await expect(liveNotice(page)).toHaveText('This Claude session isn’t running in a terminal now.');
+  await moveHere(page).click();
+  await expect(
+    popover.getByText('This Claude session isn’t running in a terminal now.', { exact: true }),
+  ).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
+});
+
+test('Settings → Ask before moving a session restores the popover at once', async ({ page }) => {
+  await withoutConfirmation(page);
+  await page.route('**/api/settings/language', (r) =>
+    r.fulfill({ json: { write: 'he', send: 'en', reply: 'he', assist: 'he' } }),
+  );
+  const move = await outsideSession(page, { state: 'ready', process: PROCESS });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  const ask = settings
+    .getByRole('region', { name: 'Claude connection' })
+    .getByRole('checkbox', { name: 'Ask before moving a session' });
+  await expect(ask).not.toBeChecked();
+  await ask.check();
+  expect(await storedNoConfirm(page)).toBe(false);
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(settings).toBeHidden();
+  await moveHere(page).click();
+  const popover = page.locator('.pane-live').getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  await expect(popover.getByRole('checkbox', { name: 'Don’t ask again' })).not.toBeChecked();
+  expect(move.posts).toEqual([]);
+});

@@ -1,10 +1,15 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { ClaudeMoveFailure, ClaudeMoveRequest } from '../runtime/claude-move.js';
 import type { SessionClient } from './session-client.js';
+import { useDisplayPreferences } from './display-preferences.js';
 import {
   MOVE_DONE_TEXT,
+  MOVE_MOVING_TEXT,
+  MOVE_WAITING_TEXT,
   moveViewOf,
+  moveWithoutAsking,
   requestMove,
+  useMoveProgress,
   useMoveView,
   type MoveClient,
 } from './claude-move-watch.js';
@@ -50,8 +55,29 @@ function FailureNote({ failure }: { failure: ClaudeMoveFailure }) {
   );
 }
 type Confirmable = Exclude<ClaudeMoveRequest, { action: 'cancel' }>;
-const WAITING_TEXT = 'Gloss will move this session when Claude finishes.';
-const MOVING_TEXT = 'Moving the session to Gloss…';
+/**
+ * Starts Move to Gloss from a click. Normally `ask` shows the popover; with "Don’t ask again" set on this device the
+ * click is the confirmation and the move starts at once (claude-move-watch reads the status it acts on), and the
+ * popover opens only when there is nothing to do at once, so the user sees why. A late answer for an older click
+ * or an unmounted caller opens nothing.
+ */
+export function useMoveLauncher(): (client: MoveClient, ask: () => void) => void {
+  const [preferences] = useDisplayPreferences();
+  const latest = useRef(0);
+  useEffect(
+    () => () => {
+      latest.current++;
+    },
+    [],
+  );
+  return (client, ask) => {
+    const click = ++latest.current;
+    if (!preferences.moveWithoutConfirmation) return ask();
+    void moveWithoutAsking(client).then((started) => {
+      if (!started && click === latest.current) ask();
+    });
+  };
+}
 /**
  * Spec 5: the compact Move to Gloss popover for one outside Claude session, in one step: pressing Move (or Move when
  * it finishes) is the confirmation. Its buttons exist only while the status shows the state they act on, and each
@@ -72,6 +98,8 @@ export function MovePopover({
   opener?: RefObject<HTMLElement | null>;
 }) {
   const { status, pending, error } = useMoveView(client);
+  const [, updatePreferences] = useDisplayPreferences();
+  const [dontAsk, setDontAsk] = useState(false);
   const id = useId();
   const root = useRef<HTMLElement>(null);
   const close = useRef(onClose);
@@ -94,6 +122,8 @@ export function MovePopover({
   const act = (request: ClaudeMoveRequest) => {
     // One POST per click: a second click before the first one's pending state renders sends nothing.
     if (moveViewOf(client.sessionId).pending) return;
+    if (request.action !== 'cancel' && dontAsk)
+      updatePreferences((value) => ({ ...value, moveWithoutConfirmation: true }));
     void requestMove(client, request);
     // The pressed button gives way to the progress line; focus stays here so Escape still closes the popover.
     root.current?.focus();
@@ -101,6 +131,10 @@ export function MovePopover({
   const confirmation = (request: Confirmable, label: string) => (
     <>
       <p>{MOVE_CONFIRMATION}</p>
+      <label className="move-dont-ask">
+        <input type="checkbox" checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} />{' '}
+        Don’t ask again
+      </label>
       <div className="move-actions">
         <button type="button" className="primary" disabled={busy} onClick={() => act(request)}>
           {label}
@@ -128,7 +162,7 @@ export function MovePopover({
       <h3 id={id}>Move to Gloss</h3>
       {status?.failure && <FailureNote failure={status.failure} />}
       {status?.state === 'moving' || pending === 'move' ? (
-        <p role="status">{MOVING_TEXT}</p>
+        <p role="status">{MOVE_MOVING_TEXT}</p>
       ) : status?.state === 'ready' ? (
         confirmation({ action: 'move', expected: status.process }, 'Move')
       ) : status?.state === 'busy' ? (
@@ -138,7 +172,7 @@ export function MovePopover({
         </>
       ) : status?.state === 'waiting' ? (
         <>
-          <p role="status">{WAITING_TEXT}</p>
+          <p role="status">{MOVE_WAITING_TEXT}</p>
           <div className="move-actions">
             <button type="button" disabled={busy} onClick={() => act({ action: 'cancel' })}>
               Don’t move
@@ -161,6 +195,9 @@ export function MovePopover({
 export function MoveSessionHere({ client }: { client: MoveClient }) {
   const [asking, setAsking] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  const launch = useMoveLauncher();
+  // A move started without the popover reports here: its progress, then the outcome as the session's notice.
+  const progress = useMoveProgress(client.sessionId);
   return (
     <span className="move-anchor">
       <button
@@ -169,10 +206,15 @@ export function MoveSessionHere({ client }: { client: MoveClient }) {
         className="move-here"
         aria-haspopup="dialog"
         aria-expanded={asking}
-        onClick={() => setAsking((open) => !open)}
+        onClick={() => (asking ? setAsking(false) : launch(client, () => setAsking(true)))}
       >
         Move session here
       </button>
+      {!asking && progress && (
+        <small className="live-attention-notice" role="status" dir="auto">
+          {progress}
+        </small>
+      )}
       {asking && (
         <MovePopover
           client={client}
@@ -191,6 +233,8 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
   const { status, pending, error } = useMoveView(client);
   const [asking, setAsking] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const launch = useMoveLauncher();
+  const ask = () => launch(client, () => setAsking(true));
   if (asking)
     return (
       <MovePopover
@@ -207,9 +251,9 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
     <div className="move-to-gloss" dir="ltr">
       {status?.failure && <FailureNote failure={status.failure} />}
       {status?.state === 'moving' || pending === 'move' ? (
-        <p role="status">{MOVING_TEXT}</p>
+        <p role="status">{MOVE_MOVING_TEXT}</p>
       ) : status?.state === 'ready' ? (
-        <button ref={trigger} type="button" disabled={busy} onClick={() => setAsking(true)}>
+        <button ref={trigger} type="button" disabled={busy} onClick={ask}>
           Move to Gloss
         </button>
       ) : status?.state === 'busy' ? (
@@ -217,13 +261,13 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
           <button type="button" disabled>
             {status.reason}
           </button>
-          <button ref={trigger} type="button" disabled={busy} onClick={() => setAsking(true)}>
+          <button ref={trigger} type="button" disabled={busy} onClick={ask}>
             Move when it finishes
           </button>
         </>
       ) : status?.state === 'waiting' ? (
         <>
-          <p role="status">{WAITING_TEXT}</p>
+          <p role="status">{MOVE_WAITING_TEXT}</p>
           <button
             type="button"
             disabled={busy}

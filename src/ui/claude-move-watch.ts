@@ -17,6 +17,8 @@ export const MOVE_STATUS_POLL_MS = 2000;
  */
 export const MOVE_OUTCOME_WATCH_MS = MOVE_RESUME_CHECK_MS + MOVE_STATUS_POLL_MS;
 export const MOVE_DONE_TEXT = 'This session now runs in Gloss.';
+export const MOVE_WAITING_TEXT = 'Gloss will move this session when Claude finishes.';
+export const MOVE_MOVING_TEXT = 'Moving the session to Gloss…';
 const STATUS_UNAVAILABLE = 'Gloss couldn’t check Move to Gloss; it will check again.';
 
 /** The part of SessionClient a move needs; responses are untrusted. */
@@ -200,7 +202,7 @@ export function attachMoveView(client: MoveClient): () => void {
     stop(watch);
   };
 }
-/** Only called from an explicit, confirmed click (or Don’t move). */
+/** Only called from an explicit click: a confirmed one, one with confirmation waived, or Don’t move. */
 export async function requestMove(client: MoveClient, request: ClaudeMoveRequest): Promise<void> {
   const watch = watchFor(client);
   const cancel = request.action === 'cancel';
@@ -234,6 +236,44 @@ export async function requestMove(client: MoveClient, request: ClaudeMoveRequest
   settle(watch);
   if (!needed(watch)) stop(watch);
 }
+// Sessions whose no-confirmation click is still reading the status it will act on.
+const reading = new Set<string>();
+/**
+ * A click with "Don’t ask again" set (spec 5.2 waived by the user on this device): the click is the confirmation.
+ * Reads the status now and sends the identity it shows: `ready` moves, `busy` moves when Claude finishes. Resolves
+ * false when there is nothing to do at once (or the status can't be read), so the caller shows the popover instead.
+ */
+export async function moveWithoutAsking(client: MoveClient): Promise<boolean> {
+  const { sessionId } = client;
+  // One POST per click: a click while another is being read or sent adds nothing.
+  if (reading.has(sessionId) || moveViewOf(sessionId).pending) return true;
+  reading.add(sessionId);
+  let status: ClaudeMoveStatus | undefined;
+  try {
+    status = readMoveStatus(await client.claudeMove());
+  } catch {
+    status = undefined;
+  } finally {
+    reading.delete(sessionId);
+  }
+  if (moveViewOf(sessionId).pending) return true;
+  const request: ClaudeMoveRequest | undefined =
+    status?.state === 'ready'
+      ? { action: 'move', expected: status.process }
+      : status?.state === 'busy'
+        ? { action: 'when-idle', expected: status.process }
+        : undefined;
+  if (!request) return false;
+  void requestMove(client, request);
+  return true;
+}
+/** What a move started here is doing now, as one line; undefined when none is under way. */
+export function moveProgressText(view: MoveView): string | undefined {
+  if (view.phase !== 'in-flight') return undefined;
+  if (view.pending === 'move' || view.status?.state === 'moving') return MOVE_MOVING_TEXT;
+  if (view.status?.state === 'waiting') return MOVE_WAITING_TEXT;
+  return undefined;
+}
 function subscribe(sessionId: string, listener: () => void) {
   const set = listeners.get(sessionId) ?? new Set();
   set.add(listener);
@@ -259,6 +299,13 @@ export function useMoveShown(sessionId: string): boolean {
   return useSyncExternalStore(
     (listener) => subscribe(sessionId, listener),
     () => moveViewOf(sessionId).phase !== 'none',
+  );
+}
+/** The progress of a move started for this session, without keeping its status polled. */
+export function useMoveProgress(sessionId: string): string | undefined {
+  return useSyncExternalStore(
+    (listener) => subscribe(sessionId, listener),
+    () => moveProgressText(moveViewOf(sessionId)),
   );
 }
 /** The outcome of a move that ended with no dialog open, handed out once. */
