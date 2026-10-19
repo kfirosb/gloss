@@ -28,7 +28,7 @@ Gloss is an early open-source release. What is verified today:
 
 | Area | Status |
 |------|--------|
-| Platform | macOS 13 or newer, Apple Silicon. Linux x64 and arm64 (deb and AppImage), new in 0.17 and so far verified only in a container |
+| Platform | macOS 13 or newer, Apple Silicon. Linux x64 (deb, AppImage) and arm64 (deb), new in 0.17 and so far verified only in a container |
 | Codex CLI | Fully supported. Automatic session discovery is pinned to Codex 0.154.0, 0.157.1 and 0.158.0 |
 | Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
@@ -47,7 +47,7 @@ xattr -cr "/Applications/Gloss.app"
 
 ## Install on Linux
 
-1. Download `Gloss-<version>-arm64.deb` or `Gloss-<version>-amd64.deb` (or the matching `.AppImage`) from the [Releases](../../releases) page.
+1. Download `Gloss-<version>-amd64.deb` or `Gloss-<version>-arm64.deb` (or, for x64, `Gloss-<version>-x86_64.AppImage`) from the [Releases](../../releases) page.
 2. `sudo apt install ./Gloss-<version>-<arch>.deb` installs it to `/opt/Gloss` with a launcher entry; the AppImage needs only `chmod +x` and runs in place.
 3. Launch *Gloss* from your application menu, or run `/opt/Gloss/gloss`.
 
@@ -90,7 +90,7 @@ npm run desktop:dmg -- --arm64
 
 `npm run desktop:install` builds and installs the app into *Applications* locally.
 
-Linux packages are built from a Mac (or any machine with Docker): `npm run build:linux-vendor` compiles tmux, whisper-server and node-pty for both architectures in Debian containers, then `npm run desktop:linux` writes the deb and AppImage files to `release/`. `sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.deb` installs and launches the result in an Ubuntu container. See [docs/linux-build.md](docs/linux-build.md).
+Linux packages are built from a Mac (or any machine with Docker): `npm run build:linux-vendor` compiles tmux, whisper-server and node-pty for both architectures in Debian containers, then `npm run desktop:linux` writes the deb files and the x64 AppImage to `release/`. `sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.deb` installs and launches the result in an Ubuntu container. See [docs/linux-build.md](docs/linux-build.md).
 
 There is also a browser mode: `node dist/server/runtime/cli.js --agent codex --session <thread-id> --language he --project "$PWD"` prints an authenticated local URL you can open in any browser or embedded pane.
 

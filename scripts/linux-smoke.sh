@@ -43,7 +43,11 @@ su tester -c "cd ~ && DISPLAY=:99 $APP > ~/app.log 2>&1 &"
 CONFIG=""
 for i in $(seq 1 60); do CONFIG=$( (find /home/tester/.config -name desktop.json 2>/dev/null || true) | head -1 || true); [ -n "$CONFIG" ] && [ -s "$CONFIG" ] && break; sleep 1; done
 if [ -z "$CONFIG" ] || [ ! -s "$CONFIG" ]; then
-  echo "no desktop.json after 60 s"; ls -R /home/tester/.config 2>/dev/null | head -40; ps -ef | grep -v grep | grep -c gloss || true; grep -v dbus /home/tester/app.log; exit 1
+  echo "no desktop.json after 60 s"
+  (grep -v dbus /home/tester/app.log || true) | tail -40
+  (ls -R /home/tester/.config 2>/dev/null || true) | head -20
+  (ps -ef | grep -v grep | grep -i gloss || true) | cut -c1-200
+  exit 1
 fi
 echo "config: $CONFIG"
 PORT=$(sed -n "s/.*\"port\": *\([0-9]*\).*/\1/p" "$CONFIG")

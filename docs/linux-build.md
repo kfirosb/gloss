@@ -1,6 +1,6 @@
 # Linux build
 
-Gloss ships for Linux as a `.deb` and an `.AppImage` for x64 and arm64. Both are built from this Mac (or any machine with Docker and Node.js 24); no Linux host is needed to build, and a container stands in for one to test.
+Gloss ships for Linux as a `.deb` for x64 and arm64 and an `.AppImage` for x64 (the arm64 AppImage runtime that electron-builder 26 bundles, appimage 12.0.1, is linked against `libz.so`, the development symlink, so it fails to start on a stock Ubuntu; the arm64 build is therefore deb only until that runtime is fixed). Both are built from this Mac (or any machine with Docker and Node.js 24); no Linux host is needed to build, and a container stands in for one to test.
 
 ## 1. Native pieces
 
@@ -20,10 +20,10 @@ The script checks with `ldd` that only glibc, the terminfo library and the GCC r
 ## 2. Packages
 
 ```sh
-npm run desktop:linux             # both architectures; add -- --arm64 for one
+npm run desktop:linux             # every Linux target: x64 AppImage, x64 and arm64 deb
 ```
 
-`predesktop:linux` refuses to run without the vendor binaries. The run writes `release/Gloss-<version>-<arch>.AppImage` and `release/Gloss-<version>-<arch>.deb` (electron-builder names the x64 deb `amd64`). `-c.npmRebuild=false` keeps electron-builder from trying to compile node-pty for Linux on the Mac. The `linux` block in `package.json` bundles `vendor/linux-${arch}` into `resources/bin`, and the deb depends on `lsof`, which session discovery needs, and recommends `ripgrep`, the freedesktop sound theme and `pulseaudio-utils`.
+`predesktop:linux` refuses to run without the vendor binaries. The run writes `release/Gloss-<version>-x86_64.AppImage`, `release/Gloss-<version>-amd64.deb` and `release/Gloss-<version>-arm64.deb`. `-c.npmRebuild=false` keeps electron-builder from trying to compile node-pty for Linux on the Mac. The `linux` block in `package.json` bundles `vendor/linux-${arch}` into `resources/bin`, and the deb depends on `lsof`, which session discovery needs, and recommends `ripgrep`, the freedesktop sound theme and `pulseaudio-utils`.
 
 Nothing is signed. The Mac packaging is unchanged; its vendor entries simply moved under the `mac` key.
 
@@ -31,10 +31,9 @@ Nothing is signed. The Mac packaging is unchanged; its vendor entries simply mov
 
 ```sh
 sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.deb
-sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.AppImage
 ```
 
-This installs the deb (or, for an AppImage, the deb's dependency list and the file itself, run with `--appimage-extract-and-run` because containers have no FUSE) in a fresh `ubuntu:24.04` container, starts Xvfb, launches `/opt/Gloss/gloss` as an unprivileged user, waits for the app's `desktop.json` under `~/.config` (Electron names that folder `language-assistant`, after the package name), checks that the local server answers on the recorded port, saves `release/smoke/smoke-<kind>.png` and prints the app log. The container runs with `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` so Chromium's setuid sandbox can create namespaces as it does on a real host; the packaged app is not changed. It exits non-zero when the server never answers. Use the arm64 deb on an Apple Silicon Mac; Chromium under qemu is not reliable enough for the x64 package, which is checked only for its contents.
+This installs the deb (or, for an AppImage, the deb's dependency list and the file itself, run with `--appimage-extract-and-run` because containers have no FUSE) in a fresh `ubuntu:24.04` container, starts Xvfb, launches `/opt/Gloss/gloss` as an unprivileged user, waits for the app's `desktop.json` under `~/.config` (Electron names that folder `language-assistant`, after the package name), checks that the local server answers on the recorded port, saves `release/smoke/smoke-<kind>.png` and prints the app log. The container runs with `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` so Chromium's setuid sandbox can create namespaces as it does on a real host; the packaged app is not changed. It exits non-zero when the server never answers. Use the arm64 deb on an Apple Silicon Mac. The x64 packages cannot be launched here: Chromium is not reliable under qemu and qemu refuses to load the AppImage runtime at all, so the x64 deb and AppImage are checked for their contents and for the runtime's shared-library needs (`readelf -d`), not launched. The script also accepts an `.AppImage` (installing the deb's dependency list and running it with `--appimage-extract-and-run`) for when a usable arm64 AppImage runtime exists.
 
 ## What differs from macOS at runtime
 

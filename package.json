@@ -28,7 +28,7 @@
     "desktop:dmg": "npm run build && electron-builder --mac dmg",
     "desktop:install": "sh scripts/install-mac.sh",
     "predesktop:linux": "node scripts/check-linux-vendor.mjs",
-    "desktop:linux": "npm run build && node scripts/stage-linux-node-pty.mjs && electron-builder --linux --x64 --arm64 -c.npmRebuild=false",
+    "desktop:linux": "npm run build && node scripts/stage-linux-node-pty.mjs && electron-builder --linux -c.npmRebuild=false",
     "build:linux-vendor": "sh scripts/build-linux-vendor.sh x64 && sh scripts/build-linux-vendor.sh arm64",
     "build:tmux": "sh scripts/build-tmux.sh",
     "build:whisper": "sh scripts/build-whisper.sh",
@@ -106,8 +106,19 @@
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "Development",
       "icon": "build/icon.png",
