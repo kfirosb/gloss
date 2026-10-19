@@ -4,6 +4,7 @@ import type { ChannelSetup } from '../runtime/claude-channel-setup.js';
 import type { PeerSetting } from '../runtime/claude-peer-setting.js';
 import { changeClaudeRegistration, type SessionClient } from './session-client.js';
 import { errorMessage } from './error-message.js';
+import { MoveToGloss, copyCommand } from './claude-move.js';
 
 export function useClaudeConnection(client: SessionClient, enabled: boolean) {
   const [status, setStatus] = useState<ChannelStatus>({
@@ -42,14 +43,6 @@ const labels = {
   disconnected: 'Disconnected',
   unsupported: 'Unsupported',
 };
-/** Copies `text`; when the clipboard is unavailable, selects the field so the user can copy it by hand. */
-async function copy(text: string, field: HTMLTextAreaElement | null) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    field?.select();
-  }
-}
 export function ClaudeConnection({
   client,
   status,
@@ -57,6 +50,7 @@ export function ClaudeConnection({
   client: SessionClient;
   status: ChannelStatus;
 }) {
+  const [open, setOpen] = useState(false);
   const [setup, setSetup] = useState<ChannelSetup | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -80,7 +74,11 @@ export function ClaudeConnection({
     }, 'Registration failed');
   const registration = setup?.kind === 'registration-required' ? setup.registration : undefined;
   return (
-    <details className="claude-connection" dir="ltr">
+    <details
+      className="claude-connection"
+      dir="ltr"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>Connect this session to Gloss · {labels[status.state]}</summary>
       <p>
         {status.reason ??
@@ -152,14 +150,20 @@ export function ClaudeConnection({
             value={setup.command}
             rows={2}
           />
-          <button type="button" onClick={() => void copy(setup.command, field.current)}>
+          <button type="button" onClick={() => void copyCommand(setup.command, field.current)}>
             Copy
           </button>
-          <button type="button" onClick={() => void copy(setup.cdCommand, field.current)}>
+          <button type="button" onClick={() => void copyCommand(setup.cdCommand, field.current)}>
             Copy with cd
           </button>
+          <p>
+            Or press <b>Move to Gloss</b> and Gloss will do this for you: it checks that Claude
+            isn't working right now, closes the session in the terminal where it's open, and opens
+            it again here, with all its history. You don't need to do anything else.
+          </p>
         </>
       )}
+      {open && <MoveToGloss client={client} />}
       {error && <p role="alert">{error}</p>}
     </details>
   );
@@ -244,7 +248,7 @@ export function PeerExplanation({ client }: { client: SessionClient }) {
       </p>
       <p>
         <b>For a full connection:</b> close the session and run the command in "Connect this session
-        to Gloss".
+        to Gloss", or press <b>Move to Gloss</b>.
       </p>
       {error && <p role="alert">{error}</p>}
     </details>

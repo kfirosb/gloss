@@ -46,6 +46,7 @@ export function SessionTabs({
   onShowTerminal,
   onRetry,
   onRemove,
+  onMoveToGloss,
   selectedTerminalId,
   onSelectTerminal,
   onExpandTerminal,
@@ -60,6 +61,7 @@ export function SessionTabs({
   onShowTerminal?(launchId: string, title: string): void;
   onRetry?(launchId: string): void;
   onRemove?(entries: CatalogEntry[]): void;
+  onMoveToGloss?(sessionId: string): void; // context menu: an outside Claude session
   selectedTerminalId?: string | undefined; // launchId shown in the workspace view
   onSelectTerminal?(terminal: TerminalEntry): void; // click on a terminal tab
   onExpandTerminal?(terminal: TerminalEntry): void; // context menu: Expand (popup mode) / Shrink (workspace mode)
@@ -70,7 +72,8 @@ export function SessionTabs({
   const root = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{
     key: string;
-    launchId: string;
+    launchId?: string;
+    moveSessionId?: string;
     pending: boolean;
     title: string;
     x: number;
@@ -84,9 +87,17 @@ export function SessionTabs({
     x: number;
     y: number;
   } | null>(null);
+  // A Claude session no Gloss launch owns can be moved into Gloss (spec 5); the server decides whether it may.
+  const movable = (entry: CatalogEntry) =>
+    !!onMoveToGloss &&
+    entry.target.agent === 'claude' &&
+    !!entry.sessionId &&
+    !entry.launchId &&
+    entry.availability !== 'unavailable';
   // A placeholder row has no session to select, so its terminal and retry live in the tab's context menu.
   const hasMenu = (entry: CatalogEntry) =>
-    !!entry.launchId && (!!onEnd || (launchPending(entry) && !!(onShowTerminal || onRetry)));
+    movable(entry) ||
+    (!!entry.launchId && (!!onEnd || (launchPending(entry) && !!(onShowTerminal || onRetry))));
   const tabFor = (key: string) =>
     root.current?.querySelector<HTMLElement>(`[data-session-key=${JSON.stringify(key)}]`);
   const openSavedMenu = (entry: CatalogEntry, anchor: { x: number; y: number }) => {
@@ -99,18 +110,55 @@ export function SessionTabs({
     anchor: { x: number; y: number } | undefined,
     tab: HTMLElement,
   ) => {
-    if (!entry.launchId || !hasMenu(entry)) return;
+    if (!hasMenu(entry)) return;
     const box = tab.parentElement?.parentElement?.getBoundingClientRect();
     const at = tab.getBoundingClientRect();
     setMenu({
       key: entry.key,
-      launchId: entry.launchId,
+      ...(entry.launchId ? { launchId: entry.launchId } : {}),
+      ...(movable(entry) && entry.sessionId ? { moveSessionId: entry.sessionId } : {}),
       pending: launchPending(entry),
       title: entry.sessionTitle ?? agentName(entry),
       x: (anchor?.x ?? at.left) - (box?.left ?? 0),
       y: (anchor?.y ?? at.bottom) - (box?.top ?? 0),
     });
   };
+  const menuItems = ({
+    launchId,
+    moveSessionId,
+    pending,
+    title,
+  }: {
+    launchId?: string;
+    moveSessionId?: string;
+    pending: boolean;
+    title: string;
+  }) => [
+    ...(moveSessionId && onMoveToGloss
+      ? [
+          {
+            key: 'move',
+            content: 'Move to Gloss…',
+            onChoose: () => onMoveToGloss(moveSessionId),
+          },
+        ]
+      : []),
+    ...(launchId && pending && onShowTerminal
+      ? [
+          {
+            key: 'terminal',
+            content: 'Show terminal',
+            onChoose: () => onShowTerminal(launchId, title),
+          },
+        ]
+      : []),
+    ...(launchId && pending && onRetry
+      ? [{ key: 'retry', content: 'Retry connection', onChoose: () => onRetry(launchId) }]
+      : []),
+    ...(launchId && onEnd
+      ? [{ key: 'end', content: 'End session', onChoose: () => onEnd(launchId) }]
+      : []),
+  ];
   const openTerminalMenu = (
     terminal: TerminalEntry,
     anchor: { x: number; y: number } | undefined,
@@ -326,29 +374,7 @@ export function SessionTabs({
             label="Session actions"
             menuClassName="session-saved-menu session-context-menu"
             menuLabel="Session actions"
-            items={[
-              ...(menu.pending && onShowTerminal
-                ? [
-                    {
-                      key: 'terminal',
-                      content: 'Show terminal',
-                      onChoose: () => onShowTerminal(menu.launchId, menu.title),
-                    },
-                  ]
-                : []),
-              ...(menu.pending && onRetry
-                ? [
-                    {
-                      key: 'retry',
-                      content: 'Retry connection',
-                      onChoose: () => onRetry(menu.launchId),
-                    },
-                  ]
-                : []),
-              ...(onEnd
-                ? [{ key: 'end', content: 'End session', onChoose: () => onEnd(menu.launchId) }]
-                : []),
-            ]}
+            items={menuItems(menu)}
           />
         </div>
       )}

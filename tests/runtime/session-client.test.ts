@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionClient } from '../../src/ui/session-client.js';
 import { WorkspaceConflict, defaultWorkspace } from '../../src/core/session-contracts.js';
+import { parseMoveRequest, type ClaudeMoveRequest } from '../../src/runtime/claude-move.js';
 afterEach(() => vi.unstubAllGlobals());
 it('uses encoded session routes and capability for every request including image metadata', async () => {
   vi.stubGlobal('location', { hash: '#capability=secret' });
@@ -70,4 +71,28 @@ it('ignores events with a different session envelope or snapshot identity', asyn
   expect(listener).toHaveBeenCalledWith(
     expect.objectContaining({ sessionId: 'A', snapshot: { id: 'A' } }),
   );
+});
+it('sends each Move to Gloss request as a body the server parses back to the same request', async () => {
+  vi.stubGlobal('location', { hash: '#capability=secret' });
+  const fetcher = vi.fn(
+    async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ state: 'waiting' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const client = new SessionClient('A');
+  const expected = { pid: 4242, procStart: 'Sat Oct 18 10:00:00 2026' };
+  const requests: ClaudeMoveRequest[] = [
+    { action: 'move', expected },
+    { action: 'when-idle', expected },
+    { action: 'cancel' },
+  ];
+  for (const request of requests) await client.moveClaude(request);
+  expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual(
+    requests.map(() => ['/api/sessions/A/claude-move', 'POST']),
+  );
+  expect(
+    fetcher.mock.calls.map(([, init]) => parseMoveRequest(JSON.parse(String(init?.body)))),
+  ).toEqual(requests);
 });

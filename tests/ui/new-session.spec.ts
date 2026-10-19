@@ -162,7 +162,9 @@ test('the context menu opens from the keyboard and Escape returns focus to the t
   const other = page.getByRole('tab', { name: /Session B/ });
   await other.focus();
   await page.keyboard.press('Shift+F10');
-  await expect(page.getByRole('menu')).toHaveCount(0);
+  // An outside Claude session has no launch to end; its menu offers only Move to Gloss (spec 5).
+  await expect(page.getByRole('menuitem', { name: 'Move to Gloss…', exact: true })).toBeFocused();
+  await expect(page.getByRole('menuitem', { name: 'End session', exact: true })).toHaveCount(0);
 });
 test('+ is available before any folder exists and the dialog explains how to get one', async ({
   page,

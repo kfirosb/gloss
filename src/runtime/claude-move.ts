@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Target } from '../core/contracts.js';
 import { recordOf } from '../core/json-record.js';
+import { MOVE_RESUME_CHECK_MS } from '../core/claude-move-policy.js';
 import { claudeConfigDir, validateTarget } from '../agents/shared.js';
 import { pidExists } from '../agents/claude/liveness.js';
 import { readProcess, type ProcessInfo } from '../agents/claude/process-probe.js';
@@ -44,11 +45,7 @@ export const MOVE_CLOSE_TIMEOUT_MS = 10_000;
 const MOVE_CLOSE_POLL_MS = 100;
 /** "Move when it finishes" re-reads the session record this often, in milliseconds. */
 export const MOVE_WAIT_POLL_MS = 1000;
-/**
- * How long Gloss watches a reopened session for its record, another session's record or its pane closing, in
- * milliseconds. Task 1 measured 681 ms from `--resume` to the record; max(15 000, 2 × that) rounded up to 1 000.
- */
-export const MOVE_RESUME_CHECK_MS = 15_000;
+export { MOVE_RESUME_CHECK_MS };
 /** Step between checks of a reopened session, in milliseconds. */
 const MOVE_RESUME_POLL_MS = 250;
 /** Bound on one `ps` read, in milliseconds; a slow answer reads as "not this process", so nothing is signalled. */

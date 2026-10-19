@@ -92,6 +92,7 @@ import {
 } from '../core/language-settings.js';
 import { isHebrew } from '../core/language-style.js';
 import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
+import { useMoveNotice, useMoveShown } from './claude-move-watch.js';
 import {
   DIALOG_OPEN_REASON,
   isChannelAwaitingReply,
@@ -337,8 +338,14 @@ export function SessionWorkspace({
   const [terminalFocus, setTerminalFocus] = useState(true);
   /** Why the terminal was shown for a declined Send; cleared when the user picks a view or sends again. */
   const [terminalNotice, setTerminalNotice] = useState<string>();
+  /** How a Move to Gloss ended when no dialog was open to show it (I6); cleared when the user picks a view. */
+  const [moveNotice, setMoveNotice] = useState<string>();
+  useMoveNotice(record.id, setMoveNotice);
+  // I6: the connect dialog that started a move stays until the move has an outcome, even once the route is tmux.
+  const moveShown = useMoveShown(record.id);
   const chooseLiveView = (view: LiveView) => {
     setTerminalNotice(undefined);
+    setMoveNotice(undefined);
     setApprovalView(null);
     setTerminalFocus(true);
     setLiveLayout({ view, conversation: selectView(view, liveLayout.conversation) });
@@ -1145,6 +1152,11 @@ export function SessionWorkspace({
           {terminalNotice}
         </small>
       )}
+      {moveNotice && (
+        <small className="live-attention-notice" role="status" dir="auto">
+          {moveNotice}
+        </small>
+      )}
     </>
   );
   const liveFeed = (
@@ -1333,7 +1345,7 @@ export function SessionWorkspace({
   );
   const composerPanel = (
     <ReadingPane title="Chat with the Language Assistant" name="composer">
-      {isClaude && route && route.transport !== 'tmux' && (
+      {isClaude && route && (route.transport !== 'tmux' || moveShown) && (
         <ClaudeConnection client={client} status={channelStatus} />
       )}
       {stripState && (

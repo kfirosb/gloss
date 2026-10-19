@@ -29,6 +29,15 @@ async function fixture(
       ? { transport: 'channel' }
       : { transport: null, reason: 'Gloss can’t reach this session yet.' });
   await page.route('**/api/sessions/*/claude-route', (r) => r.fulfill({ json: currentRoute() }));
+  // The connect dialog also shows Move to Gloss; these tests are about the channel, so the session can't be moved.
+  await page.route('**/api/sessions/*/claude-move', (r) =>
+    r.fulfill({
+      json: {
+        state: 'unavailable',
+        reason: 'This Claude session isn’t running in a terminal now.',
+      },
+    }),
+  );
   await mockSession(page, () => snapshot);
   await page.route('**/api/sessions/*/events', (route) =>
     route.fulfill({ contentType: 'text/event-stream', body: '' }),

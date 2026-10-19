@@ -217,6 +217,8 @@ it('reads Move to Gloss status and accepts only exact move requests, only for Cl
     state: 'in-gloss',
   });
   expect(act).toHaveBeenLastCalledWith(target, { action: 'move', expected: identity });
+  expect((await call(url('A'), 'POST', { action: 'when-idle', ...identity })).status).toBe(200);
+  expect(act).toHaveBeenLastCalledWith(target, { action: 'when-idle', expected: identity });
   await call(url('A'), 'POST', { action: 'cancel' });
   expect(act).toHaveBeenLastCalledWith(target, { action: 'cancel' });
   await app.close();
