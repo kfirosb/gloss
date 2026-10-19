@@ -1,10 +1,10 @@
-// Native macOS shell: runs the local server on Electron's bundled Node and shows the UI in an app window.
+// Native desktop shell (macOS, Linux): runs the local server on Electron's bundled Node and shows the UI in an app window.
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -29,13 +29,18 @@ function writeConfig(config) {
   writeFileSync(configPath(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
-// Apps opened from Finder get a minimal PATH; the server needs `claude` and `codex` from the user's shell.
+const isMac = process.platform === 'darwin';
+// Apps opened from Finder or a desktop launcher get a minimal PATH; the server needs `claude` and `codex` from the user's shell.
 function loginShellPath() {
   try {
-    return execFileSync(process.env.SHELL || '/bin/zsh', ['-lic', 'printf "__PATH__%s" "$PATH"'], {
-      encoding: 'utf8',
-      timeout: 5000,
-    })
+    return execFileSync(
+      process.env.SHELL || (isMac ? '/bin/zsh' : '/bin/bash'),
+      ['-lic', 'printf "__PATH__%s" "$PATH"'],
+      {
+        encoding: 'utf8',
+        timeout: 5000,
+      },
+    )
       .split('__PATH__')
       .pop()
       .trim();
@@ -163,7 +168,8 @@ function createWindow() {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   const badge = createBadgeController({
-    setBadge: (text) => app.dock?.setBadge(text),
+    // The Dock on macOS; the launcher/taskbar count elsewhere (shown where the desktop supports it).
+    setBadge: (text) => (isMac ? app.dock?.setBadge(text) : app.setBadgeCount(Number(text) || 0)),
     isFocused: () => !!mainWindow && mainWindow.isFocused(),
   });
   ipcMain.removeAllListeners('attention-count');
@@ -172,8 +178,14 @@ function createWindow() {
     if (fromMainWindow(event)) badge.setCount(count);
   });
   const alerts = createAlertHandler({
-    playSound: (path) => execFile('/usr/bin/afplay', [path], () => {}),
-    bounce: () => app.dock?.bounce('informational'),
+    playSound: (path) => {
+      const player = isMac
+        ? '/usr/bin/afplay'
+        : ['/usr/bin/paplay', '/usr/bin/pw-play'].find((p) => existsSync(p));
+      // Best effort: a desktop without a sound server simply stays silent.
+      if (player) execFile(player, [path], () => {});
+    },
+    bounce: () => (isMac ? app.dock?.bounce('informational') : mainWindow?.flashFrame(true)),
     isFocused: () => !!mainWindow && mainWindow.isFocused(),
   });
   ipcMain.removeAllListeners('attention-alert');

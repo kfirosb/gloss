@@ -6,6 +6,7 @@ import type { JsonRecord } from '../core/json-record.js';
 import { writeFileAtomic } from './atomic-file.js';
 import {
   isMissingFile,
+  defaultManagedDir,
   opaqueManagedPolicyPaths,
   pathExists,
   readClaudeConfigFile,
@@ -30,6 +31,7 @@ export interface PeerSettingOptions {
   configDir?: string | undefined;
   managedDir?: string | undefined;
   systemLibraryDir?: string | undefined;
+  platform?: NodeJS.Platform | undefined;
 }
 
 const KEY = 'crossSessionInbound';
@@ -48,8 +50,9 @@ const tightens = (value: PeerInbound): value is 'hold' | 'refuse' =>
 export function createClaudePeerSetting(options: PeerSettingOptions = {}): PeerSettingService {
   const home = options.homeDir ?? homedir();
   const configDir = resolve(claudeConfigDir(options.configDir, home));
+  const platform = options.platform ?? process.platform;
   const library = options.systemLibraryDir ?? '/Library';
-  const managedDir = options.managedDir ?? join(library, 'Application Support', 'ClaudeCode');
+  const managedDir = options.managedDir ?? defaultManagedDir(platform, library);
   const userPath = join(configDir, 'settings.json');
   // Repository files Claude itself can't parse don't force anything.
   const optional = (path: string) => readClaudeConfigFile(path).catch(() => undefined);
@@ -63,7 +66,7 @@ export function createClaudePeerSetting(options: PeerSettingOptions = {}): PeerS
     if (managedFile === 'unreadable') return { user, forcedBy: 'organization' };
     const managed = valueOf(managedFile);
     if (tightens(managed)) return { user, forcedBy: 'organization', forced: managed };
-    for (const path of opaqueManagedPolicyPaths({ home, library, managedDir }))
+    for (const path of opaqueManagedPolicyPaths({ home, library, managedDir, platform }))
       if (await pathExists(path)) return { user, forcedBy: 'organization' };
     for (const name of ['settings.json', 'settings.local.json']) {
       const repository = valueOf(await optional(join(project, '.claude', name)));

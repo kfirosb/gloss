@@ -806,10 +806,18 @@ describe('experimental native Claude channel registry', () => {
     expect(await readdir(f.registryDir)).toEqual([]);
   });
 
-  it('stays unsupported off macOS', async () => {
+  it('registers and resolves on Linux', async () => {
+    const f = await fixture();
+    const registry = createChannelRegistry({ ...f.options, platform: 'linux' });
+    const record = await registry.registerChannel();
+    expect(record.claudePid).toBe(200);
+    expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(record);
+  });
+
+  it('stays unsupported on a platform without verified probes', async () => {
     const f = await fixture();
     await f.seed();
-    const registry = createChannelRegistry({ ...f.options, platform: 'linux' });
+    const registry = createChannelRegistry({ ...f.options, platform: 'win32' });
     expect(await registry.resolveChannel(f.target)).toBeUndefined();
     await expect(registry.registerChannel()).rejects.toThrow();
   });

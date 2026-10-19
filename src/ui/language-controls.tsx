@@ -22,7 +22,8 @@ import {
   toInput,
   type LaunchSettingsInput,
 } from './launch-controls.js';
-import { ALERT_SOUNDS, useAlertSettings } from './attention-alerts.js';
+import { alertSoundsFor, useAlertSettings } from './attention-alerts.js';
+import { hostPlatform } from './host-platform.js';
 import {
   DARK_STYLES,
   useDisplayPreferences,
@@ -179,7 +180,8 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
                 updateAlerts((s) => ({ ...s, message }));
               }}
             />{' '}
-            Show a message (banner in Gloss, Dock bounce)
+            Show a message (banner in Gloss,{' '}
+            {hostPlatform() === 'darwin' ? 'Dock bounce' : 'taskbar flash'})
           </label>{' '}
           <label>
             <input
@@ -202,7 +204,7 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
                 updateAlerts((s) => ({ ...s, soundName }));
               }}
             >
-              {ALERT_SOUNDS.map((name) => (
+              {alertSoundsFor(hostPlatform()).map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>

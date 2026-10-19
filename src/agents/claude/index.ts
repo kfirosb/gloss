@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
+import { supportsProcessProbes } from '../../runtime/platform-tools.js';
 import {
   REQUEST_ID_SOURCE,
   isAwaitingEvidence,
@@ -128,7 +129,7 @@ async function psOwnsPid(
   record: ClaudeSessionRecord,
   runner: ClaudeAdapterOptions['runner'],
 ): Promise<boolean> {
-  if (process.platform !== 'darwin') return false;
+  if (!supportsProcessProbes()) return false;
   const live = await readProcess(
     record.pid,
     new AbortController().signal,

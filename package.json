@@ -1,7 +1,13 @@
 {
   "name": "language-assistant",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
+  "description": "Work with Codex and Claude Code in your own language",
+  "homepage": "https://github.com/kfirosb/gloss",
+  "author": {
+    "name": "kfirosb",
+    "email": "kfirosb@users.noreply.github.com"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -19,6 +25,9 @@
     "desktop:package": "npm run build && electron-builder --mac --dir",
     "desktop:dmg": "npm run build && electron-builder --mac dmg",
     "desktop:install": "sh scripts/install-mac.sh",
+    "predesktop:linux": "node scripts/check-linux-vendor.mjs",
+    "desktop:linux": "npm run build && node scripts/stage-linux-node-pty.mjs && electron-builder --linux -c.npmRebuild=false",
+    "build:linux-vendor": "sh scripts/build-linux-vendor.sh x64 && sh scripts/build-linux-vendor.sh arm64",
     "build:tmux": "sh scripts/build-tmux.sh",
     "build:whisper": "sh scripts/build-whisper.sh",
     "postinstall": "node scripts/fix-node-pty.mjs"
@@ -73,34 +82,109 @@
       "notarize": true,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Gloss uses the microphone to dictate into the composer."
-      }
+      },
+      "extraResources": [
+        {
+          "from": "vendor/tmux/${arch}/bin/tmux",
+          "to": "bin/tmux"
+        },
+        {
+          "from": "vendor/tmux/TMUX-LICENSE",
+          "to": "licenses/TMUX-LICENSE"
+        },
+        {
+          "from": "vendor/tmux/LIBEVENT-LICENSE",
+          "to": "licenses/LIBEVENT-LICENSE"
+        },
+        {
+          "from": "vendor/whisper/${arch}/bin/whisper-server",
+          "to": "bin/whisper-server"
+        },
+        {
+          "from": "vendor/whisper/WHISPER-LICENSE",
+          "to": "licenses/WHISPER-LICENSE"
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "executableName": "gloss",
+      "synopsis": "Work with Codex and Claude Code in your own language",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "gloss"
+        }
+      },
+      "extraResources": [
+        {
+          "from": "vendor/linux-${arch}/bin/tmux",
+          "to": "bin/tmux"
+        },
+        {
+          "from": "vendor/linux-${arch}/TMUX-LICENSE",
+          "to": "licenses/TMUX-LICENSE"
+        },
+        {
+          "from": "vendor/linux-${arch}/LIBEVENT-LICENSE",
+          "to": "licenses/LIBEVENT-LICENSE"
+        },
+        {
+          "from": "vendor/linux-${arch}/bin/whisper-server",
+          "to": "bin/whisper-server"
+        },
+        {
+          "from": "vendor/linux-${arch}/WHISPER-LICENSE",
+          "to": "licenses/WHISPER-LICENSE"
+        },
+        {
+          "from": "vendor/linux-${arch}/NODE-PTY-LICENSE",
+          "to": "licenses/NODE-PTY-LICENSE"
+        }
+      ]
+    },
+    "deb": {
+      "packageName": "gloss",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "lsof",
+        "libgbm1",
+        "libasound2t64 | libasound2",
+        "libtinfo6"
+      ],
+      "recommends": [
+        "ripgrep",
+        "sound-theme-freedesktop",
+        "pulseaudio-utils"
+      ]
     },
     "beforePack": "scripts/check-vendor.mjs",
     "afterPack": "scripts/sign-mac.mjs",
     "asarUnpack": [
       "node_modules/node-pty/**"
-    ],
-    "extraResources": [
-      {
-        "from": "vendor/tmux/${arch}/bin/tmux",
-        "to": "bin/tmux"
-      },
-      {
-        "from": "vendor/tmux/TMUX-LICENSE",
-        "to": "licenses/TMUX-LICENSE"
-      },
-      {
-        "from": "vendor/tmux/LIBEVENT-LICENSE",
-        "to": "licenses/LIBEVENT-LICENSE"
-      },
-      {
-        "from": "vendor/whisper/${arch}/bin/whisper-server",
-        "to": "bin/whisper-server"
-      },
-      {
-        "from": "vendor/whisper/WHISPER-LICENSE",
-        "to": "licenses/WHISPER-LICENSE"
-      }
     ]
   }
 }

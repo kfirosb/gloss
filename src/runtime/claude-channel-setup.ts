@@ -15,6 +15,7 @@ import {
   channelServerPaths,
   claudeUserConfigPath,
   createClaudeExecutable,
+  defaultManagedDir,
   isMissingFile,
   opaqueManagedPolicyPaths,
   pathExists,
@@ -26,6 +27,7 @@ import {
   type RegistrationStatus,
 } from './claude-registration.js';
 import type { ProcessRunner } from './process-runner.js';
+import { supportsProcessProbes } from './platform-tools.js';
 import { ensurePrivateDirectory, isPrivateDirectory } from './private-directory.js';
 
 /** What an existing session needs to connect. Producing it writes nothing. */
@@ -88,8 +90,9 @@ export function createClaudeChannelSetup(
   const setupDir = join(stateDir, 'claude-channel-setup');
   const configDir = resolve(claudeConfigDir(options.configDir, home));
   const userConfigPath = claudeUserConfigPath({ home, configDir: options.configDir }).path;
+  const platform = options.platform ?? process.platform;
   const library = options.systemLibraryDir ?? '/Library';
-  const managedDir = options.managedDir ?? join(library, 'Application Support', 'ClaudeCode');
+  const managedDir = options.managedDir ?? defaultManagedDir(platform, library);
   const registry =
     options.registry ??
     createChannelRegistry({ registryDir: join(stateDir, 'claude-channels'), configDir });
@@ -153,8 +156,8 @@ export function createClaudeChannelSetup(
     return project;
   }
   async function preflight(project: string) {
-    if ((options.platform ?? process.platform) !== 'darwin')
-      throw new Error('Experimental Claude channels are supported on macOS only.');
+    if (!supportsProcessProbes(platform))
+      throw new Error('Experimental Claude channels are supported on macOS and Linux only.');
     const user = await readClaudeConfigFile(userConfigPath);
     const projectConfig = await readClaudeConfigFile(join(project, '.mcp.json'));
     const managed = await readClaudeConfigFile(join(managedDir, 'managed-mcp.json'));
@@ -162,7 +165,7 @@ export function createClaudeChannelSetup(
       throw new Error(
         'Managed MCP configuration is unsupported by automatic setup; ask your administrator.',
       );
-    for (const path of opaqueManagedPolicyPaths({ home, library, managedDir })) {
+    for (const path of opaqueManagedPolicyPaths({ home, library, managedDir, platform })) {
       if (await pathExists(path))
         throw new Error(
           'Managed Claude policy requires administrator review before channel setup.',

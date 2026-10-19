@@ -131,17 +131,32 @@ export function createClaudeExecutable(
   };
 }
 
+/** Where Claude reads administrator-managed policy: a system library folder on macOS, /etc on Linux. */
+export const defaultManagedDir = (platform: NodeJS.Platform, library: string) =>
+  platform === 'linux' ? '/etc/claude-code' : join(library, 'Application Support', 'ClaudeCode');
+
 /** Managed policy Gloss cannot interpret (a fragment folder or a preferences profile); its presence alone needs administrator review. */
 export const opaqueManagedPolicyPaths = (locations: {
   home: string;
   library: string;
   managedDir: string;
+  platform: NodeJS.Platform;
 }) => [
   join(locations.managedDir, 'managed-settings.d'),
-  join(locations.library, 'Managed Preferences', PREFERENCES_DOMAIN),
-  join(locations.library, 'Managed Preferences', basename(locations.home), PREFERENCES_DOMAIN),
-  join(locations.library, 'Preferences', PREFERENCES_DOMAIN),
-  join(locations.home, 'Library', 'Preferences', PREFERENCES_DOMAIN),
+  // Preference profiles are a macOS mechanism; Linux has only the fragment folder.
+  ...(locations.platform === 'darwin'
+    ? [
+        join(locations.library, 'Managed Preferences', PREFERENCES_DOMAIN),
+        join(
+          locations.library,
+          'Managed Preferences',
+          basename(locations.home),
+          PREFERENCES_DOMAIN,
+        ),
+        join(locations.library, 'Preferences', PREFERENCES_DOMAIN),
+        join(locations.home, 'Library', 'Preferences', PREFERENCES_DOMAIN),
+      ]
+    : []),
 ];
 
 export async function pathExists(path: string): Promise<boolean> {

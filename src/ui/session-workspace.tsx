@@ -1,3 +1,4 @@
+import { hostPlatform } from './host-platform.js';
 import {
   MAX_ATTACHMENTS,
   MAX_IMAGES,
@@ -108,11 +109,7 @@ import {
 import { RouteLine, useDeliveryRoute } from './delivery-route.js';
 import { fencedOutput } from './output-fence.js';
 import { useDictation } from './use-dictation.js';
-import {
-  appendDictation,
-  DICTATION_SHORTCUT_LABEL,
-  isDictationShortcut,
-} from './dictation-state.js';
+import { appendDictation, dictationShortcutLabel, isDictationShortcut } from './dictation-state.js';
 import { DictationButton } from './dictation-button.js';
 import { errorMessage } from './error-message.js';
 
@@ -1630,8 +1627,8 @@ export function SessionWorkspace({
           </div>
         </ImageAttachments>
         <small>
-          Enter sends to agent · Option+Enter or Shift+Enter adds a line ·{' '}
-          {DICTATION_SHORTCUT_LABEL} dictates
+          Enter sends to agent · {hostPlatform() === 'darwin' ? 'Option' : 'Alt'}+Enter or
+          Shift+Enter adds a line · {dictationShortcutLabel()} dictates
         </small>
       </form>
     </ReadingPane>

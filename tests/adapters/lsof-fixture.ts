@@ -3,6 +3,7 @@ import type {
   ProcessOutcome,
   ProcessRunner,
 } from '../../src/runtime/process-runner.js';
+import { lsofPath } from '../../src/runtime/platform-tools.js';
 
 export interface LsofOwner {
   pid: number;
@@ -17,7 +18,7 @@ export interface LsofBehavior {
   wait?: Promise<void>;
 }
 
-/** A fake `/usr/sbin/lsof -Fpcfn +c 0 -- <paths>` over a simulated table of socket holders. */
+/** A fake `lsof -Fpcfn +c 0 -- <paths>` (at the platform's lsof path) over a simulated table of socket holders. */
 export function lsofRunner(
   owners: Record<string, LsofOwner[]>,
   behavior?: LsofBehavior | ((paths: string[], call: number) => LsofBehavior | undefined),
@@ -25,7 +26,7 @@ export function lsofRunner(
   const calls: string[][] = [];
   const options: (ProcessOptions | undefined)[] = [];
   const runner: ProcessRunner = async function* (executable, args, _input, _signal, opts) {
-    if (executable !== '/usr/sbin/lsof') throw new Error('Unexpected process');
+    if (executable !== lsofPath()) throw new Error('Unexpected process');
     calls.push(args);
     options.push(opts);
     const paths = lsofPaths(args);

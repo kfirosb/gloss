@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { recordOf } from '../../core/json-record.js';
 import { projectIdentity } from '../shared.js';
+import { OWN_PID_DOMAIN } from './pid-domain.js';
 
 /** One Claude `sessions/<pid>.json` record, as far as Gloss reads it. */
 export interface ClaudeSessionRecord {
@@ -19,7 +20,7 @@ export interface ClaudeSessionRecord {
   name?: unknown;
   /** The process start time as `ps -o lstart=` prints it in UTC and the C locale; tells a reused pid apart. */
   procStart?: string | undefined;
-  /** The process table `pid` and `procStart` belong to; only `darwin` is comparable with this Mac's `ps`. */
+  /** The process table `pid` and `procStart` belong to; only this host's own domain is comparable with its `ps`. */
   pidDomain?: string | undefined;
 }
 /** A record larger than this is not a session record, in bytes. */
@@ -68,13 +69,14 @@ export function sessionRecordOf(value: unknown): ClaudeSessionRecord | undefined
   };
 }
 /**
- * The record's process start time, when it can be compared with this Mac's `ps`: the record says its pid is a
- * macOS pid. Anything else cannot tell a reused pid apart, so it is not trusted.
+ * The record's process start time, when it can be compared with this host's `ps`: the record says its pid lives in
+ * this host's own pid domain. Anything else cannot tell a reused pid apart, so it is not trusted.
  */
 export function trustedProcStart(
   record: Pick<ClaudeSessionRecord, 'pidDomain' | 'procStart'>,
+  ownDomain: string = OWN_PID_DOMAIN,
 ): string | undefined {
-  return record.pidDomain === 'darwin' ? record.procStart : undefined;
+  return record.pidDomain === ownDomain ? record.procStart : undefined;
 }
 /** A session run in a terminal: Claude Desktop and SDK language workers write other entrypoints; older Claude wrote none. */
 export function isTerminalRecord(record: Pick<ClaudeSessionRecord, 'entrypoint'>): boolean {

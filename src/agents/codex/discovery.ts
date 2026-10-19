@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../../runtime/process-runner.js';
+import { LsofMissing, lsofPath, supportsProcessProbes } from '../../runtime/platform-tools.js';
 import { codexHomeDir, projectIdentity, uuid } from '../shared.js';
 import { supportsCodexProtocol, type CodexAdapterOptions } from './index.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
@@ -65,11 +66,12 @@ async function ownedPaths(
   signal: AbortSignal,
 ): Promise<Map<string, number>> {
   const result = await collectProcess(
-    runner('/usr/sbin/lsof', ['-Fpcfn', '--', ...paths], '', signal, {
+    runner(lsofPath(), ['-Fpcfn', '--', ...paths], '', signal, {
       timeoutMs: 3000,
       maxOutputBytes: 1024 * 1024,
     }),
   );
+  if (result.outcome.reason === 'spawn-error') throw new LsofMissing();
   if (
     result.outcome.reason !== 'exited' ||
     ![0, 1].includes(result.outcome.code ?? -1) ||
@@ -180,8 +182,12 @@ async function scanWriters(options: CodexAdapterOptions, signal: AbortSignal): P
       try {
         for (const [path, pid] of await ownedPaths(paths, options.runner ?? runProcess, signal))
           scan.owned.set(path.slice(locks.length + 1, -5), pid);
-      } catch {
-        fail('Codex writer ownership verification failed');
+      } catch (error) {
+        fail(
+          error instanceof LsofMissing
+            ? error.message
+            : 'Codex writer ownership verification failed',
+        );
       }
     }
   };
@@ -260,7 +266,7 @@ export async function codexSnapshot(
   options: CodexAdapterOptions,
   signal: AbortSignal,
 ): Promise<CodexSnapshot> {
-  if (process.platform !== 'darwin')
+  if (!supportsProcessProbes())
     throw new Error('Codex writer ownership verification is unavailable on this platform');
   const scan = await scanWriters(options, signal);
   if (scan.cancelled || signal.aborted) throw new Error('Codex liveness check cancelled');
@@ -317,7 +323,7 @@ export async function discoverOpenCodex(
     error: 'Codex discovery cancelled',
   });
   if (signal.aborted) return cancelled();
-  if (process.platform !== 'darwin')
+  if (!supportsProcessProbes())
     return {
       candidates: [],
       complete: false,

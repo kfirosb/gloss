@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CatalogEntry } from '../core/session-catalog.js';
+import { hostPlatform, type HostPlatform } from './host-platform.js';
 
+/** The macOS system sounds; the desktop shell plays only these (see desktop/attention-alert.mjs). */
 export const ALERT_SOUNDS = [
   'Basso',
   'Blow',
@@ -17,6 +19,20 @@ export const ALERT_SOUNDS = [
   'Submarine',
   'Tink',
 ] as const satisfies readonly string[];
+/** The freedesktop sound theme names the Linux shell plays; kept equal to the desktop module's list by a test. */
+export const FREEDESKTOP_ALERT_SOUNDS = [
+  'bell',
+  'complete',
+  'message',
+  'dialog-information',
+  'dialog-warning',
+  'window-attention',
+  'service-login',
+] as const satisfies readonly string[];
+export const alertSoundsFor = (platform: HostPlatform): readonly string[] =>
+  platform === 'darwin' ? ALERT_SOUNDS : FREEDESKTOP_ALERT_SOUNDS;
+export const defaultSoundName = (platform: HostPlatform) =>
+  platform === 'darwin' ? 'Glass' : 'message';
 export interface AlertSettings {
   version: 1;
   message: boolean;
@@ -24,35 +40,45 @@ export interface AlertSettings {
   soundName: string;
 }
 const key = 'language-assistant:alerts:v1';
-const defaults = (): AlertSettings => ({
+const defaults = (platform: HostPlatform): AlertSettings => ({
   version: 1,
   message: true,
   sound: true,
-  soundName: 'Glass',
+  soundName: defaultSoundName(platform),
 });
-function validated(value: unknown): AlertSettings {
+function validated(value: unknown, platform: HostPlatform): AlertSettings {
   if (!value || typeof value !== 'object' || (value as AlertSettings).version !== 1)
-    return defaults();
+    return defaults(platform);
   const v = value as Partial<AlertSettings>;
   return {
     version: 1,
     message: v.message !== false,
     sound: v.sound !== false,
-    soundName: (ALERT_SOUNDS as readonly string[]).includes(v.soundName as string)
+    soundName: alertSoundsFor(platform).includes(v.soundName as string)
       ? (v.soundName as string)
-      : 'Glass',
+      : defaultSoundName(platform),
   };
 }
-export function readAlertSettings(storage?: Storage): AlertSettings {
+export function readAlertSettings(
+  storage?: Storage,
+  platform: HostPlatform = hostPlatform(),
+): AlertSettings {
   try {
-    return validated(JSON.parse((storage ?? globalThis.localStorage)?.getItem(key) ?? 'null'));
+    return validated(
+      JSON.parse((storage ?? globalThis.localStorage)?.getItem(key) ?? 'null'),
+      platform,
+    );
   } catch {
-    return defaults();
+    return defaults(platform);
   }
 }
-export function writeAlertSettings(value: AlertSettings, storage?: Storage): void {
+export function writeAlertSettings(
+  value: AlertSettings,
+  storage?: Storage,
+  platform: HostPlatform = hostPlatform(),
+): void {
   try {
-    (storage ?? globalThis.localStorage)?.setItem(key, JSON.stringify(validated(value)));
+    (storage ?? globalThis.localStorage)?.setItem(key, JSON.stringify(validated(value, platform)));
   } catch {
     /* In-memory settings remain usable. */
   }
@@ -73,7 +99,7 @@ export function useAlertSettings(): [
   return [
     value,
     (update) => {
-      current = validated(update(current ?? value));
+      current = validated(update(current ?? value), hostPlatform());
       writeAlertSettings(current);
       for (const listener of listeners) listener(current);
     },

@@ -7,6 +7,8 @@ import {
   channelServerPaths,
   claudeUserConfigPath,
   createClaudeExecutable,
+  defaultManagedDir,
+  opaqueManagedPolicyPaths,
   readClaudeConfigFile,
 } from '../../src/runtime/claude-config.js';
 
@@ -91,4 +93,28 @@ it('locates .claude.json in an explicitly set config dir, even the default one',
     path: '/Users/me/.claude/.claude.json',
     configDir: '/Users/me/.claude',
   });
+});
+
+it('places managed Claude policy per platform', () => {
+  expect(defaultManagedDir('darwin', '/Library')).toBe('/Library/Application Support/ClaudeCode');
+  expect(defaultManagedDir('linux', '/Library')).toBe('/etc/claude-code');
+});
+
+it('checks only the managed fragment folder on Linux, never macOS preference profiles', () => {
+  expect(
+    opaqueManagedPolicyPaths({
+      home: '/home/u',
+      library: '/Library',
+      managedDir: '/etc/claude-code',
+      platform: 'linux',
+    }),
+  ).toEqual(['/etc/claude-code/managed-settings.d']);
+  expect(
+    opaqueManagedPolicyPaths({
+      home: '/Users/u',
+      library: '/Library',
+      managedDir: '/Library/Application Support/ClaudeCode',
+      platform: 'darwin',
+    }),
+  ).toHaveLength(5);
 });

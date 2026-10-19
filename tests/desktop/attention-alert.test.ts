@@ -1,13 +1,14 @@
 import { expect, it } from 'vitest';
 // @ts-expect-error untyped desktop module
-import { createAlertHandler } from '../../desktop/attention-alert.mjs';
+import { alertSoundNames, createAlertHandler } from '../../desktop/attention-alert.mjs';
 
-function harness(focused: boolean) {
+function harness(focused: boolean, platform: NodeJS.Platform = 'darwin') {
   const calls: string[] = [];
   const handler = createAlertHandler({
     playSound: (p: string) => calls.push('sound ' + p),
     bounce: () => calls.push('bounce'),
     isFocused: () => focused,
+    platform,
   });
   return { calls, handler };
 }
@@ -31,4 +32,21 @@ it('ignores unknown sounds and junk payloads', () => {
   expect(h.calls).toEqual([]);
   h.handler.handle({ bounce: true });
   expect(h.calls).toEqual(['bounce']);
+});
+
+it('plays freedesktop theme sounds on Linux and ignores Mac names there', () => {
+  const h = harness(false, 'linux');
+  h.handler.handle({ sound: 'message', bounce: true });
+  h.handler.handle({ sound: 'Glass', bounce: false });
+  expect(h.calls).toEqual(['sound /usr/share/sounds/freedesktop/stereo/message.oga', 'bounce']);
+  expect(alertSoundNames('linux')).toEqual([
+    'bell',
+    'complete',
+    'message',
+    'dialog-information',
+    'dialog-warning',
+    'window-attention',
+    'service-login',
+  ]);
+  expect(alertSoundNames('darwin')).toHaveLength(14);
 });

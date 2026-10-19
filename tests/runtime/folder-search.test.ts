@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mdfindPredicate, searchFolders } from '../../src/runtime/folder-search.js';
@@ -106,4 +106,44 @@ it('treats a typed / or ~/ path as the single candidate, without Spotlight', asy
   });
   for (const q of ['~/missing', join(home, 'nope'), '~/file.txt', '/', tmpdir(), '~/..', home])
     expect(await search(q)).toEqual({ hits: [], timedOut: false, unavailable: false });
+});
+
+const mustNotRun: ProcessRunner = async function* () {
+  throw new Error('mdfind must not run off macOS');
+};
+
+it('walks home itself off macOS: name match, skips, limit, no symlink escape', async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'la-home-')));
+  for (const d of [
+    'work/my-app/.git',
+    'work/notes',
+    'node_modules/app',
+    '.hidden/app',
+    'deep/1/2/3/4/5/6/7/8/9/app',
+  ])
+    await mkdir(join(home, d), { recursive: true });
+  await writeFile(join(home, 'work/my-app/.git/HEAD'), 'ref');
+  await symlink('/', join(home, 'link'));
+  const options = { home, runner: mustNotRun, platform: 'linux' as const };
+  expect(await searchFolders('APP', options)).toEqual({
+    hits: [{ path: join(home, 'work/my-app'), name: 'my-app', git: true }],
+    timedOut: false,
+    unavailable: false,
+  });
+  const limited = await searchFolders('o', { ...options, limit: 1 });
+  expect(limited.hits).toHaveLength(1);
+  expect(limited.timedOut).toBe(false);
+});
+
+it('stops the walk at the deadline and says so', async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'la-home-')));
+  await mkdir(join(home, 'work/app'), { recursive: true });
+  const result = await searchFolders('app', {
+    home,
+    runner: mustNotRun,
+    platform: 'linux',
+    timeoutMs: 0,
+  });
+  expect(result.timedOut).toBe(true);
+  expect(result.unavailable).toBe(false);
 });
