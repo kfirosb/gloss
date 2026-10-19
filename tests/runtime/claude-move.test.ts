@@ -25,6 +25,7 @@ import {
 import {
   MOVE_CLOSE_TIMEOUT_MS,
   MOVE_RESUME_CHECK_MS,
+  MOVE_WAIT_MAX_MS,
   MOVE_WAIT_POLL_MS,
   MOVE_WAIT_UNREADABLE_POLLS,
   createClaudeMove,
@@ -255,6 +256,10 @@ async function setup(
     live,
     project,
     now: () => clock,
+    /** Moves the injected clock on, as a long stretch of real time would. */
+    advance: (ms: number) => {
+      clock += ms;
+    },
   };
 }
 const manual = (folder: string) => ({
@@ -747,6 +752,30 @@ it('"Move when it finishes" ends without signalling when the session restarts, i
   for (let i = 0; i < 20; i++) await tick();
   expect([...restarted.signals, ...cancelled.signals, ...quit.signals]).toEqual([]);
   expect([...restarted.prepares, ...cancelled.prepares, ...quit.prepares]).toEqual([]);
+});
+
+it('"Move when it finishes" ends without signalling once it has waited MOVE_WAIT_MAX_MS', async () => {
+  const f = await setup({ record: { status: 'busy' } });
+  let polls = 0;
+  f.hooks.onSleep = (ms) => {
+    // The first poll jumps to two polls short of the cap: the wait must still be armed after it.
+    if (ms === MOVE_WAIT_POLL_MS && ++polls === 1)
+      f.advance(MOVE_WAIT_MAX_MS - 2 * MOVE_WAIT_POLL_MS);
+  };
+  await f.service.act(f.target, { action: 'when-idle', expected: f.expected });
+  await vi.waitFor(async () =>
+    expect((await f.service.status(f.target)).failure).toEqual({
+      reason: MOVE_WAIT_ENDED_REASON,
+    }),
+  );
+  expect(polls).toBe(2);
+  expect(f.now()).toBeGreaterThanOrEqual(MOVE_WAIT_MAX_MS);
+  // The ended wait is gone: the session going idle now moves nothing.
+  await f.write(OUTSIDE_PID, { status: 'idle' });
+  for (let i = 0; i < 20; i++) await tick();
+  expect(f.signals).toEqual([]);
+  expect(f.prepares).toEqual([]);
+  expect(await f.service.status(f.target)).toMatchObject({ state: 'ready' });
 });
 
 it('two concurrent moves send one SIGTERM and start one launch', async () => {

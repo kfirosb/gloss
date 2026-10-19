@@ -45,6 +45,11 @@ export const MOVE_CLOSE_TIMEOUT_MS = 10_000;
 const MOVE_CLOSE_POLL_MS = 100;
 /** "Move when it finishes" re-reads the session record this often, in milliseconds. */
 export const MOVE_WAIT_POLL_MS = 1000;
+/**
+ * Longest a "Move when it finishes" wait stays armed, in milliseconds (4 hours). A session left with a dialog open
+ * would otherwise keep the wait, and its polling, alive for as long as Gloss runs.
+ */
+export const MOVE_WAIT_MAX_MS = 4 * 60 * 60 * 1000;
 export { MOVE_RESUME_CHECK_MS };
 /** Step between checks of a reopened session, in milliseconds. */
 const MOVE_RESUME_POLL_MS = 250;
@@ -380,11 +385,12 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
       failures.set(ref, { reason: MOVE_WAIT_ENDED_REASON });
     };
     let unreadable = 0;
+    const deadline = now() + MOVE_WAIT_MAX_MS;
     void (async () => {
       while (!ended()) {
         await sleep(MOVE_WAIT_POLL_MS);
         if (ended()) return;
-        if (!exists(record.pid)) return endWait();
+        if (now() >= deadline || !exists(record.pid)) return endWait();
         const current = await readSessionRecord(sessionRecordPath(config, record.pid));
         // I3: re-checked after every await; a Cancel, a quit or a newer wait may have come meanwhile.
         if (ended()) return;
