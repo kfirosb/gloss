@@ -169,17 +169,31 @@ describe('activity stream slots', () => {
     expect(strip2.states).toEqual([true]);
     expect(sub.states).toEqual([true]);
   });
-  it('a holder changing priority keeps its slot and its connection', () => {
+  it('a demoted holder with no more important waiter keeps its slot', () => {
     const s = slots();
-    const strip = claim(s, 3);
+    const strip = claim(s, 1);
     claim(s, 2);
     claim(s, 2);
-    strip.prioritize(1);
+    const waiting = claim(s, 3);
     strip.prioritize(3);
     expect(strip.states).toEqual([true]);
-    const clicked = claim(s, 1);
-    expect(clicked.open()).toBe(true);
-    expect(strip.states).toEqual([true, false]);
+    expect(waiting.states).toEqual([false]);
+  });
+  it('an expanded then collapsed strip gives the slot back to the subagent it took it from', () => {
+    const s = slots();
+    const a = claim(s, 2),
+      b = claim(s, 2),
+      c = claim(s, 2);
+    const strip = claim(s, 3);
+    expect(strip.states).toEqual([false]);
+    strip.prioritize(1);
+    expect(strip.states).toEqual([false, true]);
+    expect(a.states).toEqual([true, false]);
+    strip.prioritize(3);
+    expect(a.states).toEqual([true, false, true]);
+    expect(strip.states).toEqual([false, true, false]);
+    expect(b.states).toEqual([true]);
+    expect(c.states).toEqual([true]);
   });
 });
 

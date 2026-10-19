@@ -21,7 +21,10 @@ export type StreamPriority = 1 | 2 | 3;
 /** A claim on a stream slot: release it when done; a new priority applies in place. */
 export interface StreamClaim {
   release(): void;
-  /** Never moves an open holder; a waiting claim raised above an open one takes its slot. */
+  /**
+   * A waiting claim raised above an open holder takes its slot; an open holder demoted below a
+   * waiter yields to it. Nothing else moves.
+   */
   prioritize(priority: StreamPriority): void;
 }
 
@@ -53,11 +56,15 @@ export class StreamSlots {
     return {
       release: () => this.release(slot),
       prioritize: (next) => {
+        const demoted = next > slot.priority;
         slot.priority = next;
         const pausedAt = this.paused.indexOf(slot);
-        if (pausedAt < 0) return;
-        this.paused.splice(pausedAt, 1);
-        if (!this.takeFromLessImportant(slot)) this.paused.push(slot);
+        if (pausedAt >= 0) {
+          this.paused.splice(pausedAt, 1);
+          if (!this.takeFromLessImportant(slot)) this.paused.push(slot);
+          return;
+        }
+        if (demoted && this.open.includes(slot)) this.yieldToMoreImportant(slot);
       },
     };
   }
@@ -71,6 +78,17 @@ export class StreamSlots {
     slot.setOpen(true);
     victim.setOpen(false);
     return true;
+  }
+  /** A demoted holder gives its slot to a waiter that now outranks it; nothing else moves. */
+  private yieldToMoreImportant(slot: StreamSlot) {
+    const waiter = this.nextWaiting();
+    if (!waiter || waiter.priority >= slot.priority) return;
+    this.open.splice(this.open.indexOf(slot), 1);
+    this.paused.splice(this.paused.indexOf(waiter), 1);
+    this.paused.push(slot);
+    this.open.push(waiter);
+    waiter.setOpen(true);
+    slot.setOpen(false);
   }
   private release(slot: StreamSlot) {
     const pausedAt = this.paused.indexOf(slot);
