@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActivityCall, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
+import { clock, duration } from './activity-page.js';
 import { RichText } from './rich-text.js';
 import type { SessionClient } from './session-client.js';
 import { useOutputTail, useSubagentStream } from './use-activity-streams.js';
@@ -13,22 +14,6 @@ type CardStatus = ActivityTask['status'] | 'unknown';
 const STICK_TO_BOTTOM_PX = 8;
 const STREAM_PAUSED = 'Stream paused while other streams are open; it resumes when one closes.';
 
-function clock(timestamp?: string): string {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-function duration(from?: string, to?: string | number): string {
-  if (!from || to === undefined) return '';
-  const ms = new Date(to).getTime() - new Date(from).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return '';
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
 /** A running task's elapsed time; only this span re-renders every second. */
 function Elapsed({ since }: { since?: string | undefined }) {
   const [now, setNow] = useState(() => Date.now());
