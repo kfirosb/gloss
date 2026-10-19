@@ -122,4 +122,28 @@ describe('activity stream slots', () => {
     c.release();
     expect(w.states).toEqual([false]);
   });
+  it('a preempted holder reopens when a slot frees, and nothing else moves', () => {
+    const s = slots();
+    const strip1 = claim(s, 3),
+      strip2 = claim(s, 3),
+      strip3 = claim(s, 3);
+    const clicked = claim(s, 1);
+    expect(strip1.states).toEqual([true, false]);
+    clicked.release();
+    expect(strip1.states).toEqual([true, false, true]);
+    expect(strip2.states).toEqual([true]);
+    expect(strip3.states).toEqual([true]);
+  });
+  it('a development-mode release and re-claim under full equal-priority slots pauses again', () => {
+    const s = slots();
+    const holders = [claim(s, 2), claim(s, 2), claim(s, 2)];
+    const first = claim(s, 2);
+    expect(first.states).toEqual([false]);
+    first.release();
+    const again = claim(s, 2);
+    expect(again.states).toEqual([false]);
+    expect(holders.map((x) => x.states)).toEqual([[true], [true], [true]]);
+    holders[0]?.release();
+    expect(again.open()).toBe(true);
+  });
 });
