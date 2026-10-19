@@ -28,25 +28,23 @@ Today every user must notice a new release and re-download the DMG by hand.
 
 ## 22. Homebrew tap
 
-Status: high priority; independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 20 lands.
+Status: tap live since 2026-10-19 with Gloss 0.16.2 (`brew install --cask kfirosb/tap/gloss`); independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 20 lands.
 
-- [ ] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
-- [ ] Add a release-protocol step that bumps the cask version and checksum on each release (manually or with a small script).
-- [ ] Document it in the README next to the DMG download.
+- [x] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
+- [x] Add a release-protocol step that bumps the cask version and checksum on each release: `scripts/homebrew-cask.mjs` renders the cask from the published `.sha256`, step 7 of [mac-release-protocol.md](mac-release-protocol.md).
+- [x] Document it in the README next to the DMG download.
 - [ ] Later, once the project meets Homebrew's popularity thresholds, submit the cask to the main homebrew-cask repository.
 - [ ] Do not publish the desktop app on npm: a 392 MB Electron app with native binaries does not belong there. The browser mode could become an npm CLI later as a secondary option.
 
-## 23. Intel Mac (universal) build
+## 23. Intel Mac build
 
-Status: high priority, after task 20. The app code has no architecture dependency; the build scripts do.
+Status: done in 0.17.0 as a second DMG (`Gloss-<version>-x64.dmg`) rather than a universal binary, keeping each download at its current size.
 
-`scripts/build-tmux.sh` and `scripts/build-whisper.sh` refuse to run off Apple Silicon, compile with hard-coded `-arch arm64`, and verify arm64 only. node-pty and Electron already ship Intel builds.
-
-- [ ] Build `tmux` and `whisper-server` for x86_64 too (Rosetta on the build Mac or an Intel GitHub Actions runner) and `lipo` them into universal binaries; update the verify steps.
-- [ ] Switch electron-builder to a universal target (DMG grows from about 144 MB to about 250 MB) or ship two DMGs; decide which.
-- [ ] Dictation: the whisper build uses Metal; Intel falls back to CPU and the bundled large-v3-turbo model will be slow. Offer a smaller model on Intel or document the limitation.
-- [ ] Test on a real Intel Mac or a CI runner; the maintainer has none.
-- [ ] Update the README requirements (today: Apple Silicon only, macOS 13+).
+- [x] `scripts/build-tmux.sh <arch>` and `scripts/build-whisper.sh <arch>` cross-compile for `arm64` or `x64` from either kind of Mac into `vendor/<tool>/<arch>/bin`; `scripts/check-vendor.mjs` (electron-builder `beforePack`) verifies the architecture of what gets bundled.
+- [x] electron-builder: `--x64` / `--arm64` pick the matching vendor binaries (`${arch}` in `extraResources`); every DMG name carries its architecture.
+- [x] Dictation on Intel is CPU-only (ggml's Metal backend is for Apple GPUs); documented in `docs/reference.md`. Offering a smaller model on Intel is still open.
+- [ ] Test on a real Intel Mac. The x64 app was verified only under Rosetta on the maintainer's Apple Silicon Mac, which cannot catch Intel-only CPU or GPU issues.
+- [x] README requirements updated.
 
 ## 24. Linux build
 

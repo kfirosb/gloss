@@ -1,6 +1,6 @@
 {
   "name": "language-assistant",
-  "version": "0.16.2",
+  "version": "0.17.0",
   "private": true,
   "description": "Work with Codex and Claude Code in your own language",
   "homepage": "https://github.com/kfirosb/gloss",
@@ -22,9 +22,7 @@
     "test:e2e": "playwright test",
     "start": "node dist/server/runtime/cli.js",
     "desktop": "npm run build && electron .",
-    "predesktop:package": "node scripts/check-tmux.mjs && node scripts/check-whisper.mjs",
     "desktop:package": "npm run build && electron-builder --mac --dir",
-    "predesktop:dmg": "node scripts/check-tmux.mjs && node scripts/check-whisper.mjs",
     "desktop:dmg": "npm run build && electron-builder --mac dmg",
     "desktop:install": "sh scripts/install-mac.sh",
     "predesktop:linux": "node scripts/check-linux-vendor.mjs",
@@ -63,6 +61,7 @@
   "build": {
     "appId": "local.language-assistant",
     "productName": "Gloss",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": false,
     "directories": {
       "output": "release"
@@ -83,7 +82,7 @@
       },
       "extraResources": [
         {
-          "from": "vendor/tmux/bin/tmux",
+          "from": "vendor/tmux/${arch}/bin/tmux",
           "to": "bin/tmux"
         },
         {
@@ -95,7 +94,7 @@
           "to": "licenses/LIBEVENT-LICENSE"
         },
         {
-          "from": "vendor/whisper/bin/whisper-server",
+          "from": "vendor/whisper/${arch}/bin/whisper-server",
           "to": "bin/whisper-server"
         },
         {
@@ -124,7 +123,11 @@
       "icon": "build/icon.png",
       "executableName": "gloss",
       "synopsis": "Work with Codex and Claude Code in your own language",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "gloss"
+        }
+      },
       "extraResources": [
         {
           "from": "vendor/linux-${arch}/bin/tmux",
@@ -150,14 +153,10 @@
           "from": "vendor/linux-${arch}/NODE-PTY-LICENSE",
           "to": "licenses/NODE-PTY-LICENSE"
         }
-      ],
-      "desktop": {
-        "entry": {
-          "StartupWMClass": "gloss"
-        }
-      }
+      ]
     },
     "deb": {
+      "packageName": "gloss",
       "depends": [
         "libgtk-3-0",
         "libnotify4",
@@ -177,9 +176,9 @@
         "ripgrep",
         "sound-theme-freedesktop",
         "pulseaudio-utils"
-      ],
-      "packageName": "gloss"
+      ]
     },
+    "beforePack": "scripts/check-vendor.mjs",
     "afterPack": "scripts/adhoc-sign.mjs",
     "asarUnpack": [
       "node_modules/node-pty/**"
