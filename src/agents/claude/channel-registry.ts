@@ -4,6 +4,7 @@ import type { ChannelRecord } from './channel-types.js';
 import type { ProcessRunner } from '../../runtime/process-runner.js';
 import { isClaudeExecutable, readProcess, type ProcessInfo } from './process-probe.js';
 import { isTerminalRecord, sessionRecordOf, trustedProcStart } from './session-records.js';
+import { OWN_PID_DOMAIN } from './pid-domain.js';
 import { constants } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -46,7 +47,7 @@ interface NativeRecord {
   cwd: string;
   pid: number;
   procStart: string;
-  pidDomain: 'darwin';
+  pidDomain: string;
   version: string;
   entrypoint?: string;
 }
@@ -180,7 +181,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
             cwd: r.cwd,
             pid: r.pid,
             procStart,
-            pidDomain: 'darwin',
+            pidDomain: OWN_PID_DOMAIN,
             version: r.version,
             ...(r.entrypoint === 'cli' ? { entrypoint: r.entrypoint } : {}),
           });
