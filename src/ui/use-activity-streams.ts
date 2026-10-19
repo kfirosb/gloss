@@ -95,20 +95,59 @@ export function takeReportRequests(
   return ids;
 }
 
-/** Asks for a translation of each finished subagent report that has none yet. */
+/** Translates reports once per view/language, with an explicit retry after failure. */
 export function useReportTranslations(
   client: Pick<SessionClient, 'translateActivityReport' | 'sessionId'>,
   tasks: readonly ActivityTask[],
   translationOn: boolean,
+  replyLanguage: string,
 ) {
   const requested = useRef(new Set<string>());
+  const generation = useRef(0);
+  const scope = useRef({ client, replyLanguage });
+  const mounted = useRef(false);
+  const [failures, setFailures] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    mounted.current = true;
+    // Development-mode effect replay is still the same request scope.
+    if (scope.current.client !== client || scope.current.replyLanguage !== replyLanguage) {
+      scope.current = { client, replyLanguage };
+      generation.current++;
+      requested.current.clear();
+      setFailures(new Set());
+    }
+    return () => {
+      mounted.current = false;
+    };
+  }, [client, replyLanguage]);
+  const request = useCallback(
+    (task: ActivityTask) => {
+      const owner = generation.current;
+      const key = JSON.stringify([client.sessionId, task.id, task.report]);
+      setFailures((previous) => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+      void client.translateActivityReport(task.id).catch(() => {
+        // A late failure must not mark another session or language's request as failed.
+        if (mounted.current && owner === generation.current)
+          setFailures((previous) => new Set([...previous, key]));
+      });
+    },
+    [client],
+  );
   useEffect(() => {
     if (!translationOn) return;
-    for (const id of takeReportRequests(client.sessionId, tasks, requested.current))
-      // The server answers at once; its pending and complete states arrive in the snapshot stream.
-      // A failed request leaves the English report in place.
-      void client.translateActivityReport(id).catch(() => {});
-  }, [client, tasks, translationOn]);
+    const ids = new Set(takeReportRequests(client.sessionId, tasks, requested.current));
+    for (const task of tasks) if (ids.has(task.id)) request(task);
+  }, [client, tasks, translationOn, replyLanguage, request]);
+  return {
+    retry: request,
+    failed: (task: ActivityTask) =>
+      task.reportTranslation?.status === 'error' ||
+      failures.has(JSON.stringify([client.sessionId, task.id, task.report])),
+  };
 }
 
 export interface StreamState {

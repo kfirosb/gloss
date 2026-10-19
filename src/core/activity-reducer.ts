@@ -112,7 +112,8 @@ export function applyActivityEvent(
       );
     case 'report': {
       const report = event.report.slice(0, ACTIVITY_REPORT_CHARS);
-      const index = state.tasks.findIndex(
+      // A resumed agent reuses its agentId, but each invocation has its own task.
+      const index = state.tasks.findLastIndex(
         (task) => task.kind === 'subagent' && task.agentId === event.agentId,
       );
       if (index < 0 || state.tasks[index]!.report === report) return state;

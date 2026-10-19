@@ -585,10 +585,13 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
   };
 
+  let reportLanguageGeneration = 0;
+
   /** Translates one subagent report and writes it back only onto the same task, report and connection. */
   const translateReport = async (taskId: string, position: number, report: string) => {
     const generation = connectionGeneration;
     const target = settings.reply;
+    const languageGeneration = reportLanguageGeneration;
     const abort = new AbortController();
     activeLanguageOperations.add(abort);
     let result: { text: string; status: string };
@@ -616,7 +619,13 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
     const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
     // A resumed agent may have handed back a new report meanwhile; this translation is of the old one.
-    if (closed || generation !== connectionGeneration || !current || current.report !== report)
+    if (
+      closed ||
+      generation !== connectionGeneration ||
+      languageGeneration !== reportLanguageGeneration ||
+      !current ||
+      current.report !== report
+    )
       return;
     current.reportTranslation = {
       text: result.text,
@@ -1609,6 +1618,10 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       const previous = settings;
       settings = readSettings();
       if (JSON.stringify(previous) === JSON.stringify(settings)) return;
+      if (previous.reply !== settings.reply) {
+        reportLanguageGeneration++;
+        for (const task of state.activity?.tasks ?? []) delete task.reportTranslation;
+      }
       if (!needsReplyTranslation(settings)) dropPendingTranslations();
       if (
         needsReplyTranslation(settings) &&

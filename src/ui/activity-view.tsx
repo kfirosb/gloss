@@ -208,12 +208,16 @@ function TaskCard({
   disconnected,
   translationOn,
   replyLanguage,
+  translationFailed,
+  retryTranslation,
 }: {
   client: ActivityClient;
   task: ActivityTask;
   disconnected: boolean;
   translationOn: boolean;
   replyLanguage: LanguageCode;
+  translationFailed: boolean;
+  retryTranslation: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const status: CardStatus = disconnected && task.status === 'running' ? 'unknown' : task.status;
@@ -284,20 +288,21 @@ function TaskCard({
         <SubagentTimeline client={client} taskId={task.id} active={!disconnected} />
       )}
       {!subagent && open && !disconnected && <OutputPanel client={client} taskId={task.id} />}
-      {subagent && (
-        <Report task={task} translationOn={translationOn} replyLanguage={replyLanguage} />
+      {subagent && (open || task.status === 'running') && (
+        <>
+          <Report task={task} translationOn={translationOn} replyLanguage={replyLanguage} />
+          {translationOn && translationFailed && (
+            <p className="activity-meta" role="status">
+              Translation unavailable.{' '}
+              <button type="button" className="activity-button" onClick={retryTranslation}>
+                Retry translation
+              </button>
+            </p>
+          )}
+        </>
       )}
     </article>
   );
-}
-
-/** Running work first, then finished; each group newest first. */
-function cardOrder(tasks: readonly ActivityTask[]): ActivityTask[] {
-  const newest = [...tasks].reverse();
-  return [
-    ...newest.filter((task) => task.status === 'running'),
-    ...newest.filter((task) => task.status !== 'running'),
-  ];
 }
 
 export function ActivityView({
@@ -318,7 +323,15 @@ export function ActivityView({
   const tasks = activity?.tasks ?? [];
   const calls = activity?.calls ?? [];
   const gaps = activity?.gaps ?? [];
-  useReportTranslations(client, tasks, translationOn);
+  const translations = useReportTranslations(client, tasks, translationOn, replyLanguage);
+  const newest = [...tasks].reverse();
+  const groups = [
+    {
+      label: disconnected ? 'Status unknown' : 'Running now',
+      tasks: newest.filter((task) => task.status === 'running'),
+    },
+    { label: 'Completed', tasks: newest.filter((task) => task.status !== 'running') },
+  ];
   if (tasks.length === 0 && calls.length === 0 && gaps.length === 0)
     return (
       <div className="activity" dir="ltr">
@@ -328,18 +341,27 @@ export function ActivityView({
   return (
     <div className="activity" dir="ltr">
       {tasks.length > 0 && (
-        <section className="activity-tasks" aria-label="Running now">
-          <h3 className="activity-label">Running now</h3>
-          {cardOrder(tasks).map((task) => (
-            <TaskCard
-              key={task.id}
-              client={client}
-              task={task}
-              disconnected={disconnected}
-              translationOn={translationOn}
-              replyLanguage={replyLanguage}
-            />
-          ))}
+        <section className="activity-tasks" aria-label="Tasks">
+          {/* Keep cards under one parent so completing a task preserves its open stream and history. */}
+          {groups
+            .filter((group) => group.tasks.length > 0)
+            .flatMap((group) => [
+              <h3 key={`heading:${group.label}`} className="activity-label">
+                {group.label}
+              </h3>,
+              ...group.tasks.map((task) => (
+                <TaskCard
+                  key={`task:${task.id}`}
+                  client={client}
+                  task={task}
+                  disconnected={disconnected}
+                  translationOn={translationOn}
+                  replyLanguage={replyLanguage}
+                  translationFailed={translations.failed(task)}
+                  retryTranslation={() => translations.retry(task)}
+                />
+              )),
+            ])}
         </section>
       )}
       <section className="activity-main" aria-label="Tool timeline">

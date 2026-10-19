@@ -321,3 +321,35 @@ describe('summarizeToolCall', () => {
     expect(summarizeToolCall('Unknown', { a: 'x'.repeat(500) }).length).toBeLessThanOrEqual(120);
   });
 });
+
+it('keeps reports on their own invocation when an agent is resumed', () => {
+  let state = emptyActivity();
+  for (const [id, position, report] of [
+    ['first', 1, 'Original report'],
+    ['resumed', 2, 'New report'],
+  ] as const) {
+    state = applyActivityEvent(state, {
+      kind: 'task-start',
+      task: {
+        kind: 'subagent',
+        id,
+        position,
+        description: id,
+        depth: 0,
+        status: 'running',
+      },
+    });
+    state = applyActivityEvent(state, {
+      kind: 'task-launched',
+      id,
+      agentId: 'shared',
+      async: true,
+    });
+    state = applyActivityEvent(state, { kind: 'report', agentId: 'shared', report });
+    state = applyActivityEvent(state, { kind: 'task-end', id, status: 'finished' });
+  }
+  expect(state.tasks.map(({ id, report }) => ({ id, report }))).toEqual([
+    { id: 'first', report: 'Original report' },
+    { id: 'resumed', report: 'New report' },
+  ]);
+});
