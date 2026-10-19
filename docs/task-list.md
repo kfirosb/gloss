@@ -2,6 +2,74 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 21. Sign and notarize the Mac build
+
+Status: high priority; captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
+
+Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) and not notarized, so every download shows that dialog and the "Open Anyway" path got harder on macOS Sequoia. Only Developer ID signing plus notarization removes it. The Mac App Store is not an option: the app spawns tmux, reads Codex and Claude session files in the home folder, and runs a local server, which the App Sandbox forbids.
+
+- [ ] Enroll in the Apple Developer Program (99 USD per year; identity verification takes one to two days, so start first).
+- [ ] Change the bundle id from `local.language-assistant` to a real reverse-DNS id before the first signed release; changing it later resets macOS permission grants (microphone and others) for existing users.
+- [ ] Create a Developer ID Application certificate and keep it out of the repository (Keychain or CI secrets).
+- [ ] electron-builder: set the identity, hardened runtime, and entitlements (microphone, Electron JIT); sign the bundled `tmux` and `whisper-server` binaries with the same identity.
+- [ ] Notarize with `notarytool` (app-specific password or App Store Connect API key), staple the ticket to the app and the DMG, and verify with `spctl -a -vv` on a clean machine.
+- [ ] Update [mac-release-protocol.md](mac-release-protocol.md), the README install section, and the release-notes template: drop the "unsigned" wording once it is true.
+
+## 22. In-app updates from GitHub Releases
+
+Status: high priority; depends on task 21 (electron-updater refuses to update unsigned apps on macOS).
+
+Today every user must notice a new release and re-download the DMG by hand.
+
+- [ ] Add electron-updater with the GitHub Releases provider; publish `latest-mac.yml` and the zip or DMG the updater expects alongside each release.
+- [ ] Check on startup and on a Settings action; show the available version and a one-click install with restart. Never install silently.
+- [ ] Preserve the running app and saved data across an update; keep the manual DMG path working.
+- [ ] Add the publish step to the release protocol and verify an actual 0.x to 0.y update on an installed build.
+
+## 23. Homebrew tap
+
+Status: high priority; independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 21 lands.
+
+- [ ] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
+- [ ] Add a release-protocol step that bumps the cask version and checksum on each release (manually or with a small script).
+- [ ] Document it in the README next to the DMG download.
+- [ ] Later, once the project meets Homebrew's popularity thresholds, submit the cask to the main homebrew-cask repository.
+- [ ] Do not publish the desktop app on npm: a 392 MB Electron app with native binaries does not belong there. The browser mode could become an npm CLI later as a secondary option.
+
+## 24. Intel Mac (universal) build
+
+Status: high priority, after task 21. The app code has no architecture dependency; the build scripts do.
+
+`scripts/build-tmux.sh` and `scripts/build-whisper.sh` refuse to run off Apple Silicon, compile with hard-coded `-arch arm64`, and verify arm64 only. node-pty and Electron already ship Intel builds.
+
+- [ ] Build `tmux` and `whisper-server` for x86_64 too (Rosetta on the build Mac or an Intel GitHub Actions runner) and `lipo` them into universal binaries; update the verify steps.
+- [ ] Switch electron-builder to a universal target (DMG grows from about 144 MB to about 250 MB) or ship two DMGs; decide which.
+- [ ] Dictation: the whisper build uses Metal; Intel falls back to CPU and the bundled large-v3-turbo model will be slow. Offer a smaller model on Intel or document the limitation.
+- [ ] Test on a real Intel Mac or a CI runner; the maintainer has none.
+- [ ] Update the README requirements (today: Apple Silicon only, macOS 13+).
+
+## 25. Linux build
+
+Status: high priority to scope; recommendation is to hold implementation until a Linux user asks in an issue, so there is demand and a tester. Windows is out of scope: tmux does not exist there.
+
+Electron, node-pty, tmux, and whisper.cpp all run on Linux, and the Codex and Claude session files live in the same home-folder locations. About 18 platform checks across a dozen files gate on `darwin` and fail closed.
+
+- [ ] Replace `mdfind` in `src/runtime/folder-search.ts` with a Linux backend (ripgrep or fd).
+- [ ] Add Linux branches to Codex discovery, the Claude channel registry and setup, the dictation engine, the process runner, and `desktop/main.mjs`; keep the fail-closed behaviour for anything unverified.
+- [ ] Build whisper-server without Metal (CPU or Vulkan); prefer the distro's tmux over bundling.
+- [ ] Replace ad-hoc signing and DMG packaging with AppImage or deb output.
+- [ ] Test Hebrew rendering and clipboard on Wayland and X11; expect early issues there.
+
+## 26. Public release readiness
+
+Status: high priority; small items that will otherwise become the first issues filed.
+
+- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon only (until task 24), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
+- [ ] Codex discovery is pinned to 0.154.0, 0.157.1 and 0.158.0 and fails closed on any other version; Codex ships often, so this will be the top bug report. Decide between loosening the gate and committing to fast version bumps.
+- [ ] Keep the "experimental" label on Claude Code support visible in the README and the app.
+- [ ] Add a GitHub issue template asking for macOS version, Codex or Claude Code version, and what the sidebar showed.
+- [ ] Announce only after tasks 21 and 23 are done.
+
 ## 20. Activity view
 
 Status: implemented on branch `subagents` (not merged); spec [2026-10-18-activity-view-design](superpowers/specs/2026-10-18-activity-view-design.md).
@@ -35,7 +103,7 @@ Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh
 - [x] Measured: built backend 2–3 Claude `lsof` runs per 10 s; packaged 0.10.5 1 Claude run per 6 s. Browser suite 279/279 in about 5 minutes.
 - [x] Installed 0.10.5 (9 Claude records, 93 catalog entries): all `lsof` runs fell from 143 per 5 s to 42–52 per 10 s; Claude's share is 6 per 10 s. Load average fell from 12–14 to about 4. Unit 1102/1102; browser 279/279 in 4.7 min.
 - [x] Codex probes (`ps`, `lsof -Fpcfn` on writer locks, `lsof -a -d cwd`) share one round across discovery, status and sends for 3 s (Gloss 0.10.6). Installed 2026-10-16: per 15 s, Codex fell from 16 writer `lsof` + 15 `cwd` `lsof` + 16 `ps` to 4 + 1 + 4; all `lsof` together about 1/s (30 in 30 s).
-- [ ] Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in.
+- [ ] Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in. Not seen with the installed 0.12.0 while logged in (0 runs in 10 s on 2026-10-17). Cause to confirm: `ClaudeBackend.open()` runs the check on every session open with no cache, so failed opens that retry repeat it.
 
 ## 15. Claude discovery accepts invalid `entrypoint` values
 
@@ -85,7 +153,7 @@ Status: requirements definition first; implementation scope not yet agreed.
 
 ## 4. Sidebar, folders, worktrees, and version display
 
-Status: visual design and product decisions approved on 2026-10-12; implemented on branch `feature/sidebar-worktrees`; not yet merged or released.
+Status: complete; on `main` and released (in Gloss since the first public release).
 
 See the [decisions and session handoff](handoffs/2026-10-12-sidebar-worktrees.md) and [interactive preview](previews/folders-and-worktrees.html).
 
@@ -96,7 +164,7 @@ See the [decisions and session handoff](handoffs/2026-10-12-sidebar-worktrees.md
 - [x] Create, open, and delete worktrees; default to `<project>/.worktrees/<name>` with a remembered per-project override.
 - [x] Add `/.worktrees/` to the root `.gitignore` when needed, preserving existing entries and avoiding duplicates.
 - [x] Show the actual running version beside Settings, with an About panel.
-- [ ] Plan and verify persistence, session isolation, and safe worktree operations before a future Mac release.
+- [x] Plan and verify persistence, session isolation, and safe worktree operations before a future Mac release.
 
 ## 5. Terminals from Gloss
 
@@ -117,14 +185,14 @@ Status: idea captured on 2026-10-16; benefits and feasibility still to be worked
 
 ## 7. Remove the large end-of-session popup
 
-Status: implemented on `make-pop-up-smaller`; not released.
+Status: complete; released in Gloss 0.12.0.
 
 - [x] Ending a session opens a huge popup; the user does not want it.
 - [x] Hovering a session or terminal tab swaps its activity dot for an X; clicking it ends the session or terminal at once. The tab's context menu "End session" also ends at once, and a failure is shown in the error line.
 
 ## 8. Smaller usage-limit notice
 
-Status: implemented on `make-pop-up-smaller`; not released.
+Status: complete; released in Gloss 0.12.0.
 
 - [x] When tokens run out and the usage limit is hit, the window that opens is too big and too long. Make it short and compact.
 - [x] The quota break dialog stretched to the full window height and laid its English text out right to left; it is now a 320px card sized to its content, left to right, with the same content and buttons.
@@ -141,11 +209,11 @@ Status: captured; reproduce and find the cause.
 
 - [ ] Something in "Summarize in Hebrew" does not work for the user; details still needed.
 
-## 11. Terminal scrollback reaches the top
+## 11. Terminal scrollback stops before the top
 
-Status: captured.
+Status: complete; confirmed working by the user on 2026-10-17.
 
-- [ ] Scrolling up in a terminal session stops before the beginning; let the user scroll all the way to the top.
+- [x] Scrolling up in a terminal session stops before the beginning; let the user scroll all the way to the top.
 
 ## 12. Show running Claude subagents
 
