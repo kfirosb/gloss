@@ -104,7 +104,6 @@ export interface Workflow {
   translateComposer(text: string): Promise<string>;
   refreshLanguageSettings(): void;
   translateMessage(sourceId: string): Promise<void>;
-  translateActivityReport(taskId: string): Promise<void>;
   subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
   /** The validated path of a background task's output file. */
   backgroundOutput(taskId: string): Promise<string>;
@@ -592,46 +591,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         /* Native events trigger status-only checks, never retries of the send. */
       }
     }
-  };
-
-  /** Translates one subagent report and writes it back only onto the same task, report and connection. */
-  const translateReport = async (taskId: string, position: number, report: string) => {
-    const generation = connectionGeneration;
-    const target = settings.reply;
-    const abort = new AbortController();
-    activeLanguageOperations.add(abort);
-    let result: { text: string; status: string };
-    try {
-      result = await translateMessageResult(
-        {
-          sourceScope: `${state.id}:activity`,
-          sourceId: taskId,
-          sourceRevision: position,
-          text: report,
-          complete: true,
-          language: target,
-          promptLanguage: languageName(target),
-          model: state.languageModel,
-          promptVersion: TRANSLATION_PROMPT_VERSION,
-          signal: abort.signal,
-        },
-        { store: deps.store, session: deps.languageSession },
-      );
-    } catch {
-      // The translation cache failed; the English report stays in place.
-      result = { text: report, status: 'error' };
-    } finally {
-      activeLanguageOperations.delete(abort);
-    }
-    const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
-    // A resumed agent may have handed back a new report meanwhile; this translation is of the old one.
-    if (closed || generation !== connectionGeneration || !current || current.report !== report)
-      return;
-    current.reportTranslation = {
-      text: result.text,
-      status: result.status === 'complete' ? 'complete' : 'error',
-    };
-    publish(false);
   };
 
   /** Channel deliveries Claude has read into its context and not yet answered with a finished turn. */
@@ -1676,21 +1635,6 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!state.activity?.tasks.some((task) => task.id === taskId))
         throw new Error('Unknown task');
       return activity.outputPath(taskId);
-    },
-
-    async translateActivityReport(taskId) {
-      requireOpen();
-      const task = state.activity?.tasks.find((candidate) => candidate.id === taskId);
-      const report = task?.report;
-      if (!task || !report) throw new Error('Report unavailable for translation');
-      if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
-      if (task.reportTranslation?.status === 'complete') return;
-      if (task.reportTranslation?.status === 'pending') return;
-      task.reportTranslation = { text: report, status: 'pending' };
-      publish(false);
-      // Like a message translation, the request is answered at once; the pending and finished states
-      // reach the client through snapshots, so a slow translation never holds the request open.
-      void translateReport(taskId, task.position, report);
     },
 
     subscribe(listener) {

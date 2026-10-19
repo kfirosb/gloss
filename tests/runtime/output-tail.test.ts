@@ -82,3 +82,22 @@ it('ends when the signal aborts', async () => {
   abort.abort();
   expect((await within(pending)).done).toBe(true);
 });
+
+it.each(['x', 'א', '😀'])(
+  'paginates a long %s line without losing text or splitting UTF-8',
+  async (character) => {
+    const content = character.repeat(70001);
+    const path = await file(content);
+    let window = await readOutputWindow(path);
+    let text = window.text;
+    expect(text.length).toBeGreaterThan(0);
+    while (window.start > 0) {
+      const earlier = await readOutputWindow(path, window.start);
+      expect(earlier.start).toBeLessThan(window.start);
+      expect(earlier.end).toBe(window.start);
+      text = earlier.text + text;
+      window = earlier;
+    }
+    expect(text).toBe(content);
+  },
+);
