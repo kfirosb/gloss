@@ -173,6 +173,10 @@ export function rememberStream(key: string, state: ActivitySnapshot): void {
     seenStreams.delete(oldest);
   }
 }
+/** Drops a remembered state that no longer follows its transcript. */
+export function forgetStream(key: string): void {
+  seenStreams.delete(key);
+}
 export function recallStream(key: string): ActivitySnapshot | undefined {
   return seenStreams.get(key);
 }
@@ -213,6 +217,11 @@ export function useSubagentStream(
   const [stream, setStream] = useState<StreamState>(() => ({ key, state: emptyActivity() }));
   const slot = useStreamSlot(active, priority);
   const open = slot === true;
+  // A paused stream stops following its transcript, so its remembered state would go stale.
+  const paused = slot === false;
+  useEffect(() => {
+    if (paused) forgetStream(key);
+  }, [paused, key]);
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
@@ -240,7 +249,7 @@ export function useSubagentStream(
   const live = stream.key === key ? stream.state : emptyActivity();
   return {
     activity: active ? live : (recallStream(key) ?? live),
-    paused: slot === false,
+    paused,
   };
 }
 

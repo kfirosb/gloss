@@ -5,6 +5,7 @@ import {
   StreamSlots,
   foldStreamEvents,
   recallStream,
+  forgetStream,
   rememberStream,
 } from '../../src/ui/use-activity-streams.js';
 
@@ -202,6 +203,11 @@ describe('seen subagent actions', () => {
   it('recalls what was remembered under the same key', () => {
     rememberStream('cache-s:a1', state('c1'));
     expect(recallStream('cache-s:a1')?.calls.map((c) => c.id)).toEqual(['c1']);
+  });
+  it('forgets a state whose stream was paused', () => {
+    rememberStream('pause-s:a1', state('c1'));
+    forgetStream('pause-s:a1');
+    expect(recallStream('pause-s:a1')).toBeUndefined();
   });
   it('knows nothing about an unseen key', () => {
     expect(recallStream('cache-s:never')).toBeUndefined();

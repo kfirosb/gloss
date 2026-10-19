@@ -174,7 +174,8 @@ test('shows the strip, the active cards and the last five actions newest first',
   await main.getByRole('button', { name: 'Show earlier actions (3)' }).click();
   await expect(rows).toHaveCount(8);
   await expect(rows.last()).toHaveAttribute('data-call', 'c1');
-  await expect(main.getByRole('button', { name: 'Show fewer' })).toBeVisible();
+  await main.getByRole('button', { name: 'Show fewer' }).click();
+  await expect(rows).toHaveCount(5);
 
   const card = view.locator('[data-agent="a1"]');
   await expect(card.locator('.activity-tag')).toHaveText('subagent');
@@ -244,6 +245,43 @@ test('a finished subagent moves to History and keeps its actions', async ({ page
   await card.getByRole('button', { name: /Re-review final fix wave/ }).click();
   await expect(card.locator('[data-call="s-grep"]')).toHaveCount(1);
   expect(streams.length).toBe(opened);
+});
+
+test('a subagent preempted while running streams again from History', async ({ page }) => {
+  const commands = [1, 2, 3].map((index) =>
+    background({ id: `b${index}`, description: `Command ${index}`, position: 100 + index }),
+  );
+  const { streams, push } = await open(page, {
+    value: activity({ tasks: [subagent(), ...commands], running: 4 }),
+  });
+  await activityRadio(page).click();
+  const view = page.locator('.activity');
+  await expect(view.locator('[data-agent="a1"] [data-call="s-grep"]')).toHaveCount(1);
+  for (const id of ['b1', 'b2', 'b3']) {
+    await view
+      .locator(`.activity-strip-row[data-task="${id}"]`)
+      .getByRole('button', { name: 'output' })
+      .click();
+  }
+  await expect.poll(() => streams.filter((id) => id.startsWith('b')).length).toBeGreaterThan(2);
+  await page.waitForTimeout(300);
+  const opened = streams.filter((id) => id === 'a1').length;
+  expect(opened).toBe(1);
+  await push(
+    activity({
+      tasks: [
+        subagent({ status: 'finished', report: 'Done.' }),
+        ...commands.map((command) => ({ ...command, status: 'finished' as const })),
+      ],
+      running: 0,
+    }),
+  );
+  await expect(view.locator('article.activity-agent')).toHaveCount(1);
+  await view.locator('button.activity-history-toggle').click();
+  const card = view.locator('.activity-history [data-agent="a1"]');
+  await card.getByRole('button', { name: /Re-review final fix wave/ }).click();
+  await expect(card.locator('[data-call="s-grep"]')).toHaveCount(1);
+  expect(streams.filter((id) => id === 'a1')).toHaveLength(2);
 });
 
 test('finished commands show their output once', async ({ page }) => {
