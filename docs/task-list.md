@@ -2,7 +2,7 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
-## 21. Sign and notarize the Mac build
+## 20. Sign and notarize the Mac build
 
 Status: high priority; captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
 
@@ -15,9 +15,9 @@ Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) an
 - [ ] Notarize with `notarytool` (app-specific password or App Store Connect API key), staple the ticket to the app and the DMG, and verify with `spctl -a -vv` on a clean machine.
 - [ ] Update [mac-release-protocol.md](mac-release-protocol.md), the README install section, and the release-notes template: drop the "unsigned" wording once it is true.
 
-## 22. In-app updates from GitHub Releases
+## 21. In-app updates from GitHub Releases
 
-Status: high priority; depends on task 21 (electron-updater refuses to update unsigned apps on macOS).
+Status: high priority; depends on task 20 (electron-updater refuses to update unsigned apps on macOS).
 
 Today every user must notice a new release and re-download the DMG by hand.
 
@@ -26,9 +26,9 @@ Today every user must notice a new release and re-download the DMG by hand.
 - [ ] Preserve the running app and saved data across an update; keep the manual DMG path working.
 - [ ] Add the publish step to the release protocol and verify an actual 0.x to 0.y update on an installed build.
 
-## 23. Homebrew tap
+## 22. Homebrew tap
 
-Status: high priority; independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 21 lands.
+Status: high priority; independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 20 lands.
 
 - [ ] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
 - [ ] Add a release-protocol step that bumps the cask version and checksum on each release (manually or with a small script).
@@ -36,9 +36,9 @@ Status: high priority; independent of signing, but Homebrew still applies quaran
 - [ ] Later, once the project meets Homebrew's popularity thresholds, submit the cask to the main homebrew-cask repository.
 - [ ] Do not publish the desktop app on npm: a 392 MB Electron app with native binaries does not belong there. The browser mode could become an npm CLI later as a secondary option.
 
-## 24. Intel Mac (universal) build
+## 23. Intel Mac (universal) build
 
-Status: high priority, after task 21. The app code has no architecture dependency; the build scripts do.
+Status: high priority, after task 20. The app code has no architecture dependency; the build scripts do.
 
 `scripts/build-tmux.sh` and `scripts/build-whisper.sh` refuse to run off Apple Silicon, compile with hard-coded `-arch arm64`, and verify arm64 only. node-pty and Electron already ship Intel builds.
 
@@ -48,7 +48,7 @@ Status: high priority, after task 21. The app code has no architecture dependenc
 - [ ] Test on a real Intel Mac or a CI runner; the maintainer has none.
 - [ ] Update the README requirements (today: Apple Silicon only, macOS 13+).
 
-## 25. Linux build
+## 24. Linux build
 
 Status: high priority to scope; recommendation is to hold implementation until a Linux user asks in an issue, so there is demand and a tester. Windows is out of scope: tmux does not exist there.
 
@@ -60,21 +60,21 @@ Electron, node-pty, tmux, and whisper.cpp all run on Linux, and the Codex and Cl
 - [ ] Replace ad-hoc signing and DMG packaging with AppImage or deb output.
 - [ ] Test Hebrew rendering and clipboard on Wayland and X11; expect early issues there.
 
-## 26. Public release readiness
+## 25. Public release readiness
 
 Status: high priority; small items that will otherwise become the first issues filed.
 
-- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon only (until task 24), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
+- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon only (until task 23), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
 - [ ] Codex discovery is pinned to 0.154.0, 0.157.1 and 0.158.0 and fails closed on any other version; Codex ships often, so this will be the top bug report. Decide between loosening the gate and committing to fast version bumps.
 - [ ] Keep the "experimental" label on Claude Code support visible in the README and the app.
 - [ ] Add a GitHub issue template asking for macOS version, Codex or Claude Code version, and what the sidebar showed.
-- [ ] Announce only after tasks 21 and 23 are done.
+- [ ] Announce only after tasks 20 and 22 are done.
 
-## 20. Activity view
+## 26. Activity view
 
 Status: implemented on branch `subagents` (not merged); spec [2026-10-18-activity-view-design](superpowers/specs/2026-10-18-activity-view-design.md).
 
-A Claude session gets an Activity tab beside Translated, Original, Split and Terminal. It lists running subagents and background commands (with a live tail of the command's output) and every tool call as a timeline, all derived from the transcript.
+A Claude session gets an Activity tab beside Translated, Original, Split and Terminal. It lists running subagents and background commands (with a live tail of the command's output) and every tool call as a timeline, all derived from the transcript. (First version, 2026-10-18; the live page below replaced the timeline and the translated reports.)
 
 - [x] 1. In a connected Claude session, ask Claude to run a long command in the background and spawn a subagent. Within a few seconds the Activity tab shows "2", the view lists both as running, the background card tails the output, and the subagent card shows its tool rows. When each finishes, the cards grey out and the report appears, translated when translation is on.
 - [x] 2. The timeline lists the session's tool calls newest first, with failed commands marked; clicking a row shows the full command and result.
@@ -89,6 +89,19 @@ Verification (2026-10-18):
 - `npm run build` succeeds with Vite's existing advisory "Some chunks are larger than 500 kB after minification" (main chunk 922.66 kB).
 - Manual, isolated instance (fake `HOME`, built backend on port 4302, throwaway Claude 2.1.302 session in this worktree, driven with Playwright): badge read "Activity2" with both cards running about 2 s after the tool calls; the subagent card showed its Grep and SubagentHandback rows; the background tail stayed empty during `sleep 30`, then showed `done` and `[exited with code 0]`; the badge fell to 1 when the subagent ended and both cards went grey (finished, with durations 7 s and 30 s). A real `ls /nonexistent-gloss-check` row was marked failed at the top of the timeline and expanded to the command and `Exit code 1` output. Switching to a Codex session aborted both open streams at once, showed no Activity rows and a disabled Activity tab titled "Activity is available for Claude sessions"; switching back showed the right cards with tails closed, and a reload kept the correct badge.
 - [x] Fix found by manual acceptance (9d0ea41): Claude 2.1.302 runs subagents async and hands the report back as a peer record, so finished async cards had no report. The report is now read from the hand-back's structured `origin` fields; afterwards both real subagent cards showed their reports translated into Hebrew.
+
+- Live page (2026-10-19): spec [2026-10-19-activity-live-page-design](superpowers/specs/2026-10-19-activity-live-page-design.md). This round was verified by the unit and browser suites only; there was no fresh manual run. It supersedes the timeline and translated-report wording above.
+  - [x] 1. With one running subagent and one running background command: the strip shows the command and its last output line; two cards show (Claude, the subagent), each with at most 5 rows, newest on top; the newest row carries the highlight class briefly; the badge shows 2. No request to `translate-activity-report` exists anywhere. Covered by `tests/ui/activity.spec.ts`: "shows the strip, the active cards and the last five actions newest first", "the newest row is highlighted briefly" and "five running commands take three slots and the rest show an ellipsis". The absence of `translate-activity-report` is by removal of the action (no spec asserts the missing request).
+  - [x] 2. "Show earlier actions (N)" on the Claude card reveals the older rows; "Show fewer" collapses them. Covered by the "Show earlier actions (3)" and "Show fewer" assertions in "shows the strip, the active cards and the last five actions newest first".
+  - [x] 3. When the subagent finishes, its card disappears from the active list and History reads `1 finished subagent`; opening History shows its card with the English report and its last actions. Covered by "a finished subagent moves to History and keeps its actions".
+  - [x] 4. Translated, Original, Split and Terminal views and reply translation behave as before; the full unit and browser suites pass. Covered by the full suites below.
+  - [x] 5. A Codex session shows the Activity tab disabled; a disconnected Claude session shows no live dots and opens no streams. Covered by "Activity is only for Claude sessions" and "a disconnected session greys everything and opens no stream".
+
+  Verification (2026-10-19):
+
+  - Unit: `npm run typecheck && npx vitest run`: 1652 passed, 1 skipped (139 files passed, 1 skipped).
+  - Browser: `PLAYWRIGHT_PORT=4321 npx playwright test`: 315/315 in 2.1 min, no reruns needed.
+  - `npm run build` succeeds with Vite's existing chunk-size advisory.
 
 ## 19. lsof storm in Claude session liveness checks
 

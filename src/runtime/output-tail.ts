@@ -23,7 +23,7 @@ async function readSlice(path: string, from: number, to: number) {
   }
 }
 
-/** Reads a window ending at `end`, moved forward to a line start so it never begins mid-line. */
+/** Prefers whole lines; a line longer than the window falls back to a UTF-8 boundary. */
 async function readWindowBytes(path: string, end?: number) {
   const size = (await stat(path)).size;
   const to = Math.min(end ?? size, size);
@@ -31,7 +31,9 @@ async function readWindowBytes(path: string, end?: number) {
   let { bytes, start } = slice;
   if (start > 0) {
     const newline = bytes.indexOf(0x0a);
-    const skip = newline === -1 ? bytes.length : newline + 1;
+    let skip = newline >= 0 && newline + 1 < bytes.length ? newline + 1 : 0;
+    // Keep long lines readable and pagination moving, without splitting a code point.
+    while (skip < bytes.length && (bytes[skip]! & 0xc0) === 0x80) skip++;
     bytes = bytes.subarray(skip);
     start += skip;
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActivityEvent, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
+import type { ActivityEvent, ActivitySnapshot } from '../core/activity-contracts.js';
 import { applyActivityEvent, emptyActivity } from '../core/activity-reducer.js';
 import type { SessionClient } from './session-client.js';
 
@@ -13,109 +13,173 @@ const EARLIER_UNAVAILABLE = 'Earlier output unavailable';
  * Activity streams the page holds open at once. The browser allows six connections per host over
  * HTTP/1.1 and the session and catalog event streams already use two; actions need the rest.
  */
-export const ACTIVITY_STREAM_LIMIT = 2;
+export const ACTIVITY_STREAM_LIMIT = 3;
+
+/** How much a stream matters: 1 expanded by hand, 2 a running subagent card, 3 a background-command tail. */
+export type StreamPriority = 1 | 2 | 3;
+
+/** A claim on a stream slot: release it when done; a new priority applies in place. */
+export interface StreamClaim {
+  release(): void;
+  /**
+   * A waiting claim raised above an open holder takes its slot; an open holder demoted below a
+   * waiter yields to it. Nothing else moves.
+   */
+  prioritize(priority: StreamPriority): void;
+}
 
 interface StreamSlot {
-  order: number; // claim order: the lowest open one is the oldest
+  order: number; // claim order: a lower number is older
+  priority: StreamPriority;
   setOpen: (open: boolean) => void;
 }
-const byOrder = (a: StreamSlot, b: StreamSlot) => a.order - b.order;
 
-/** Grants at most `limit` open streams; a new one closes the oldest, which reopens when another closes. */
+/**
+ * Grants at most `limit` open streams. A holder keeps its slot until it releases it; a claim takes a
+ * free slot, else preempts only a holder of lower importance (oldest first), else waits paused.
+ */
 export class StreamSlots {
   private readonly open: StreamSlot[] = [];
   private readonly paused: StreamSlot[] = [];
   private claims = 0;
   constructor(private readonly limit: number) {}
   /** `setOpen` hears whether the stream may hold its connection now and whenever that changes. */
-  claim(setOpen: (open: boolean) => void): () => void {
-    const slot: StreamSlot = { order: this.claims++, setOpen };
-    this.open.push(slot);
-    setOpen(true);
-    if (this.open.length > this.limit) {
-      const oldest = this.open.shift();
-      if (oldest) {
-        this.paused.push(oldest);
-        this.paused.sort(byOrder);
-        oldest.setOpen(false);
-      }
+  claim(setOpen: (open: boolean) => void, priority: StreamPriority): StreamClaim {
+    const slot: StreamSlot = { order: this.claims++, priority, setOpen };
+    if (this.open.length < this.limit) {
+      this.open.push(slot);
+      setOpen(true);
+    } else if (!this.takeFromLessImportant(slot)) {
+      this.paused.push(slot);
+      setOpen(false);
     }
-    return () => {
-      const pausedAt = this.paused.indexOf(slot);
-      if (pausedAt >= 0) {
-        this.paused.splice(pausedAt, 1);
-        return;
-      }
-      const openAt = this.open.indexOf(slot);
-      if (openAt < 0) return;
-      this.open.splice(openAt, 1);
-      // The newest waiting stream reopens and keeps its place in the claim order, so a stream that is
-      // closed and claimed again at once (as React's development mode does) pauses the same one again.
-      const next = this.paused.pop();
-      if (!next) return;
-      this.open.push(next);
-      this.open.sort(byOrder);
-      next.setOpen(true);
+    return {
+      release: () => this.release(slot),
+      prioritize: (next) => {
+        const demoted = next > slot.priority;
+        slot.priority = next;
+        const pausedAt = this.paused.indexOf(slot);
+        if (pausedAt >= 0) {
+          this.paused.splice(pausedAt, 1);
+          if (!this.takeFromLessImportant(slot)) this.paused.push(slot);
+          return;
+        }
+        if (demoted && this.open.includes(slot)) this.yieldToMoreImportant(slot);
+      },
     };
+  }
+  /** Opens `slot` in place of the least important holder below it; false when none ranks below. */
+  private takeFromLessImportant(slot: StreamSlot): boolean {
+    const victim = this.preemptable(slot.priority);
+    if (!victim) return false;
+    this.open.splice(this.open.indexOf(victim), 1);
+    this.paused.push(victim);
+    this.open.push(slot);
+    slot.setOpen(true);
+    victim.setOpen(false);
+    return true;
+  }
+  /** A demoted holder gives its slot to a waiter that now outranks it; nothing else moves. */
+  private yieldToMoreImportant(slot: StreamSlot) {
+    const waiter = this.nextWaiting();
+    if (!waiter || waiter.priority >= slot.priority) return;
+    this.open.splice(this.open.indexOf(slot), 1);
+    this.paused.splice(this.paused.indexOf(waiter), 1);
+    this.paused.push(slot);
+    this.open.push(waiter);
+    waiter.setOpen(true);
+    slot.setOpen(false);
+  }
+  private release(slot: StreamSlot) {
+    const pausedAt = this.paused.indexOf(slot);
+    if (pausedAt >= 0) {
+      this.paused.splice(pausedAt, 1);
+      return;
+    }
+    const openAt = this.open.indexOf(slot);
+    if (openAt < 0) return;
+    this.open.splice(openAt, 1);
+    const next = this.nextWaiting();
+    if (!next) return;
+    this.paused.splice(this.paused.indexOf(next), 1);
+    this.open.push(next);
+    next.setOpen(true);
+  }
+  /** The open holder of the lowest importance below `priority`, oldest first. */
+  private preemptable(priority: StreamPriority): StreamSlot | undefined {
+    let victim: StreamSlot | undefined;
+    for (const holder of this.open) {
+      if (holder.priority <= priority) continue;
+      if (!victim || holder.priority > victim.priority) victim = holder;
+    }
+    return victim;
+  }
+  /** The most important waiting claim, newest first. */
+  private nextWaiting(): StreamSlot | undefined {
+    let next: StreamSlot | undefined;
+    for (const waiting of this.paused) {
+      if (
+        !next ||
+        waiting.priority < next.priority ||
+        (waiting.priority === next.priority && waiting.order > next.order)
+      )
+        next = waiting;
+    }
+    return next;
   }
 }
 const activityStreamSlots = new StreamSlots(ACTIVITY_STREAM_LIMIT);
 
-/** Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming. */
-function useStreamSlot(active: boolean): boolean | undefined {
+/**
+ * Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming.
+ * A priority change re-ranks the same claim, so an open stream keeps its connection.
+ */
+function useStreamSlot(active: boolean, priority: StreamPriority): boolean | undefined {
   const [open, setOpen] = useState<boolean | undefined>(undefined);
+  const claim = useRef<StreamClaim | undefined>(undefined);
+  const priorityNow = useRef(priority);
+  priorityNow.current = priority;
   useEffect(() => {
     if (!active) return;
-    const release = activityStreamSlots.claim(setOpen);
+    const held = activityStreamSlots.claim(setOpen, priorityNow.current);
+    claim.current = held;
     return () => {
-      release();
+      held.release();
+      if (claim.current === held) claim.current = undefined;
       setOpen(undefined);
     };
   }, [active]);
-  return active ? open : undefined;
-}
-
-/**
- * The finished subagent reports to ask a translation for, recording each in `requested`. A report is
- * asked for once; a resumed agent's new report has a new key, so it is asked for again.
- */
-export function takeReportRequests(
-  sessionId: string,
-  tasks: readonly ActivityTask[],
-  requested: Set<string>,
-): string[] {
-  const ids: string[] = [];
-  for (const task of tasks) {
-    if (task.kind !== 'subagent' || !task.report || task.reportTranslation) continue;
-    const key = JSON.stringify([sessionId, task.id, task.report]);
-    if (requested.has(key)) continue;
-    requested.add(key);
-    ids.push(task.id);
-  }
-  return ids;
-}
-
-/** Asks for a translation of each finished subagent report that has none yet. */
-export function useReportTranslations(
-  client: Pick<SessionClient, 'translateActivityReport' | 'sessionId'>,
-  tasks: readonly ActivityTask[],
-  translationOn: boolean,
-) {
-  const requested = useRef(new Set<string>());
   useEffect(() => {
-    if (!translationOn) return;
-    for (const id of takeReportRequests(client.sessionId, tasks, requested.current))
-      // The server answers at once; its pending and complete states arrive in the snapshot stream.
-      // A failed request leaves the English report in place.
-      void client.translateActivityReport(id).catch(() => {});
-  }, [client, tasks, translationOn]);
+    claim.current?.prioritize(priority);
+  }, [priority]);
+  return active ? open : undefined;
 }
 
 export interface StreamState {
   key: string;
   state: ActivitySnapshot;
 }
-const streamKey = (sessionId: string, taskId: string) => `${sessionId}:${taskId}`;
+export const streamKey = (sessionId: string, taskId: string) => `${sessionId}:${taskId}`;
+
+/** Subagent activities kept after their card goes away, so History can show them without a new stream. */
+const SEEN_STREAMS_LIMIT = 50;
+const seenStreams = new Map<string, ActivitySnapshot>();
+/** Keeps the newest `SEEN_STREAMS_LIMIT` states; rewriting a key makes it the newest. */
+export function rememberStream(key: string, state: ActivitySnapshot): void {
+  seenStreams.delete(key);
+  seenStreams.set(key, state);
+  for (const oldest of seenStreams.keys()) {
+    if (seenStreams.size <= SEEN_STREAMS_LIMIT) break;
+    seenStreams.delete(oldest);
+  }
+}
+/** Drops a remembered state that no longer follows its transcript. */
+export function forgetStream(key: string): void {
+  seenStreams.delete(key);
+}
+export function recallStream(key: string): ActivitySnapshot | undefined {
+  return seenStreams.get(key);
+}
 
 /**
  * Folds one event from the stream opened for `incomingKey` while the view shows `key`.
@@ -134,28 +198,42 @@ export function foldStreamEvents(
 
 export interface SubagentStream {
   activity: ActivitySnapshot;
-  /** Wanted but closed while newer activity streams hold the connections. */
+  /** Wanted but closed while other activity streams hold the connections. */
   paused: boolean;
 }
-/** The activity of one subagent's own transcript, streamed while `active` and holding a slot. */
+/**
+ * The activity of one subagent's own transcript, streamed while `active` and holding a slot.
+ * While not `active` it is the activity last seen for this task, if any.
+ */
 export function useSubagentStream(
   client: Pick<SessionClient, 'subagentActivity' | 'sessionId'>,
   taskId: string,
   active: boolean,
+  priority: StreamPriority,
 ): SubagentStream {
   const key = streamKey(client.sessionId, taskId);
   const keyNow = useRef(key);
   keyNow.current = key;
   const [stream, setStream] = useState<StreamState>(() => ({ key, state: emptyActivity() }));
-  const slot = useStreamSlot(active);
+  const slot = useStreamSlot(active, priority);
   const open = slot === true;
+  // A paused stream stops following its transcript, so its remembered state would go stale.
+  const paused = slot === false;
+  useEffect(() => {
+    if (paused) forgetStream(key);
+  }, [paused, key]);
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
     // Each connection replays the transcript from its start, so it folds onto a fresh state.
     setStream({ key, state: emptyActivity() });
     const fold = (event: ActivityEvent) =>
-      setStream((current) => foldStreamEvents(keyNow.current, current, key, event));
+      setStream((current) => {
+        const next = foldStreamEvents(keyNow.current, current, key, event);
+        // Idempotent, so a repeated updater call in development is harmless.
+        if (next !== current) rememberStream(next.key, next.state);
+        return next;
+      });
     void (async () => {
       try {
         for await (const event of client.subagentActivity(taskId, controller.signal)) {
@@ -168,9 +246,10 @@ export function useSubagentStream(
     })();
     return () => controller.abort();
   }, [client, taskId, key, open]);
+  const live = stream.key === key ? stream.state : emptyActivity();
   return {
-    activity: stream.key === key ? stream.state : emptyActivity(),
-    paused: slot === false,
+    activity: active ? live : (recallStream(key) ?? live),
+    paused,
   };
 }
 
@@ -200,7 +279,7 @@ export interface OutputTail {
   lines: string;
   start: number;
   error?: string;
-  /** Wanted but closed while newer activity streams hold the connections. */
+  /** Wanted but closed while other activity streams hold the connections. */
   paused: boolean;
   /** Prepends the window before `start`; never rejects, a failure becomes `error`. */
   showEarlier(): Promise<void>;
@@ -210,6 +289,7 @@ export function useOutputTail(
   client: Pick<SessionClient, 'outputTail' | 'outputWindow' | 'sessionId'>,
   taskId: string,
   active: boolean,
+  priority: StreamPriority,
 ): OutputTail {
   const key = streamKey(client.sessionId, taskId);
   const keyNow = useRef(key);
@@ -219,7 +299,7 @@ export function useOutputTail(
   const current = tail.key === key ? tail : empty();
   const startNow = useRef(current.start);
   startNow.current = current.start;
-  const slot = useStreamSlot(active);
+  const slot = useStreamSlot(active, priority);
   const open = slot === true;
   useEffect(() => {
     if (!open) return;
@@ -271,6 +351,80 @@ export function useOutputTail(
     start: current.start,
     ...(current.error === undefined ? {} : { error: current.error }),
     paused: slot === false,
+    showEarlier,
+  };
+}
+
+/** Asks the window endpoint for the newest window: the server clamps `end` to the file size. */
+const LATEST_WINDOW_END = Number.MAX_SAFE_INTEGER;
+interface WindowState {
+  key: string;
+  text: string;
+  start: number;
+  error?: string;
+}
+export interface OutputWindowView {
+  text: string;
+  start: number;
+  error?: string;
+  /** Prepends the window before `start`; never rejects, a failure becomes `error`. */
+  showEarlier(): Promise<void>;
+}
+/** A finished command's output, read once through the window endpoint while `enabled`; never a stream. */
+export function useOutputWindow(
+  client: Pick<SessionClient, 'outputWindow' | 'sessionId'>,
+  taskId: string,
+  enabled: boolean,
+): OutputWindowView {
+  const key = streamKey(client.sessionId, taskId);
+  const keyNow = useRef(key);
+  keyNow.current = key;
+  const empty = (): WindowState => ({ key, text: '', start: 0 });
+  const [view, setView] = useState<WindowState>(empty);
+  const current = view.key === key ? view : empty();
+  const startNow = useRef(current.start);
+  startNow.current = current.start;
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    setView({ key, text: '', start: 0 });
+    void client.outputWindow(taskId, LATEST_WINDOW_END).then(
+      (window) => {
+        if (cancelled || keyNow.current !== key) return;
+        setView({ key, text: window.text, start: window.start });
+      },
+      () => {
+        if (cancelled || keyNow.current !== key) return;
+        setView({ key, text: '', start: 0, error: OUTPUT_UNAVAILABLE });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, taskId, key, enabled]);
+  const showEarlier = useCallback(async () => {
+    const requestedKey = key;
+    const before = startNow.current;
+    if (before <= 0) return;
+    const owns = (state: WindowState) =>
+      keyNow.current === requestedKey && state.key === requestedKey;
+    let window: Awaited<ReturnType<typeof client.outputWindow>>;
+    try {
+      window = await client.outputWindow(taskId, before);
+    } catch {
+      setView((state) => (owns(state) ? { ...state, error: EARLIER_UNAVAILABLE } : state));
+      return;
+    }
+    setView((state) =>
+      owns(state) && state.start === before && window.end === before
+        ? { ...state, text: window.text + state.text, start: window.start }
+        : state,
+    );
+  }, [client, taskId, key]);
+  return {
+    text: current.text,
+    start: current.start,
+    ...(current.error === undefined ? {} : { error: current.error }),
     showEarlier,
   };
 }

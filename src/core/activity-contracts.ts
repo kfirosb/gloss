@@ -24,7 +24,6 @@ export interface ActivityTask {
   model?: string; // subagent
   agentId?: string; // subagent, once known
   report?: string; // subagent final report
-  reportTranslation?: { text: string; status: 'pending' | 'complete' | 'error' };
   outputAvailable?: boolean; // background: the server could validate the output path
   /** Reducer-internal: a launched async subagent keeps running past its tool result. */
   async?: true;
