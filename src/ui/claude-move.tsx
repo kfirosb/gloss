@@ -1,5 +1,10 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import type { ClaudeMoveFailure, ClaudeMoveRequest } from '../runtime/claude-move.js';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import type {
+  ClaudeMoveFailure,
+  ClaudeMoveRequest,
+  ClaudeMoveStatus,
+  MoveIdentity,
+} from '../runtime/claude-move.js';
 import type { SessionClient } from './session-client.js';
 import { useDisplayPreferences } from './display-preferences.js';
 import {
@@ -55,6 +60,18 @@ function FailureNote({ failure }: { failure: ClaudeMoveFailure }) {
   );
 }
 type Confirmable = Exclude<ClaudeMoveRequest, { action: 'cancel' }>;
+/** The confirmable state and Claude process a popover first showed. */
+type Shown = { state: 'ready' | 'busy'; process: MoveIdentity };
+const shownOf = (status: ClaudeMoveStatus | undefined): Shown | undefined =>
+  status?.state === 'ready' || status?.state === 'busy'
+    ? { state: status.state, process: status.process }
+    : undefined;
+const sameShown = (a: Shown, b: Shown) =>
+  a.state === b.state &&
+  a.process.pid === b.process.pid &&
+  a.process.procStart === b.process.procStart;
+/** Space kept between a floating popover and the window's edge, in CSS pixels. */
+const EDGE_GAP_PX = 8;
 /**
  * Starts Move to Gloss from a click. Normally `ask` shows the popover; with "Don’t ask again" set on this device the
  * click is the confirmation and the move starts at once (claude-move-watch reads the status it acts on), and the
@@ -80,8 +97,9 @@ export function useMoveLauncher(): (client: MoveClient, ask: () => void) => void
 }
 /**
  * Spec 5: the compact Move to Gloss popover for one outside Claude session, in one step: pressing Move (or Move when
- * it finishes) is the confirmation. Its buttons exist only while the status shows the state they act on, and each
- * posts the identity in the status shown, so a confirmation never outlives its status. A move started here keeps
+ * it finishes) is the confirmation. It is armed for the state and Claude process it first showed; if a later status
+ * shows another process or the other confirmable state, it closes rather than swap its button in place, so the
+ * identity posted is the one the user saw and a confirmation never outlives its status. A move started here keeps
  * being watched after this closes (claude-move-watch). `onClose(returnFocus)`: false for an outside click.
  */
 export function MovePopover({
@@ -104,6 +122,21 @@ export function MovePopover({
   const root = useRef<HTMLElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  const [armedFor, setArmedFor] = useState<Shown>();
+  const shown = shownOf(status);
+  const changed = !!armedFor && !!shown && !sameShown(armedFor, shown);
+  useEffect(() => {
+    if (changed) close.current(true);
+    else if (shown && !armedFor) setArmedFor(shown);
+  }, [changed, shown, armedFor]);
+  // A floating popover opened near the window's right edge is shifted left to stay inside it.
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (inline || !root.current) return;
+    const box = root.current.getBoundingClientRect();
+    const over = box.right - (window.innerWidth - EDGE_GAP_PX);
+    if (over > 0) setShift(Math.min(over, Math.max(0, box.left - EDGE_GAP_PX)));
+  }, [inline]);
   useEffect(() => {
     root.current?.focus();
     const outside = (event: PointerEvent) => {
@@ -152,6 +185,7 @@ export function MovePopover({
       aria-labelledby={id}
       tabIndex={-1}
       className={'move-popover' + (inline ? ' inline' : '')}
+      style={shift ? { transform: `translateX(-${shift}px)` } : undefined}
       dir="ltr"
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
@@ -163,7 +197,7 @@ export function MovePopover({
       {status?.failure && <FailureNote failure={status.failure} />}
       {status?.state === 'moving' || pending === 'move' ? (
         <p role="status">{MOVE_MOVING_TEXT}</p>
-      ) : status?.state === 'ready' ? (
+      ) : changed ? null : status?.state === 'ready' ? (
         confirmation({ action: 'move', expected: status.process }, 'Move')
       ) : status?.state === 'busy' ? (
         <>

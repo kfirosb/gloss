@@ -24,8 +24,10 @@ async function moveRoute(target: Page | BrowserContext, initial: ClaudeMoveStatu
   let status = initial;
   let next: ClaudeMoveStatus | undefined;
   let held: Promise<void> | undefined;
+  let heldReads: Promise<void> | undefined;
   const posts: unknown[] = [];
   await target.route('**/api/sessions/*/claude-move', async (route) => {
+    if (route.request().method() === 'GET') await heldReads;
     if (route.request().method() === 'POST') {
       posts.push(route.request().postDataJSON());
       await held;
@@ -42,6 +44,17 @@ async function moveRoute(target: Page | BrowserContext, initial: ClaudeMoveStatu
       held = new Promise((resolve) => {
         release = () => {
           held = undefined;
+          resolve();
+        };
+      });
+      return release;
+    },
+    /** Status reads wait until the returned function is called. */
+    holdReads() {
+      let release = () => {};
+      heldReads = new Promise((resolve) => {
+        release = () => {
+          heldReads = undefined;
           resolve();
         };
       });
@@ -170,7 +183,7 @@ test('a move whose connect dialog was closed reports its outcome as the session�
   );
 });
 
-async function tabsWithMove(context: BrowserContext) {
+async function tabsWithMove(context: BrowserContext, launched = 'B') {
   const f = await sessionFixture(context);
   const catalog: CatalogSnapshot = {
     epoch: 'move',
@@ -187,7 +200,7 @@ async function tabsWithMove(context: BrowserContext) {
       open: true,
       activity: 'idle' as const,
       availability: 'available' as const,
-      ...(r.id === 'B' ? { launchId: 'launch-B', launchState: 'running' as const } : {}),
+      ...(r.id === launched ? { launchId: 'launch-' + r.id, launchState: 'running' as const } : {}),
     })),
   };
   await context.route('**/api/session-catalog', (r) => r.fulfill({ json: catalog }));
@@ -342,8 +355,8 @@ test('a popover whose status changes under it drops its confirmation and sends n
   expect(move.posts).toEqual([]);
 });
 
-async function claudeTabsWithMove(context: BrowserContext) {
-  const move = await tabsWithMove(context);
+async function claudeTabsWithMove(context: BrowserContext, launched = 'B') {
+  const move = await tabsWithMove(context, launched);
   for (const record of move.records) record.target.agent = 'claude';
   await context.route('**/api/sessions/*/claude-route', (r) =>
     r.fulfill({ json: { transport: null, reason: 'Gloss can’t reach this session yet.' } }),
@@ -527,4 +540,59 @@ test('Settings → Ask before moving a session restores the popover at once', as
   await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
   await expect(popover.getByRole('checkbox', { name: 'Don’t ask again' })).not.toBeChecked();
   expect(move.posts).toEqual([]);
+});
+
+test('a popover whose Claude process changes under it drops its confirmation and sends nothing', async ({
+  page,
+}) => {
+  const move = await outsideSession(page, { state: 'ready', process: PROCESS });
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const popover = connect.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByRole('button', { name: 'Move', exact: true })).toBeVisible();
+  move.set({ state: 'ready', process: { pid: 5151, procStart: PROCESS.procStart } });
+  await expect(popover).toHaveCount(0);
+  await expect(connect.getByRole('button', { name: 'Move to Gloss', exact: true })).toBeVisible();
+  expect(move.posts).toEqual([]);
+});
+
+test('without asking, a double click on “Move session here” sends one move', async ({
+  page,
+  context,
+}) => {
+  await withoutConfirmation(context);
+  const move = await claudeTabsWithMove(context);
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('tab', { name: /Session A/ })
+    .click();
+  const release = move.holdReads();
+  move.afterPost({ state: 'moving' });
+  await moveHere(page).click();
+  await moveHere(page).click();
+  release();
+  await expect(liveNotice(page)).toHaveText('Moving the session to Gloss…');
+  await moveHere(page).click();
+  await expect(liveNotice(page)).toHaveText('Moving the session to Gloss…');
+  expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
+});
+
+test('the tab menu popover stays inside the window for the last tab', async ({ page, context }) => {
+  await page.setViewportSize({ width: 540, height: 700 });
+  await tabsWithMove(context, 'A');
+  await page.goto('/#capability=test');
+  const tab = page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('tab', { name: /Session B/ });
+  const box = await tab.boundingBox();
+  if (!box) throw new Error('no tab box');
+  await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
+  const popover = page.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  const shown = await popover.boundingBox();
+  if (!shown) throw new Error('no popover box');
+  expect(shown.x).toBeGreaterThanOrEqual(0);
+  expect(shown.x + shown.width).toBeLessThanOrEqual(540);
 });
