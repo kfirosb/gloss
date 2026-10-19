@@ -645,3 +645,13 @@ describe('scroll', () => {
       await expect(scrollCalls('0 0 0 0', wheel)).rejects.toThrow('Invalid scroll');
   });
 });
+
+it('prefers the bundled tmux on Linux and falls back to the distribution one', () => {
+  expect(tmuxCandidates({ LANGUAGE_ASSISTANT_TMUX: '/r/bin/tmux' }, '/res', 'linux')).toEqual([
+    '/r/bin/tmux',
+    '/res/bin/tmux',
+    '/usr/bin/tmux',
+    '/usr/local/bin/tmux',
+  ]);
+  expect(tmuxCandidates({}, undefined, 'linux')).toEqual(['/usr/bin/tmux', '/usr/local/bin/tmux']);
+});

@@ -5,9 +5,12 @@ import {
   readAlertSettings,
   writeAlertSettings,
   ALERT_SOUNDS,
+  alertSoundsFor,
   type AlertTracker,
 } from '../../src/ui/attention-alerts.js';
 import type { CatalogEntry } from '../../src/core/session-catalog.js';
+// @ts-expect-error untyped desktop module
+import { alertSoundNames } from '../../desktop/attention-alert.mjs';
 
 const entry = (id: string, extra: Partial<CatalogEntry> = {}): CatalogEntry =>
   ({
@@ -150,5 +153,28 @@ describe('alert settings', () => {
   it('lists the fourteen Mac sounds', () => {
     expect(ALERT_SOUNDS).toHaveLength(14);
     expect(ALERT_SOUNDS).toContain('Submarine');
+  });
+});
+
+describe('alert settings on Linux', () => {
+  const store = () => {
+    const m = new Map<string, string>();
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+    } as unknown as Storage;
+  };
+  it('offers the same sounds the desktop shell can play', () => {
+    expect(alertSoundsFor('linux')).toEqual(alertSoundNames('linux'));
+    expect(alertSoundsFor('darwin')).toEqual(alertSoundNames('darwin'));
+    expect(alertSoundsFor('darwin')).toEqual(ALERT_SOUNDS);
+  });
+  it('defaults to message and drops a Mac sound carried over', () => {
+    const s = store();
+    expect(readAlertSettings(s, 'linux').soundName).toBe('message');
+    writeAlertSettings({ version: 1, message: true, sound: true, soundName: 'Glass' }, s);
+    expect(readAlertSettings(s, 'linux').soundName).toBe('message');
+    writeAlertSettings({ version: 1, message: true, sound: true, soundName: 'bell' }, s, 'linux');
+    expect(readAlertSettings(s, 'linux').soundName).toBe('bell');
   });
 });

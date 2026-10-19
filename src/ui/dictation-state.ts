@@ -1,3 +1,4 @@
+import { hostPlatform, type HostPlatform } from './host-platform.js';
 import {
   DICTATION_REASON_TEXT,
   FINISH_TIMEOUT_MS,
@@ -238,7 +239,8 @@ export function reduceDictation(
 export const isDictationShortcut = (
   e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'shiftKey' | 'code' | 'key'>,
 ) => (e.metaKey || e.ctrlKey) && e.shiftKey && (e.code === 'KeyM' || e.key.toLowerCase() === 'm');
-export const DICTATION_SHORTCUT_LABEL = '⌘⇧M';
+export const dictationShortcutLabel = (platform: HostPlatform = hostPlatform()) =>
+  platform === 'darwin' ? '⌘⇧M' : 'Ctrl+Shift+M';
 
 export function dictationLabel(
   state: DictationUiState,

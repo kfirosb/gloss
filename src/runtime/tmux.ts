@@ -13,24 +13,33 @@ import { isTerminalWheel, type TerminalWheel } from '../core/terminal-wheel.js';
 export class TmuxUnavailable extends Error {
   readonly code = 'tmux-unavailable';
   constructor() {
-    super('tmux is not installed. Install it with Homebrew (brew install tmux) or update Gloss.');
+    super(
+      process.platform === 'darwin'
+        ? 'tmux is not installed. Install it with Homebrew (brew install tmux) or update Gloss.'
+        : 'tmux is not installed. Install it with your package manager (for example apt install tmux) or update Gloss.',
+    );
   }
 }
 export const sessionNameFor = (launchId: string) => 'la-' + launchId;
-/** Homebrew first, then the app's bundled tmux: the desktop shell passes its path in LANGUAGE_ASSISTANT_TMUX
- * because process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */
+/** On macOS Homebrew first, then the app's bundled tmux; on Linux the bundled, tested tmux first and the
+ * distribution's as fallback. The desktop shell passes the bundled path in LANGUAGE_ASSISTANT_TMUX because
+ * process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */
 export function tmuxCandidates(
   env: NodeJS.ProcessEnv = process.env,
   resourcesPath = (process as { resourcesPath?: string }).resourcesPath,
+  platform: NodeJS.Platform = process.platform,
 ): string[] {
   const bundled = env.LANGUAGE_ASSISTANT_TMUX;
+  const app = [
+    ...(bundled && isAbsolute(bundled) ? [bundled] : []),
+    ...(resourcesPath ? [join(resourcesPath, 'bin', 'tmux')] : []),
+  ];
   return [
-    ...new Set([
-      '/opt/homebrew/bin/tmux',
-      '/usr/local/bin/tmux',
-      ...(bundled && isAbsolute(bundled) ? [bundled] : []),
-      ...(resourcesPath ? [join(resourcesPath, 'bin', 'tmux')] : []),
-    ]),
+    ...new Set(
+      platform === 'darwin'
+        ? ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', ...app]
+        : [...app, '/usr/bin/tmux', '/usr/local/bin/tmux'],
+    ),
   ];
 }
 // Never hand the panel capability, Electron's node mode or an enclosing tmux to the private server or its agents.
