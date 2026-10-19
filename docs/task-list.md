@@ -72,7 +72,7 @@ Status: high priority; small items that will otherwise become the first issues f
 
 ## 26. Activity view
 
-Status: implemented on branch `subagents` (not merged); spec [2026-10-18-activity-view-design](superpowers/specs/2026-10-18-activity-view-design.md).
+Status: complete; merged and released in Gloss 0.15.1. Spec [2026-10-18-activity-view-design](superpowers/specs/2026-10-18-activity-view-design.md).
 
 A Claude session gets an Activity tab beside Translated, Original, Split and Terminal. It lists running subagents and background commands (with a live tail of the command's output) and every tool call as a timeline, all derived from the transcript. (First version, 2026-10-18; the live page below replaced the timeline and the translated reports.)
 
@@ -105,7 +105,7 @@ Verification (2026-10-18):
 
 ## 19. lsof storm in Claude session liveness checks
 
-Status: fixed on branch `lsof`; Gloss 0.10.5 installed on 2026-10-16.
+Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
 
 Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh and status poll: 155 runs in 5 s with 9 sessions, load average 7.7, and the full browser suite took 22 minutes.
 
@@ -156,13 +156,13 @@ Status: captured; brainstorm separately.
 
 ## 3. Claude Code parity with Codex
 
-Status: requirements definition first; implementation scope not yet agreed.
+Status: complete; confirmed done by the user on 2026-10-19.
 
-- [ ] Define what “works the same as Codex” means from the user's perspective.
-- [ ] Compare current behavior and gaps in session discovery/switching, live capture and translation, Language Assistant discussion, direct sends, prepared instructions, files/images, delivery status, and recovery.
-- [ ] Preserve the preference for the existing account/subscription instead of requiring a separate API key.
-- [ ] Identify native integration limitations and distinguish verified capabilities from desired behavior.
-- [ ] Agree on parity requirements and end-to-end acceptance scenarios before implementation.
+- [x] Define what “works the same as Codex” means from the user's perspective.
+- [x] Compare current behavior and gaps in session discovery/switching, live capture and translation, Language Assistant discussion, direct sends, prepared instructions, files/images, delivery status, and recovery.
+- [x] Preserve the preference for the existing account/subscription instead of requiring a separate API key.
+- [x] Identify native integration limitations and distinguish verified capabilities from desired behavior.
+- [x] Agree on parity requirements and end-to-end acceptance scenarios before implementation.
 
 ## 4. Sidebar, folders, worktrees, and version display
 
@@ -181,7 +181,7 @@ See the [decisions and session handoff](handoffs/2026-10-12-sidebar-worktrees.md
 
 ## 5. Terminals from Gloss
 
-Status: designed and approved on 2026-10-14; implemented on branch `terminal`. See the [feature preview](previews/terminal-feature.html).
+Status: complete; released in Gloss 0.6.0. See the [feature preview](previews/terminal-feature.html).
 
 - [x] Plain shell terminals as tabs, started from "+" or by Run, surviving restarts.
 - [x] First message field on the New session dialog, replacing the setup prompt.
@@ -218,9 +218,9 @@ Status: captured; needs its own design pass.
 
 ## 10. "Summarize in Hebrew" is not working
 
-Status: captured; reproduce and find the cause.
+Status: complete; the user confirmed it works on 2026-10-19.
 
-- [ ] Something in "Summarize in Hebrew" does not work for the user; details still needed.
+- [x] Something in "Summarize in Hebrew" does not work for the user; details still needed.
 
 ## 11. Terminal scrollback stops before the top
 
@@ -230,15 +230,17 @@ Status: complete; confirmed working by the user on 2026-10-17.
 
 ## 12. Show running Claude subagents
 
-Status: captured; check what Claude Code exposes.
+Status: complete; delivered by task 26 (Activity view), released in Gloss 0.15.1.
 
-- [ ] If possible, show the subagents a Claude session is running.
+- [x] If possible, show the subagents a Claude session is running.
 
 ## 13. Logs of background servers
 
-Status: captured.
+Status: partly covered by task 26, checked on 2026-10-19. For a Claude session, a command started in the background (`run_in_background`) shows in the Activity view with a live output panel and "show earlier" in 64 KB pages, read from Claude's own output file. Open below.
 
 - [ ] When a session runs a server in the background, let the user see its logs.
+- [ ] Color codes are shown raw: server logs with ANSI colors appear as `\x1b[32m…` text in the output panel. Strip or render them.
+- [ ] Not seen: servers started outside Claude's background tasks (`nohup … &`, a log file, another terminal) and Codex sessions.
 
 ## 14. Local DevOps tools and their permissions
 
@@ -248,7 +250,7 @@ Status: idea captured; brainstorm separately.
 
 ## 16. Terminal inside the Live Conversation
 
-Status: implemented on branch `terminal-to-live` on 2026-10-17; checked by the user in the Electron app; the Hebrew line shows only in the expanded pane.
+Status: complete; released in Gloss 0.12.0. The Hebrew line shows only in the expanded pane.
 
 - [x] Show the session's terminal as part of the Live Conversation panel, so the user can view the terminal instead of the conversation in the same place.
 - [x] Replace the terminal pop-up there with a switch between "Coding agent · translated", the regular (original) conversation, and the terminal.
@@ -256,12 +258,12 @@ Status: implemented on branch `terminal-to-live` on 2026-10-17; checked by the u
 
 ## 17. Files panel and file preview
 
-Status: design task captured on 2026-10-16; needs a design pass.
+Status: complete; confirmed done by the user on 2026-10-19.
 
-- [ ] Let the user move the Files panel to another place in the window (not only the current side panel).
-- [ ] Add an option to expand an open file preview from the pop-up to full screen.
-- [ ] Remember Translate / TL;DR results per file: closing the preview and reopening the same file shows the result without clicking again.
-- [ ] Show the file list beside the preview pop-up, so the user can pick other files and move between them without closing the preview.
+- [x] Let the user move the Files panel to another place in the window (not only the current side panel).
+- [x] Add an option to expand an open file preview from the pop-up to full screen.
+- [x] Remember Translate / TL;DR results per file: closing the preview and reopening the same file shows the result without clicking again.
+- [x] Show the file list beside the preview pop-up, so the user can pick other files and move between them without closing the preview.
 
 ## 18. Editing and creating files
 
