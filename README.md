@@ -35,6 +35,14 @@ Gloss is an early open-source release. What is verified today:
 
 ## Install the Mac app
 
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask kfirosb/tap/gloss
+```
+
+Later releases arrive with `brew upgrade --cask gloss`. Or by hand:
+
 1. Download the latest `.dmg` from the [Releases](../../releases) page and check its `.sha256` if you like.
 2. Open the DMG and drag the app into *Applications*.
 3. Launch it from Spotlight or the Dock.

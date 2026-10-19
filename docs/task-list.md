@@ -28,11 +28,11 @@ Today every user must notice a new release and re-download the DMG by hand.
 
 ## 22. Homebrew tap
 
-Status: high priority; independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 20 lands.
+Status: tap live since 2026-10-19 with Gloss 0.16.2 (`brew install --cask kfirosb/tap/gloss`); independent of signing, but Homebrew still applies quarantine, so the Gatekeeper dialog stays until task 20 lands.
 
-- [ ] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
-- [ ] Add a release-protocol step that bumps the cask version and checksum on each release (manually or with a small script).
-- [ ] Document it in the README next to the DMG download.
+- [x] Create a `kfirosb/homebrew-tap` repository with a `gloss` cask pointing at the GitHub release DMG and its SHA-256; `brew install --cask kfirosb/tap/gloss`.
+- [x] Add a release-protocol step that bumps the cask version and checksum on each release: `scripts/homebrew-cask.mjs` renders the cask from the published `.sha256`, step 7 of [mac-release-protocol.md](mac-release-protocol.md).
+- [x] Document it in the README next to the DMG download.
 - [ ] Later, once the project meets Homebrew's popularity thresholds, submit the cask to the main homebrew-cask repository.
 - [ ] Do not publish the desktop app on npm: a 392 MB Electron app with native binaries does not belong there. The browser mode could become an npm CLI later as a secondary option.
 
