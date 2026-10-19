@@ -50,15 +50,13 @@ Status: high priority, after task 20. The app code has no architecture dependenc
 
 ## 24. Linux build
 
-Status: high priority to scope; recommendation is to hold implementation until a Linux user asks in an issue, so there is demand and a tester. Windows is out of scope: tmux does not exist there.
+Status: implemented on 2026-10-19 (branch `linux`); verified in an Ubuntu 24.04 container only, awaiting a Linux user on real hardware. Windows is out of scope: tmux does not exist there.
 
-Electron, node-pty, tmux, and whisper.cpp all run on Linux, and the Codex and Claude session files live in the same home-folder locations. About 18 platform checks across a dozen files gate on `darwin` and fail closed.
-
-- [ ] Replace `mdfind` in `src/runtime/folder-search.ts` with a Linux backend (ripgrep or fd).
-- [ ] Add Linux branches to Codex discovery, the Claude channel registry and setup, the dictation engine, the process runner, and `desktop/main.mjs`; keep the fail-closed behaviour for anything unverified.
-- [ ] Build whisper-server without Metal (CPU or Vulkan); prefer the distro's tmux over bundling.
-- [ ] Replace ad-hoc signing and DMG packaging with AppImage or deb output.
-- [ ] Test Hebrew rendering and clipboard on Wayland and X11; expect early issues there.
+- [x] Replace `mdfind` in `src/runtime/folder-search.ts` with a Linux backend (a bounded walk of home; no new dependency).
+- [x] Add Linux branches to Codex discovery, the Claude channel registry and setup, and `desktop/main.mjs`; `src/runtime/platform-tools.ts` owns the policy and everything else fails closed.
+- [x] Build whisper-server without Metal (CPU) and bundle tmux for Linux too (`scripts/build-linux-vendor.sh`, Docker).
+- [x] AppImage and deb output (`npm run desktop:linux`), smoke-tested in a container (`scripts/linux-smoke.sh`).
+- [ ] Test Hebrew rendering, clipboard and dictation on Wayland and X11 on real hardware; expect early issues there.
 
 ## 25. Public release readiness
 

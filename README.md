@@ -4,7 +4,7 @@
 
 **Talk to Claude Code and Codex in Hebrew (or any language) without leaving your terminal sessions.**
 
-Gloss is a local macOS app that sits next to the coding-agent sessions already running in your terminal. It shows the agent's replies in your language as they arrive, lets you write back in your language, and turns that into a concise English instruction you review before anything is sent. Nothing is sent on its own.
+Gloss is a local desktop app for macOS and Linux that sits next to the coding-agent sessions already running in your terminal. It shows the agent's replies in your language as they arrive, lets you write back in your language, and turns that into a concise English instruction you review before anything is sent. Nothing is sent on its own.
 
 > Built by a developer who reads Hebrew faster than English and got tired of copying agent output into another chat to translate it. It started as a small translation panel and grew into the IDE he now works in all day.
 
@@ -13,12 +13,12 @@ Gloss is a local macOS app that sits next to the coding-agent sessions already r
 - **Finds your sessions.** Open Codex sessions are discovered automatically and grouped by project and worktree. Closed sessions stay available under *Saved*. You can also start new sessions from inside the app.
 - **Translates the conversation live.** Completed agent replies are translated into your language as they arrive. No separate chat, no copy-paste.
 - **You write Hebrew, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
-- **Dictation.** Press the mic button and speak Hebrew or English. Speech is transcribed on your Mac, with no cloud and no extra account, and the text lands in the composer for you to review and send.
+- **Dictation.** Press the mic button and speak Hebrew or English. Speech is transcribed on your computer, with no cloud and no extra account, and the text lands in the composer for you to review and send.
 - **Files and images.** A project file sidebar with search, read-only previews, *TL;DR* and full translation of files, and image or screenshot paste straight into the conversation.
 - **Sees what the agent is doing.** An Activity view shows the Claude agents working right now, each with its last actions, background commands with their live output, and a History of what finished. Nothing in it is translated.
 - **Skills and MCP at your fingertips.** Type `/` in the composer to search the skills your agent can use, or `$` to search its MCP servers. Global, project and plugin entries are listed together, and Gloss sends your pick in the form the agent understands.
 - **Uses the accounts you already have.** Translation runs on an inexpensive model in the same ecosystem as your agent (Claude or OpenAI). No extra API key.
-- **Everything stays local.** Conversations, drafts and translations live under `~/.language-assistant` on your Mac. Native approval prompts stay in the coding tool and are never answered by Gloss.
+- **Everything stays local.** Conversations, drafts and translations live under `~/.language-assistant` on your computer. Native approval prompts stay in the coding tool and are never answered by Gloss.
 
 Translation costs a few extra tokens. You can turn it off per session, and you can pick the language.
 
@@ -28,7 +28,7 @@ Gloss is an early open-source release. What is verified today:
 
 | Area | Status |
 |------|--------|
-| Platform | macOS 13 or newer, Apple Silicon |
+| Platform | macOS 13 or newer, Apple Silicon. Linux x64 and arm64 (deb and AppImage), new in 0.17 and so far verified only in a container |
 | Codex CLI | Fully supported. Automatic session discovery is pinned to Codex 0.154.0, 0.157.1 and 0.158.0 |
 | Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
@@ -45,10 +45,19 @@ The app is ad-hoc signed and not notarized, so macOS will say it cannot verify t
 xattr -cr "/Applications/Gloss.app"
 ```
 
+## Install on Linux
+
+1. Download `Gloss-<version>-arm64.deb` or `Gloss-<version>-amd64.deb` (or the matching `.AppImage`) from the [Releases](../../releases) page.
+2. `sudo apt install ./Gloss-<version>-<arch>.deb` installs it to `/opt/Gloss` with a launcher entry; the AppImage needs only `chmod +x` and runs in place.
+3. Launch *Gloss* from your application menu, or run `/opt/Gloss/gloss`.
+
+Prefer the deb when you use Claude Code channels: the channel configuration Gloss writes points at the installed executable, and an AppImage is mounted at a new path on every launch (Gloss repairs those files at startup). Session discovery needs `lsof` (the deb depends on it); alert sounds use the freedesktop sound theme through `paplay` or `pw-play` and stay silent without them. Wayland and X11 have been exercised only in a container so far; please report what you see.
+
 ### Requirements
 
 - [Codex CLI](https://github.com/openai/codex) and/or [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and signed in. Gloss uses their existing authentication.
-- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on your `PATH` for file search. `brew install ripgrep`.
+- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on your `PATH` for file search. `brew install ripgrep` or `apt install ripgrep`.
+- On Linux, `lsof` for session discovery (`apt install lsof`).
 
 ### First run
 
@@ -81,6 +90,8 @@ npm run desktop:dmg -- --arm64
 
 `npm run desktop:install` builds and installs the app into *Applications* locally.
 
+Linux packages are built from a Mac (or any machine with Docker): `npm run build:linux-vendor` compiles tmux, whisper-server and node-pty for both architectures in Debian containers, then `npm run desktop:linux` writes the deb and AppImage files to `release/`. `sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.deb` installs and launches the result in an Ubuntu container. See [docs/linux-build.md](docs/linux-build.md).
+
 There is also a browser mode: `node dist/server/runtime/cli.js --agent codex --session <thread-id> --language he --project "$PWD"` prints an authenticated local URL you can open in any browser or embedded pane.
 
 ### Verify
@@ -103,7 +114,7 @@ Gloss runs a local HTTP server and a React UI. Per-agent adapters observe the na
 
 ## Contributing
 
-Issues and pull requests are welcome. Try it, break it, challenge it. Please include your macOS version, the Codex or Claude Code version, and what the sidebar showed when reporting discovery problems.
+Issues and pull requests are welcome. Try it, break it, challenge it. Please include your macOS or Linux version, the Codex or Claude Code version, and what the sidebar showed when reporting discovery problems.
 
 ## License
 
