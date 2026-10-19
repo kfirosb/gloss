@@ -4,14 +4,15 @@
 // /private/var, a private tmux server inside it, a scratch project, Haiku, --permission-mode default, no MCP servers.
 // ONE model turn in total, sent last so every turn-free step has already worked. It signals only processes it
 // started: the pane's own pid, checked against the session record, the argv and the cwd before every signal.
-// It reads ~/.claude.json (copied into the fake home) and links ~/Library/Keychains for the login; it never writes to
-// the real home. Usage: node scripts/probes/probe-claude-sigterm.mjs <claude version> <fake home under /private/var>
+// For the login it copies ~/.claude.json into the fake home and links ~/Library/Keychains there, so the fake home
+// holds account data (the copy, and the real keychains through the link) until cleanup deletes both.
+// Usage: node scripts/probes/probe-claude-sigterm.mjs <claude version> <fake home under /private/var>
 // [--stopped-only]. --stopped-only runs just the turn-free stopped-process checks: tmux continues a stopped pane
 // process at once, so a held SIGTERM is checked on a Claude that runs as a child of the pane's shell as well.
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, copyFile, mkdir, readFile, readdir, realpath, symlink } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -38,6 +39,8 @@ const tmux = '/opt/homebrew/bin/tmux';
 const base = ['-u', '-S', join(home, 'sig.sock'), '-f', '/dev/null'];
 const project = join(home, 'project-sigterm');
 const sessionsDir = join(home, '.claude', 'sessions');
+const accountCopy = join(home, '.claude.json');
+const keychainLink = join(home, 'Library', 'Keychains');
 const env = {
   PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
   HOME: home,
@@ -51,14 +54,10 @@ const ignoreExisting = (error) => {
 };
 
 await mkdir(join(home, 'Library'), { recursive: true });
-await symlink(join(homedir(), 'Library', 'Keychains'), join(home, 'Library', 'Keychains')).catch(
+await symlink(join(homedir(), 'Library', 'Keychains'), keychainLink).catch(ignoreExisting);
+await copyFile(join(homedir(), '.claude.json'), accountCopy, constants.COPYFILE_EXCL).catch(
   ignoreExisting,
 );
-await copyFile(
-  join(homedir(), '.claude.json'),
-  join(home, '.claude.json'),
-  constants.COPYFILE_EXCL,
-).catch(ignoreExisting);
 await mkdir(join(home, '.claude'), { recursive: true });
 await mkdir(project, { recursive: true });
 await chmod(home, 0o700);
@@ -246,7 +245,13 @@ async function terminate(session, label) {
 /** SIGSTOP, then SIGTERM: is the SIGTERM held until SIGCONT? */
 async function stopThenTerminate(session, label) {
   await signalOwn(session.name, session.pid, 'SIGSTOP');
-  await signalOwn(session.name, session.pid, 'SIGTERM');
+  try {
+    await signalOwn(session.name, session.pid, 'SIGTERM');
+  } catch (error) {
+    // Leave no stopped Claude behind: continue it (best effort, same checks) before giving up.
+    await signalOwn(session.name, session.pid, 'SIGCONT').catch(() => undefined);
+    throw error;
+  }
   await sleep(STOPPED_WATCH_MS);
   note(label, { aliveAfter3s: alive(session.pid), recordAfter3s: !!(await record(session.pid)) });
   const continued = performance.now();
@@ -357,4 +362,7 @@ try {
   report.modelTurns = modelTurns;
   console.log(JSON.stringify(report, null, 2));
   await t('kill-server').catch(() => undefined);
+  // The account data copied or linked in for the login does not outlive the run. rm removes the link, not its target.
+  await rm(accountCopy, { force: true });
+  await rm(keychainLink, { force: true });
 }
