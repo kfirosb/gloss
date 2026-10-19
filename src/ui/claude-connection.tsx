@@ -333,6 +333,11 @@ export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
           <button type="button" disabled={busy} onClick={() => void change('register')}>
             Update
           </button>
+          <small>
+            Runs <code>claude mcp remove --scope user gloss</code>, then registers{' '}
+            <code>gloss</code> again with this app’s paths (
+            <code>claude mcp add-json --scope user gloss …</code>).
+          </small>
         </>
       )}
       {status?.state === 'conflict' && (
@@ -349,7 +354,7 @@ export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
           </button>
           <small>
             Runs <code>claude mcp remove --scope user gloss</code>. Sessions already connected keep
-            working until they close.
+            working until they close. This takes effect now; Cancel doesn’t undo it.
           </small>
         </>
       )}

@@ -38,8 +38,10 @@ test('Settings shows a stale connection with Update, then Remove Claude connecti
   const section = dialog.getByRole('region', { name: 'Claude connection' });
   await expect(section).toContainText('The Claude connection needs updating');
   await expect(section).toContainText(OLD);
+  await expect(section).toContainText('registers gloss again with this app’s paths');
   await section.getByRole('button', { name: 'Update', exact: true }).click();
   await expect(section).toContainText('Gloss is registered with Claude Code');
+  await expect(section).toContainText('This takes effect now; Cancel doesn’t undo it.');
   await section.getByRole('button', { name: 'Remove Claude connection', exact: true }).click();
   await expect(section).toContainText('isn’t registered');
   expect(posts).toEqual([{ action: 'register' }, { action: 'remove' }]);
@@ -56,7 +58,7 @@ test('Settings reports a foreign gloss entry and offers no change', async ({ pag
 test('opening the connect dialog shows a stale connection without another click', async ({
   page,
 }) => {
-  await registration(page, { state: 'stale', found: OLD });
+  const posts = await registration(page, { state: 'stale', found: OLD });
   const snapshot = {
     ...basicSnapshot(),
     target: {
@@ -87,4 +89,5 @@ test('opening the connect dialog shows a stale connection without another click'
   await page.getByText(/Connect this session to Gloss/).click();
   await expect(page.getByText('The Claude connection needs updating')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible();
+  expect(posts).toEqual([]);
 });
