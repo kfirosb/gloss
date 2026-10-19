@@ -5,6 +5,7 @@ import type { ProcessRunner } from '../../runtime/process-runner.js';
 import { isClaudeExecutable, readProcess, type ProcessInfo } from './process-probe.js';
 import { isTerminalRecord, sessionRecordOf, trustedProcStart } from './session-records.js';
 import { OWN_PID_DOMAIN } from './pid-domain.js';
+import { supportsProcessProbes } from '../../runtime/platform-tools.js';
 import { constants } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -64,8 +65,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
   );
   const configDir = resolve(claudeConfigDir(options.configDir));
   const uid = () => options.uid ?? process.getuid?.();
-  const supported = () =>
-    (options.platform ?? process.platform) === 'darwin' && uid() !== undefined;
+  const supported = () => supportsProcessProbes(options.platform) && uid() !== undefined;
   const own = new Map<string, ChannelRecord>();
   const now = options.now ?? (() => performance.now());
   const sleep = options.sleep ?? ((ms) => delay(ms));
@@ -387,7 +387,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
   }
   return {
     async registerChannel(port = options.port): Promise<ChannelRecord> {
-      if (!supported()) throw new Error('Claude channels are experimental and macOS-only');
+      if (!supported()) throw new Error('Claude channels are experimental and need macOS or Linux');
       if (!validPort(port)) throw new Error('A bound loopback port is required');
       const deadline = now() + 10_000;
       const controller = new AbortController();

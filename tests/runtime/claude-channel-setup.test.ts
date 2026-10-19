@@ -39,7 +39,7 @@ async function fixture() {
     target: { agent: 'claude', sessionRef: native, projectId: project } as Target,
   };
 }
-async function service(registered = true) {
+async function service(registered = true, platform: NodeJS.Platform = 'darwin') {
   const f = await fixture();
   const { createClaudeChannelSetup } = await import('../../src/runtime/claude-channel-setup.js');
   let connected = false;
@@ -66,7 +66,7 @@ async function service(registered = true) {
     configDir: join(f.root, '.claude'),
     managedDir: join(f.root, 'managed'),
     systemLibraryDir: join(f.root, 'system-library'),
-    platform: 'darwin' as const,
+    platform,
     cliPath: join(f.root, "cli ' ;$(touch INJECTED).js"),
     nodePath: process.execPath,
     claudePath: '/bin/echo',
@@ -626,4 +626,9 @@ it('keeps the legacy language-assistant key in repaired files even when gloss is
   const servers = recordOf(repaired?.mcpServers);
   expect(Object.keys(servers ?? {})).toEqual(['language-assistant']);
   expect(recordOf(servers?.['language-assistant'])?.command).toBe(await realpath(process.execPath));
+});
+
+it('prepares channel setup on Linux', async () => {
+  const f = await service(true, 'linux');
+  expect(await f.setup.createChannelSetup(f.target)).toMatchObject({ kind: 'command' });
 });
