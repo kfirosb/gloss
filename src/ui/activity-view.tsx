@@ -11,7 +11,7 @@ type ActivityClient = Pick<
 type CardStatus = ActivityTask['status'] | 'unknown';
 /** Pixels from the bottom that still count as "at the bottom" for the output tail's auto-scroll. */
 const STICK_TO_BOTTOM_PX = 8;
-const STREAM_PAUSED = 'Stream paused while newer streams are open; it resumes when one closes.';
+const STREAM_PAUSED = 'Stream paused while other streams are open; it resumes when one closes.';
 
 function clock(timestamp?: string): string {
   if (!timestamp) return '';
@@ -100,7 +100,7 @@ function SubagentTimeline({
   taskId: string;
   active: boolean;
 }) {
-  const { activity: stream, paused } = useSubagentStream(client, taskId, active);
+  const { activity: stream, paused } = useSubagentStream(client, taskId, active, 1);
   return (
     <div className="activity-sub">
       {paused && (
@@ -143,7 +143,7 @@ function Report({ task }: { task: ActivityTask }) {
 }
 
 function OutputPanel({ client, taskId }: { client: ActivityClient; taskId: string }) {
-  const tail = useOutputTail(client, taskId, true);
+  const tail = useOutputTail(client, taskId, true, 1);
   const pre = useRef<HTMLPreElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {

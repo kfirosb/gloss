@@ -249,29 +249,34 @@ test('activity gaps are shown instead of the empty state', async ({ page }) => {
   await expect(view.getByText('No tool calls yet.')).toHaveCount(0);
 });
 
-test('a third activity stream pauses the oldest until another closes', async ({ page }) => {
+test('a fourth activity stream waits paused until another closes', async ({ page }) => {
   const value = activity();
   value.tasks.push(
     task({ id: 'a2', kind: 'subagent', description: 'Second reviewer', position: 27 }),
+    task({ id: 'a3', kind: 'subagent', description: 'Third reviewer', position: 28 }),
   );
   const { streams } = await open(page, claude, 'idle', value);
   await activityRadio(page).click();
   const first = page.locator('[data-task="a1"]');
   const second = page.locator('[data-task="a2"]');
+  const third = page.locator('[data-task="a3"]');
   const background = page.locator('[data-task="b1"]');
   await first.getByRole('button', { name: /Re-review final fix wave/ }).click();
   await expect(first.locator('[data-call="s-grep"]')).toHaveCount(1);
   await second.getByRole('button', { name: /Second reviewer/ }).click();
   await expect(second.locator('[data-call="s-grep"]')).toHaveCount(1);
+  await third.getByRole('button', { name: /Third reviewer/ }).click();
+  await expect(third.locator('[data-call="s-grep"]')).toHaveCount(1);
   await background.getByRole('button', { name: 'Show output' }).click();
-  await expect(background.locator('pre')).toHaveText('Running 279 tests\n');
-  await expect(first).toContainText('Stream paused');
-  await expect(second).not.toContainText('Stream paused');
-  await expect.poll(() => streams).toEqual(['a1', 'a2', 'b1']);
-  await background.getByRole('button', { name: 'Hide output' }).click();
+  await expect(background).toContainText('Stream paused');
   await expect(first).not.toContainText('Stream paused');
-  await expect(first.locator('[data-call="s-grep"]')).toHaveCount(1);
-  await expect.poll(() => streams).toEqual(['a1', 'a2', 'b1', 'a1']);
+  await expect(second).not.toContainText('Stream paused');
+  await expect(third).not.toContainText('Stream paused');
+  await expect.poll(() => streams).toEqual(['a1', 'a2', 'a3']);
+  await first.getByRole('button', { name: /Re-review final fix wave/ }).click();
+  await expect(background.locator('pre')).toHaveText('Running 279 tests\n');
+  await expect(background).not.toContainText('Stream paused');
+  await expect.poll(() => streams).toEqual(['a1', 'a2', 'a3', 'b1']);
 });
 
 test('an expanded task stays open when it finishes', async ({ page }) => {

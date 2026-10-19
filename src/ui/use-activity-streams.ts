@@ -13,31 +13,43 @@ const EARLIER_UNAVAILABLE = 'Earlier output unavailable';
  * Activity streams the page holds open at once. The browser allows six connections per host over
  * HTTP/1.1 and the session and catalog event streams already use two; actions need the rest.
  */
-export const ACTIVITY_STREAM_LIMIT = 2;
+export const ACTIVITY_STREAM_LIMIT = 3;
+
+/** How much a stream matters: 1 expanded by hand, 2 a running subagent card, 3 a background-command tail. */
+export type StreamPriority = 1 | 2 | 3;
 
 interface StreamSlot {
-  order: number; // claim order: the lowest open one is the oldest
+  order: number; // claim order: a lower number is older
+  priority: StreamPriority;
   setOpen: (open: boolean) => void;
 }
-const byOrder = (a: StreamSlot, b: StreamSlot) => a.order - b.order;
 
-/** Grants at most `limit` open streams; a new one closes the oldest, which reopens when another closes. */
+/**
+ * Grants at most `limit` open streams. A holder keeps its slot until it releases it; a claim takes a
+ * free slot, else preempts only a holder of lower importance (oldest first), else waits paused.
+ */
 export class StreamSlots {
   private readonly open: StreamSlot[] = [];
   private readonly paused: StreamSlot[] = [];
   private claims = 0;
   constructor(private readonly limit: number) {}
   /** `setOpen` hears whether the stream may hold its connection now and whenever that changes. */
-  claim(setOpen: (open: boolean) => void): () => void {
-    const slot: StreamSlot = { order: this.claims++, setOpen };
-    this.open.push(slot);
-    setOpen(true);
-    if (this.open.length > this.limit) {
-      const oldest = this.open.shift();
-      if (oldest) {
-        this.paused.push(oldest);
-        this.paused.sort(byOrder);
-        oldest.setOpen(false);
+  claim(setOpen: (open: boolean) => void, priority: StreamPriority): () => void {
+    const slot: StreamSlot = { order: this.claims++, priority, setOpen };
+    if (this.open.length < this.limit) {
+      this.open.push(slot);
+      setOpen(true);
+    } else {
+      const victim = this.preemptable(priority);
+      if (victim) {
+        this.open.splice(this.open.indexOf(victim), 1);
+        this.paused.push(victim);
+        this.open.push(slot);
+        setOpen(true);
+        victim.setOpen(false);
+      } else {
+        this.paused.push(slot);
+        setOpen(false);
       }
     }
     return () => {
@@ -49,29 +61,49 @@ export class StreamSlots {
       const openAt = this.open.indexOf(slot);
       if (openAt < 0) return;
       this.open.splice(openAt, 1);
-      // The newest waiting stream reopens and keeps its place in the claim order, so a stream that is
-      // closed and claimed again at once (as React's development mode does) pauses the same one again.
-      const next = this.paused.pop();
+      const next = this.nextWaiting();
       if (!next) return;
+      this.paused.splice(this.paused.indexOf(next), 1);
       this.open.push(next);
-      this.open.sort(byOrder);
       next.setOpen(true);
     };
+  }
+  /** The open holder of the lowest importance below `priority`, oldest first. */
+  private preemptable(priority: StreamPriority): StreamSlot | undefined {
+    let victim: StreamSlot | undefined;
+    for (const holder of this.open) {
+      if (holder.priority <= priority) continue;
+      if (!victim || holder.priority > victim.priority) victim = holder;
+    }
+    return victim;
+  }
+  /** The most important waiting claim, newest first. */
+  private nextWaiting(): StreamSlot | undefined {
+    let next: StreamSlot | undefined;
+    for (const waiting of this.paused) {
+      if (
+        !next ||
+        waiting.priority < next.priority ||
+        (waiting.priority === next.priority && waiting.order > next.order)
+      )
+        next = waiting;
+    }
+    return next;
   }
 }
 const activityStreamSlots = new StreamSlots(ACTIVITY_STREAM_LIMIT);
 
 /** Whether a stream wanted while `active` holds a slot: `false` while paused, `undefined` before claiming. */
-function useStreamSlot(active: boolean): boolean | undefined {
+function useStreamSlot(active: boolean, priority: StreamPriority): boolean | undefined {
   const [open, setOpen] = useState<boolean | undefined>(undefined);
   useEffect(() => {
     if (!active) return;
-    const release = activityStreamSlots.claim(setOpen);
+    const release = activityStreamSlots.claim(setOpen, priority);
     return () => {
       release();
       setOpen(undefined);
     };
-  }, [active]);
+  }, [active, priority]);
   return active ? open : undefined;
 }
 
@@ -98,7 +130,7 @@ export function foldStreamEvents(
 
 export interface SubagentStream {
   activity: ActivitySnapshot;
-  /** Wanted but closed while newer activity streams hold the connections. */
+  /** Wanted but closed while other activity streams hold the connections. */
   paused: boolean;
 }
 /** The activity of one subagent's own transcript, streamed while `active` and holding a slot. */
@@ -106,12 +138,13 @@ export function useSubagentStream(
   client: Pick<SessionClient, 'subagentActivity' | 'sessionId'>,
   taskId: string,
   active: boolean,
+  priority: StreamPriority,
 ): SubagentStream {
   const key = streamKey(client.sessionId, taskId);
   const keyNow = useRef(key);
   keyNow.current = key;
   const [stream, setStream] = useState<StreamState>(() => ({ key, state: emptyActivity() }));
-  const slot = useStreamSlot(active);
+  const slot = useStreamSlot(active, priority);
   const open = slot === true;
   useEffect(() => {
     if (!open) return;
@@ -164,7 +197,7 @@ export interface OutputTail {
   lines: string;
   start: number;
   error?: string;
-  /** Wanted but closed while newer activity streams hold the connections. */
+  /** Wanted but closed while other activity streams hold the connections. */
   paused: boolean;
   /** Prepends the window before `start`; never rejects, a failure becomes `error`. */
   showEarlier(): Promise<void>;
@@ -174,6 +207,7 @@ export function useOutputTail(
   client: Pick<SessionClient, 'outputTail' | 'outputWindow' | 'sessionId'>,
   taskId: string,
   active: boolean,
+  priority: StreamPriority,
 ): OutputTail {
   const key = streamKey(client.sessionId, taskId);
   const keyNow = useRef(key);
@@ -183,7 +217,7 @@ export function useOutputTail(
   const current = tail.key === key ? tail : empty();
   const startNow = useRef(current.start);
   startNow.current = current.start;
-  const slot = useStreamSlot(active);
+  const slot = useStreamSlot(active, priority);
   const open = slot === true;
   useEffect(() => {
     if (!open) return;

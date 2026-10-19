@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityCall, ActivityEvent } from '../../src/core/activity-contracts.js';
 import { emptyActivity } from '../../src/core/activity-reducer.js';
-import {
-  ACTIVITY_STREAM_LIMIT,
-  StreamSlots,
-  foldStreamEvents,
-} from '../../src/ui/use-activity-streams.js';
+import { StreamSlots, foldStreamEvents } from '../../src/ui/use-activity-streams.js';
 
 const call = (id: string, position: number): ActivityCall => ({
   id,
@@ -55,52 +51,75 @@ describe('subagent stream fold', () => {
 });
 
 describe('activity stream slots', () => {
-  const recorder = () => {
+  const slots = () => new StreamSlots(3);
+  const claim = (s: StreamSlots, priority: 1 | 2 | 3) => {
     const states: boolean[] = [];
-    return { states, set: (open: boolean) => states.push(open) };
+    const release = s.claim((o) => states.push(o), priority);
+    return { states, release, open: () => states.at(-1) === true };
   };
-  it('holds at most two activity streams open at once', () => {
-    expect(ACTIVITY_STREAM_LIMIT).toBe(2);
+  it('holds at most three streams open at once', () => {
+    const s = slots();
+    const a = claim(s, 2),
+      b = claim(s, 2),
+      c = claim(s, 2),
+      d = claim(s, 2);
+    expect([a, b, c].every((x) => x.open())).toBe(true);
+    expect(d.open()).toBe(false);
   });
-  it('closes the oldest open stream when one more opens, and reopens it when another closes', () => {
-    const slots = new StreamSlots(2);
-    const a = recorder();
-    const b = recorder();
-    const c = recorder();
-    slots.claim(a.set);
-    const releaseB = slots.claim(b.set);
-    expect([a.states, b.states]).toEqual([[true], [true]]);
-    const releaseC = slots.claim(c.set);
-    expect([a.states, b.states, c.states]).toEqual([[true, false], [true], [true]]);
-    releaseB();
-    expect(a.states).toEqual([true, false, true]);
-    releaseC();
-    expect(a.states).toEqual([true, false, true]);
+  it('an equal-priority claim waits instead of preempting', () => {
+    const s = slots();
+    const a = claim(s, 2);
+    claim(s, 2);
+    claim(s, 2);
+    const d = claim(s, 2);
+    expect(a.open()).toBe(true);
+    expect(d.states).toEqual([false]);
   });
-  it('pauses the same oldest stream when the newest is closed and claimed again at once', () => {
-    const slots = new StreamSlots(2);
-    const a = recorder();
-    const b = recorder();
-    slots.claim(a.set);
-    slots.claim(b.set);
-    const c = recorder();
-    slots.claim(c.set)();
-    slots.claim(c.set);
-    expect(a.states.at(-1)).toBe(false);
-    expect(b.states).toEqual([true]);
+  it('a more important claim preempts the least important, oldest holder', () => {
+    const s = slots();
+    const strip1 = claim(s, 3),
+      strip2 = claim(s, 3),
+      sub = claim(s, 2);
+    const clicked = claim(s, 1);
+    expect(clicked.open()).toBe(true);
+    expect(strip1.open()).toBe(false);
+    expect(strip2.open()).toBe(true);
+    expect(sub.open()).toBe(true);
   });
-  it('forgets a paused stream that closes before it reopens', () => {
-    const slots = new StreamSlots(1);
-    const a = recorder();
-    const b = recorder();
-    const releaseA = slots.claim(a.set);
-    const releaseB = slots.claim(b.set);
-    expect(a.states).toEqual([true, false]);
-    releaseA();
-    releaseB();
-    expect(a.states).toEqual([true, false]);
-    const c = recorder();
-    slots.claim(c.set);
-    expect(c.states).toEqual([true]);
+  it('on release the most important waiting claim opens, newest first', () => {
+    const s = slots();
+    const a = claim(s, 1),
+      b = claim(s, 1),
+      c = claim(s, 1);
+    const w3 = claim(s, 3),
+      w2old = claim(s, 2),
+      w2new = claim(s, 2);
+    a.release();
+    expect(w2new.open()).toBe(true);
+    expect(w2old.open()).toBe(false);
+    expect(w3.open()).toBe(false);
+    b.release();
+    expect(w2old.open()).toBe(true);
+    c.release();
+    expect(w3.open()).toBe(true);
+  });
+  it('a holder is never moved by a claim it outranks or equals', () => {
+    const s = slots();
+    const a = claim(s, 2),
+      b = claim(s, 2),
+      c = claim(s, 2);
+    claim(s, 3);
+    claim(s, 2);
+    expect([a, b, c].map((x) => x.states)).toEqual([[true], [true], [true]]);
+  });
+  it('forgets a waiting claim released before it opened', () => {
+    const s = slots();
+    claim(s, 1);
+    claim(s, 1);
+    const c = claim(s, 1);
+    const w = claim(s, 2);
+    w.release();
+    c.release();
+    expect(w.states).toEqual([false]);
   });
 });
