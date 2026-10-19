@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { HostAdapter, Target } from '../core/contracts.js';
+import { urlOpenerPath } from '../runtime/platform-tools.js';
 export interface SupersetHostOptions {
   workspaceId?: string;
   tabId?: string;
@@ -11,7 +12,7 @@ export function createSupersetHost(options: SupersetHostOptions = {}): HostAdapt
     options.opener ??
     ((args) =>
       new Promise((resolve, reject) => {
-        const child = spawn('/usr/bin/open', args, { stdio: 'ignore' });
+        const child = spawn(urlOpenerPath(), args, { stdio: 'ignore' });
         child.once('error', reject);
         child.once('exit', (code) =>
           code === 0 ? resolve() : reject(new Error('Superset route could not be opened')),

@@ -89,15 +89,28 @@ describe.runIf(process.platform === 'darwin')('observedOwners', () => {
   });
 });
 
-it('reports no owners and runs nothing off macOS', async () => {
+const withPlatform = async (value: NodeJS.Platform, run: () => Promise<void>) => {
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-  Object.defineProperty(process, 'platform', { value: 'linux' });
+  Object.defineProperty(process, 'platform', { value });
   try {
-    const { runner, calls } = lsofRunner({ [a]: [claude(1)] });
-    const result = await observedOwners([a], runner);
-    expect(calls).toEqual([]);
-    expect(result.get(a)).toEqual({ ok: true, owners: [] });
+    await run();
   } finally {
     Object.defineProperty(process, 'platform', platform);
   }
-});
+};
+
+it('fails closed and runs nothing on a platform without verified probes', () =>
+  withPlatform('win32', async () => {
+    const { runner, calls } = lsofRunner({ [a]: [claude(1)] });
+    const result = await observedOwners([a], runner);
+    expect(calls).toEqual([]);
+    expect(result.get(a)).toEqual({ ok: false });
+  }));
+
+it('probes with the Linux lsof on Linux', () =>
+  withPlatform('linux', async () => {
+    const { runner, calls } = lsofRunner({ [a]: [claude(1)] });
+    const result = await observedOwners([a], runner);
+    expect(calls).toEqual([['-Fpcfn', '+c', '0', '--', a]]);
+    expect(result.get(a)).toEqual({ ok: true, owners: [claude(1)] });
+  }));

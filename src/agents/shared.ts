@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { lsofPath, supportsProcessProbes } from '../runtime/platform-tools.js';
 import { orderAgentMessages, sendGate } from '../core/contracts.js';
 import type {
   AgentCapabilities,
@@ -80,8 +81,9 @@ export async function observedOwners(
 ): Promise<Map<string, OwnerResult>> {
   const results = new Map<string, OwnerResult>();
   const unique = [...new Set(paths)];
-  if (process.platform !== 'darwin') {
-    for (const path of unique) results.set(path, { ok: true, owners: [] });
+  // Without a verified process-table walk nothing can be said about any holder.
+  if (!supportsProcessProbes()) {
+    for (const path of unique) results.set(path, { ok: false });
     return results;
   }
   const batches: string[][] = [];
@@ -117,7 +119,7 @@ async function ownersOfBatch(
 ): Promise<Map<string, SocketOwner[]>> {
   // `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, clipping `claude.exe`.
   const result = await collectProcess(
-    runner('/usr/sbin/lsof', ['-Fpcfn', '+c', '0', '--', ...paths], '', signal, {
+    runner(lsofPath(), ['-Fpcfn', '+c', '0', '--', ...paths], '', signal, {
       timeoutMs: OWNER_PROBE_TIMEOUT_MS,
       maxOutputBytes: Math.min(OWNER_OUTPUT_BYTES_PER_PATH * paths.length, OWNER_OUTPUT_MAX_BYTES),
     }),

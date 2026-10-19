@@ -703,12 +703,12 @@ describe('closed Codex threads (no attached terminal)', () => {
     },
   );
 
-  it('runs no probes off macOS', async () => {
+  it('runs no probes on a platform without verified probes', async () => {
     const h = await harness('codex');
     cleanups.push(h.cleanup);
     const { state, adapter } = await terminalRig(h);
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-    Object.defineProperty(process, 'platform', { value: 'linux' });
+    Object.defineProperty(process, 'platform', { value: 'win32' });
     try {
       const connection = await adapter.attach(h.target);
       cleanups.push(() => connection.detach());

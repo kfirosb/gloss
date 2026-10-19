@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { collectProcess, type ProcessRunner } from '../../runtime/process-runner.js';
+import { lsofPath } from '../../runtime/platform-tools.js';
 import { uuid } from '../shared.js';
 
 /**
@@ -163,7 +164,7 @@ export async function processDirectories(
   const directories = new Map<number, string>();
   if (!pids.length) return directories;
   const result = await collectProcess(
-    runner('/usr/sbin/lsof', ['-a', '-d', 'cwd', '-Fpn', '-p', pids.join(',')], '', signal, {
+    runner(lsofPath(), ['-a', '-d', 'cwd', '-Fpn', '-p', pids.join(',')], '', signal, {
       timeoutMs: 3000,
       maxOutputBytes: 256 * 1024,
     }),
