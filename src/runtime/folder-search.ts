@@ -1,4 +1,4 @@
-import { access, realpath, stat } from 'node:fs/promises';
+import { access, opendir, realpath, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
 import { isWithin } from './path-containment.js';
@@ -55,6 +55,46 @@ async function pathCandidate(
   };
 }
 
+/** Deepest folder level the walk visits below home; project folders live near the top. */
+const WALK_MAX_DEPTH = 8;
+
+/**
+ * Without Spotlight: a breadth-first walk of real directories under home (symlinks are not followed), matching the
+ * query against each folder name case-insensitively. Stops at `limit` hits or at the deadline, in which case the
+ * partial result says so.
+ */
+async function walkFolders(
+  home: string,
+  query: string,
+  options: { limit: number; timeoutMs: number; isGit: (path: string) => Promise<boolean> },
+): Promise<FolderSearchResult> {
+  const deadline = Date.now() + options.timeoutMs;
+  const needle = query.toLowerCase();
+  const hits: FolderHit[] = [];
+  const queue: { path: string; depth: number }[] = [{ path: home, depth: 0 }];
+  for (let next = queue.shift(); next; next = queue.shift()) {
+    if (Date.now() >= deadline) return { hits, timedOut: true, unavailable: false };
+    let entries: string[];
+    try {
+      entries = [];
+      for await (const entry of await opendir(next.path))
+        if (entry.isDirectory()) entries.push(entry.name);
+    } catch {
+      continue; // Unreadable folders are simply not searched.
+    }
+    for (const name of entries.sort()) {
+      const path = join(next.path, name);
+      if (skipped(relative(home, path).split(sep))) continue;
+      if (name.toLowerCase().includes(needle)) {
+        hits.push({ path, name, git: await options.isGit(path) });
+        if (hits.length >= options.limit) return { hits, timedOut: false, unavailable: false };
+      }
+      if (next.depth + 1 < WALK_MAX_DEPTH) queue.push({ path, depth: next.depth + 1 });
+    }
+  }
+  return { hits, timedOut: false, unavailable: false };
+}
+
 export async function searchFolders(
   query: string,
   options: {
@@ -63,6 +103,7 @@ export async function searchFolders(
     timeoutMs?: number;
     limit?: number;
     isGit?: (path: string) => Promise<boolean>;
+    platform?: NodeJS.Platform;
   },
 ): Promise<FolderSearchResult> {
   const q = (query ?? '').trim();
@@ -75,6 +116,8 @@ export async function searchFolders(
   const isGit = options.isGit ?? hasGitEntry;
   const home = await realpath(options.home).catch(() => options.home);
   if (isPath) return pathCandidate(q, options.home, home, isGit);
+  if ((options.platform ?? process.platform) !== 'darwin')
+    return walkFolders(home, q, { limit, timeoutMs, isGit });
   const result = await collectProcess(
     runner(
       '/usr/bin/mdfind',
