@@ -1771,6 +1771,63 @@ pre {
   overflow-wrap: anywhere;
 }
 
+/* The docked Files column sits beside the workspace, before or after it in the DOM per data-side. */
+.file-workspace {
+  display: flex;
+  min-width: 0;
+  direction: ltr;
+}
+.file-workspace > .app {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  align-self: stretch;
+  margin: 0 auto;
+}
+.file-workspace > .file-sidebar {
+  width: 250px;
+  flex: none;
+  height: auto;
+  min-height: 0;
+  border-right: 1px solid light-dark(#cfd6e5, var(--dk-bg-cfd6e5));
+  background: light-dark(#fff, var(--dk-bg-ffffff));
+}
+.file-workspace[data-side='right'] > .file-sidebar {
+  border-right: 0;
+  border-left: 1px solid light-dark(#cfd6e5, var(--dk-bg-cfd6e5));
+}
+.file-workspace .file-toolbar {
+  padding: 0 4px;
+  font-size: 12px;
+}
+.file-workspace .file-toolbar strong {
+  flex: 1;
+}
+.file-workspace .file-toolbar button {
+  border: 0;
+  background: transparent;
+  padding: 0 5px;
+  font-size: 20px;
+  line-height: 24px;
+}
+@media (max-width: 900px), (max-height: 540px) {
+  /* Too narrow to dock: the column floats over the workspace at its edge. */
+  .file-workspace > .file-sidebar,
+  .file-workspace[data-side='right'] > .file-sidebar {
+    position: fixed;
+    inset: 8px auto 8px 8px;
+    width: min(290px, calc(100vw - 16px));
+    /* Above the sessions sidebar (25), below the Files popup (28) and header popovers (30). */
+    z-index: 27;
+    border: 1px solid light-dark(#bbc5d8, var(--dk-bg-bbc5d8));
+    border-radius: 10px;
+    box-shadow: 0 8px 40px #17203355;
+  }
+  .file-workspace[data-side='right'] > .file-sidebar {
+    inset: 8px 8px 8px auto;
+  }
+}
 .files-toggle {
   align-self: flex-end;
   padding: 4px 10px;
@@ -1891,7 +1948,6 @@ pre {
 .compact-file-sidebar {
   padding: 8px 6px;
   gap: 8px;
-  height: 100%;
 }
 .file-search-controls {
   display: flex;
@@ -2431,11 +2487,9 @@ pre {
   min-width: 0;
   min-height: 0;
 }
-/* The workspace fills the column below the tabs; the Files window floats above it. */
-.session-column > .app {
+/* The workspace and its Files column fill the column below the tabs; the Files popup floats above. */
+.session-column > .file-workspace {
   flex: 1;
-  width: 100%;
-  height: auto;
   min-height: 0;
 }
 #root:has(.sessions-sidebar) > .session-column {

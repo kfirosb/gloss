@@ -6,6 +6,8 @@ import { clampSidebarWidth } from './sidebar-frame.js';
 export type AssistantMode = 'full' | 'compact';
 export type Theme = 'light' | 'dark' | 'auto';
 export type DarkStyle = 'graphite' | 'dimmed' | 'midnight';
+/** Which edge of the workspace the docked Files column sits on. */
+export type FilesSide = 'left' | 'right';
 export const DARK_STYLES: { value: DarkStyle; label: string }[] = [
   { value: 'graphite', label: 'Graphite' },
   { value: 'dimmed', label: 'Dimmed slate' },
@@ -31,6 +33,7 @@ export interface DisplayPreferences {
   sidebarWidth: number;
   theme: Theme;
   darkStyle: DarkStyle;
+  filesSide: FilesSide;
   filesWindow?: FilesWindowGeometry;
 }
 const maxFolders = 500;
@@ -45,6 +48,7 @@ const defaults = (): DisplayPreferences => ({
   sidebarWidth: 300,
   theme: 'dark',
   darkStyle: 'graphite',
+  filesSide: 'left',
 });
 const clampWidth = (w: unknown) =>
   typeof w === 'number' && Number.isFinite(w) ? clampSidebarWidth(w) : defaults().sidebarWidth;
@@ -73,6 +77,7 @@ function validated(value: unknown): DisplayPreferences {
     sidebarWidth: clampWidth(v.sidebarWidth),
     theme,
     darkStyle,
+    filesSide: v.filesSide === 'right' ? 'right' : 'left',
     assistantModes: Object.fromEntries(
       Object.entries(objectOf(v.assistantModes)).filter(
         ([, mode]) => mode === 'full' || mode === 'compact',

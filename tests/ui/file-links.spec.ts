@@ -34,16 +34,26 @@ for (const href of ['/project/docs/plan.md:12', 'docs/plan.md', 'file:///project
         },
       });
     });
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/#capability=test');
     await page.getByRole('link', { name: 'תוכנית המימוש מוכנה' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Files' });
+    const dialog = page.getByRole('dialog', { name: 'File preview' });
     await expect(dialog.getByRole('heading', { name: 'Implementation plan' })).toBeVisible();
+    // The column opens in the same click as the popup; the popup's default still sits beside it.
+    const column = (await page
+      .locator('.file-workspace')
+      .getByRole('complementary', { name: 'Session files' })
+      .boundingBox())!;
+    expect(Math.round((await dialog.boundingBox())!.x)).toBeGreaterThanOrEqual(
+      Math.round(column.x + column.width),
+    );
     expect(context.pages()).toHaveLength(1);
-    // The list stays beside the preview, so the revealed row is checked without closing anything.
+    // The link opens the docked column too, revealing the file there; the popup has no list of its own.
+    await expect(dialog.getByRole('complementary', { name: 'Session files' })).toHaveCount(0);
     await expect(
-      dialog
-        .getByRole('complementary', { name: 'Session files' })
-        .getByRole('button', { name: 'Preview plan.md' }),
+      page.locator('.file-workspace').locator('.revealed-file').getByRole('button', {
+        name: 'Preview plan.md',
+      }),
     ).toHaveAttribute('aria-current', 'true');
   });
 }

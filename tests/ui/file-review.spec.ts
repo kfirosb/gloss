@@ -42,7 +42,7 @@ test('file review provides a cached TL;DR and translation with original availabl
   });
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Files' });
+  const dialog = page.getByRole('dialog', { name: 'File preview' });
   const summaryChip = dialog.getByRole('button', { name: 'TL;DR', exact: true });
   const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
   await expect(summaryChip).toHaveAttribute('data-saved', 'true');
@@ -60,8 +60,9 @@ test('file review provides a cached TL;DR and translation with original availabl
   await expect(dialog.getByLabel('File summary')).toBeVisible();
   expect(modes).toEqual(['summary', 'translation']);
   await dialog.screenshot({ path: '/tmp/file-review-summary.png' });
-  await dialog.getByRole('button', { name: 'Close files' }).click();
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  // The link opened the Files column too; closing the popup leaves it showing the file.
+  await dialog.getByRole('button', { name: 'Close file preview' }).click();
+  await expect(dialog).toHaveCount(0);
   const row = page.locator('.revealed-file .file-tree-row');
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(32);
   await expect(page.locator('.revealed-file > small').last()).toHaveText('docs');
@@ -96,7 +97,9 @@ test('review errors preserve the original and let the user retry', async ({ page
   await input.fill('@plan');
   await expect(page.locator('.file-picker [role=option]')).toHaveCount(1);
   await input.press('Enter');
-  const dialog = page.getByRole('dialog', { name: 'Files' }).locator('.files-window-preview');
+  const dialog = page
+    .getByRole('dialog', { name: 'File preview' })
+    .locator('.files-window-preview');
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByRole('alert')).toHaveText('Try again');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
@@ -157,7 +160,7 @@ test('changing the session languages resets the open file review', async ({ page
   });
   await page.goto('/#capability=test');
   await page.getByRole('link', { name: 'Open plan' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Files' });
+  const dialog = page.getByRole('dialog', { name: 'File preview' });
   const translateChip = dialog.getByRole('button', { name: 'Translate', exact: true });
   await translateChip.click();
   await expect(dialog.getByLabel('File translation')).toContainText('תוצאה 1');
@@ -171,7 +174,9 @@ test('changing the session languages resets the open file review', async ({ page
   await expect(translateChip).toHaveCount(0);
   await replies.selectOption('he');
   await expect(page.getByRole('button', { name: 'Session languages HE→EN→HE' })).toBeVisible();
-  await page.keyboard.press('Escape');
+  // Escape from inside the popover closes it; the popover would otherwise sit over the popup's chips.
+  await replies.press('Escape');
+  await expect(languages).toHaveCount(0);
   await expect(translateChip).not.toHaveAttribute('data-saved', 'true');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
   await translateChip.click();
