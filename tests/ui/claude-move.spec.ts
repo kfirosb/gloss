@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import type { DeliveryRoute } from '../../src/core/contracts.js';
 import type { CatalogSnapshot } from '../../src/core/session-catalog.js';
 import type { ClaudeMoveStatus } from '../../src/runtime/claude-move.js';
@@ -388,6 +388,17 @@ test('“Move session here” replaces Split and Terminal only for outside Claud
   await expect(moveHere(page)).toHaveCount(0);
   await tabs.getByRole('tab', { name: /Session A/ }).click();
   await expect(moveHere(page)).toBeVisible();
+  // It is clickable, so it looks like the enabled buttons beside it, not like the disabled ones it replaced.
+  await expect(moveHere(page)).toBeEnabled();
+  await expect(moveHere(page)).not.toHaveAttribute('aria-disabled');
+  const look = (target: Locator) =>
+    target.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return [style.color, style.backgroundColor, style.opacity, style.cursor];
+    });
+  expect(await look(moveHere(page))).toEqual(
+    await look(liveViews(page).getByRole('radio', { name: 'Original' })),
+  );
   await expect(liveViews(page).getByRole('radio', { name: 'Translated' })).toBeVisible();
   await expect(liveViews(page).getByRole('radio', { name: 'Split' })).toHaveCount(0);
   await expect(liveViews(page).getByRole('radio', { name: 'Terminal' })).toHaveCount(0);

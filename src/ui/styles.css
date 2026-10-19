@@ -4078,8 +4078,6 @@ button.dictation-finishing .dictation-icon {
   border-radius: 8px;
   padding: 4px 10px;
   font-size: 0.8rem;
-  background: light-dark(#eef0f5, var(--dk-bg-eef0f5));
-  color: light-dark(#647089, var(--dk-fg-647089));
 }
 .move-anchor > .move-popover {
   left: 0;
