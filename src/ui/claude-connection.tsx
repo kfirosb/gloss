@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ChannelStatus } from '../agents/claude/channel-types.js';
 import type { ChannelSetup } from '../runtime/claude-channel-setup.js';
 import type { PeerSetting } from '../runtime/claude-peer-setting.js';
-import { changeClaudeRegistration, type SessionClient } from './session-client.js';
+import type { RegistrationStatus } from '../runtime/claude-registration.js';
+import {
+  changeClaudeRegistration,
+  readClaudeRegistration,
+  type SessionClient,
+} from './session-client.js';
 import { errorMessage } from './error-message.js';
 import { MoveToGloss, copyCommand } from './claude-move.js';
 
@@ -77,7 +82,23 @@ export function ClaudeConnection({
     <details
       className="claude-connection"
       dir="ltr"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        setOpen(next);
+        // Spec 3.1 startup check: a stale or foreign entry shows as soon as the dialog opens.
+        if (next)
+          void readClaudeRegistration().then(
+            (current) => {
+              if (current.state === 'stale' || current.state === 'conflict')
+                setSetup(
+                  (shown) => shown ?? { kind: 'registration-required', registration: current },
+                );
+            },
+            () => {
+              /* The dialog's own button checks again. */
+            },
+          );
+      }}
     >
       <summary>Connect this session to Gloss · {labels[status.state]}</summary>
       <p>
@@ -252,5 +273,87 @@ export function PeerExplanation({ client }: { client: SessionClient }) {
       </p>
       {error && <p role="alert">{error}</p>}
     </details>
+  );
+}
+
+/** Settings → Claude connection (spec 3.1): status, Update for a stale entry, Remove. Acts on its own clicks. */
+export function ClaudeRegistrationSettings({ open }: { open: boolean }) {
+  const [status, setStatus] = useState<RegistrationStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const id = useId();
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setError('');
+    readClaudeRegistration().then(
+      (next) => {
+        if (live) setStatus(next);
+      },
+      (e) => {
+        if (live) setError(errorMessage(e, 'Claude connection status unavailable'));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [open]);
+  const change = async (action: 'register' | 'remove') => {
+    setBusy(true);
+    setError('');
+    try {
+      setStatus(await changeClaudeRegistration(action));
+    } catch (e) {
+      setError(errorMessage(e, action === 'remove' ? 'Removal failed' : 'Update failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ours = status?.state === 'registered' || status?.state === 'stale';
+  return (
+    <section className="settings-section" aria-labelledby={id}>
+      <h3 id={id}>Claude connection</h3>
+      {status?.state === 'registered' && (
+        <p>
+          Gloss is registered with Claude Code as the connection server <code>gloss</code>, so
+          sessions opened outside Gloss can connect to it.
+        </p>
+      )}
+      {status?.state === 'unregistered' && (
+        <p>
+          Gloss isn’t registered with Claude Code. It asks to register the first time you connect a
+          session from outside Gloss.
+        </p>
+      )}
+      {status?.state === 'stale' && (
+        <>
+          <p>
+            The Claude connection needs updating: it points at <code>{status.found}</code>.
+          </p>
+          <button type="button" disabled={busy} onClick={() => void change('register')}>
+            Update
+          </button>
+        </>
+      )}
+      {status?.state === 'conflict' && (
+        <p role="alert">
+          The name <code>gloss</code> is already used by another server in Claude:{' '}
+          <code>{status.found}</code>. Gloss leaves it unchanged; remove or rename it in Claude.
+        </p>
+      )}
+      {status?.state === 'unavailable' && <p role="alert">{status.reason}</p>}
+      {ours && (
+        <>
+          <button type="button" disabled={busy} onClick={() => void change('remove')}>
+            Remove Claude connection
+          </button>
+          <small>
+            Runs <code>claude mcp remove --scope user gloss</code>. Sessions already connected keep
+            working until they close.
+          </small>
+        </>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </section>
   );
 }

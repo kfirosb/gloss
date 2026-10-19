@@ -30,6 +30,7 @@ import {
   type Theme,
 } from './display-preferences.js';
 import { errorMessage } from './error-message.js';
+import { ClaudeRegistrationSettings } from './claude-connection.js';
 
 export type SessionLanguage = {
   defaults: LanguageSettings;
@@ -220,6 +221,7 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
             )}
           </div>
         </section>
+        <ClaudeRegistrationSettings open={open} />
         {error && <p role="alert">{error}</p>}
       </div>
       <div className="review-actions">
