@@ -85,14 +85,14 @@ describe('whisperCandidates', () => {
     );
     expect(c[0]).toBe('/bundle/bin/whisper-server');
     expect(c[1]).toBe('/App/Resources/bin/whisper-server');
-    expect(c[2]).toMatch(/vendor\/whisper\/bin\/whisper-server$/);
+    expect(c[2]).toMatch(new RegExp(`vendor/whisper/${process.arch}/bin/whisper-server$`));
     expect(
       whisperCandidates({ LANGUAGE_ASSISTANT_WHISPER: 'relative/path' }, undefined),
     ).toHaveLength(1);
   });
   it('resolves the vendor binary at the repository root from source and from the build', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-    const vendor = join(repoRoot, 'vendor', 'whisper', 'bin', 'whisper-server');
+    const vendor = join(repoRoot, 'vendor', 'whisper', process.arch, 'bin', 'whisper-server');
     expect(whisperCandidates({}, undefined)).toEqual([vendor]);
     expect(whisperCandidates({}, undefined, join(repoRoot, 'src', 'runtime', 'dictation'))).toEqual(
       [vendor],

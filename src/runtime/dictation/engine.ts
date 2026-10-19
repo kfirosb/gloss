@@ -84,7 +84,9 @@ export interface DictationEngine {
   close(): void;
 }
 
-/** Explicit env path first (the desktop shell sets it), then the packaged resources, then the checkout's vendor dir (omitted when no repo root is found). `start` overrides the module's directory, for tests. */
+/** Explicit env path first (the desktop shell sets it), then the packaged resources, then the checkout's vendor dir for this
+ * process's architecture (`scripts/build-whisper.sh` writes one per arch; omitted when no repo root is found). `start`
+ * overrides the module's directory, for tests. */
 export function whisperCandidates(
   env: NodeJS.ProcessEnv = process.env,
   resourcesPath = (process as { resourcesPath?: string }).resourcesPath,
@@ -96,7 +98,7 @@ export function whisperCandidates(
     ...new Set([
       ...(explicit && isAbsolute(explicit) ? [explicit] : []),
       ...(resourcesPath ? [join(resourcesPath, 'bin', 'whisper-server')] : []),
-      ...(root ? [join(root, 'vendor', 'whisper', 'bin', 'whisper-server')] : []),
+      ...(root ? [join(root, 'vendor', 'whisper', process.arch, 'bin', 'whisper-server')] : []),
     ]),
   ];
 }

@@ -1,6 +1,6 @@
 # Mac release protocol
 
-Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a local, versioned Apple Silicon DMG that the user can share with a friend. Online publishing is a separate request.
+Use this procedure when a future session is asked to update Gloss or produce a new Mac version. The deliverable is a pair of local, versioned DMGs, one for Apple Silicon (`-arm64`) and one for Intel (`-x64`), that the user can share with a friend. Online publishing is a separate request.
 
 As of 2026-10-14, version 0.7.0 is installed and in use. Its source is tagged `v0.7.0` at `4fd47cd` on branch `release/0.7.0`; it includes local `main` through `c1501e2` (0.6.0 with the attention-cues work), so `main` was fast-forwarded to it and holds exactly 0.7.0 plus this note. 0.7.0 adds schema 24 (`language_spend`). The DMG, checksum and release notes were delivered to `~/Downloads`, and the pre-install backup is in `~/.language-assistant-backups/2026-10-14-before-0.7.0/`. These are historical references: inspect the current branches, tags, package version, and installed app before every release.
 
@@ -60,13 +60,15 @@ Replace placeholders before running commands. Use Node.js 24 or newer for the cu
 npm run typecheck
 npm test
 npm run test:e2e -- --workers=1
-npm run build:tmux
-npm run build:whisper
-npm run desktop:dmg -- --arm64
+npm run build:tmux -- arm64
+npm run build:tmux -- x64
+npm run build:whisper -- arm64
+npm run build:whisper -- x64
+npm run desktop:dmg -- --arm64 --x64
 git diff --check
 ```
 
-`build:whisper` builds the bundled speech engine (whisper-server); the engine is bundled in the app, while the speech model is downloaded by the app on first use.
+`build:tmux` and `build:whisper` take the target architecture (`arm64` or `x64`) and cross-compile from either kind of Mac into `vendor/<tool>/<arch>/bin`; the x64 whisper-server is CPU-only (no Metal). `build:whisper` builds the bundled speech engine (whisper-server); the engine is bundled in the app, while the speech model is downloaded by the app on first use. electron-builder's `beforePack` hook (`scripts/check-vendor.mjs`) refuses to package an architecture whose vendor binaries are missing or built for the other one.
 
 Check every exit code and resolve failures before labeling the release ready. Report test counts from this run, not a previous release. Use an isolated test server if a running development server could cause browser tests to exercise a different checkout.
 
@@ -74,22 +76,24 @@ Notes from building on this Mac:
 
 - **Browser tests and other worktrees.** `playwright.config.ts` serves on port 4173 with `reuseExistingServer: true`, so a dev server from another worktree on that port makes the suite test that worktree's code. Check the port's owner first (`lsof -nP -iTCP:4173 -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). Never stop another worktree's server; instead run with a scratch config kept outside Git (for example under the ignored `.superpowers/`) that uses an absolute `testDir`, another port with `--strictPort`, `cwd` set to the release worktree and `reuseExistingServer: false`.
 - **Flaky tests.** The real-tmux case in `tests/runtime/tmux.test.ts`, the channel-privacy timing test and `tests/ui/sessions.spec.ts:44` can fail under load. `npx vitest run --maxWorkers=4` is reliable; rerun a failing browser spec on its own once before investigating, and report the rerun.
-- **Native builds.** This Mac has Command Line Tools only. `build:whisper` already sets its own flags; the node-pty rebuild inside `desktop:dmg` needs `CXXFLAGS="-nostdinc++ -isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"`.
-- **Bundled tmux.** `build:tmux` downloads and compiles tmux 3.5a. Copying `vendor/tmux` from an earlier release worktree is acceptable when `vendor/tmux/bin/tmux -V` reports 3.5a, `file` reports arm64 and `otool -L` lists only `/usr/lib` libraries; say so in the release notes.
+- **Native builds.** This Mac has Command Line Tools only. `build:whisper` already sets its own flags; the node-pty rebuild inside `desktop:dmg` needs `CXXFLAGS="-nostdinc++ -isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"` (it rebuilds once per architecture).
+- **Bundled tmux and whisper.** `build:tmux` downloads and compiles tmux 3.5a. Copying `vendor/tmux/<arch>` and `vendor/whisper/<arch>` from an earlier release worktree is acceptable when `tmux -V` reports 3.5a, `file` reports the expected architecture, `otool -L` lists only `/usr/lib` and `/System` libraries and the whisper build recipe has not changed; say so in the release notes. An x64 binary runs on this Mac through Rosetta (`arch -x86_64 <binary>`).
 
-The expected output is `release/Gloss-<version>-arm64.dmg`. Verify its integrity and create a checksum beside it:
+The expected outputs are `release/Gloss-<version>-arm64.dmg` and `release/Gloss-<version>-x64.dmg`. Verify each one's integrity and create a checksum beside it:
 
 ```sh
 hdiutil verify 'release/Gloss-<version>-arm64.dmg'
+hdiutil verify 'release/Gloss-<version>-x64.dmg'
 cd release
 shasum -a 256 'Gloss-<version>-arm64.dmg' > 'Gloss-<version>-arm64.dmg.sha256'
+shasum -a 256 'Gloss-<version>-x64.dmg' > 'Gloss-<version>-x64.dmg.sha256'
 ```
 
 Run these from the appropriate directory; return to the repository root for subsequent Git commands. Keep older released DMGs available. Read version, architecture, and minimum macOS requirements from the produced app, rather than assuming they stayed unchanged.
 
 ## 5. Verify the packaged app
 
-Import tests alone are insufficient: the first desktop build imported successfully but failed on actual startup. Verify the real `.app` with its bundled runtime and assets, ideally from the DMG or a temporary installation outside the repository so missing dependencies cannot resolve from the development checkout.
+Import tests alone are insufficient: the first desktop build imported successfully but failed on actual startup. Verify the real `.app` with its bundled runtime and assets, ideally from the DMG or a temporary installation outside the repository so missing dependencies cannot resolve from the development checkout. Verify both architectures: the x64 app runs on this Apple Silicon Mac under Rosetta (launch its `Contents/MacOS/Gloss` binary through `arch -x86_64`, and check the About panel says Intel), which exercises the x64 Electron, node-pty, tmux and whisper-server but cannot catch Intel-only CPU or GPU issues; say so in the release notes.
 
 Check that:
 
@@ -110,10 +114,10 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 1. Commit the release changes on the release branch.
 2. Create a new annotated tag `v<version>` at that commit.
 3. Record the commit, included `main` revision, requirements, release changes, verification results, and known limitations in `release/RELEASE-NOTES-<version>.txt`.
-4. Provide clickable local links to the DMG and, when useful, its checksum and release notes. If the user asks for the release to be delivered, move the DMG, its `.sha256` and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
+4. Provide clickable local links to both DMGs and, when useful, their checksums and release notes. If the user asks for the release to be delivered, move the DMGs, their `.sha256` files and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
 5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
-Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires Apple Silicon and macOS 13+, and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
+Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
 ## 7. Replace the installed app only when requested
 

@@ -28,14 +28,14 @@ Gloss is an early open-source release. What is verified today:
 
 | Area | Status |
 |------|--------|
-| Platform | macOS 13 or newer, Apple Silicon |
+| Platform | macOS 13 or newer, Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`) |
 | Codex CLI | Fully supported. Automatic session discovery is pinned to Codex 0.154.0, 0.157.1 and 0.158.0 |
 | Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
 
 ## Install the Mac app
 
-1. Download the latest `.dmg` from the [Releases](../../releases) page and check its `.sha256` if you like.
+1. Download the latest `.dmg` from the [Releases](../../releases) page: `-arm64` for an Apple Silicon Mac, `-x64` for an Intel Mac (Apple menu > About This Mac shows which chip you have). Check its `.sha256` if you like.
 2. Open the DMG and drag the app into *Applications*.
 3. Launch it from Spotlight or the Dock.
 
@@ -73,10 +73,10 @@ npm run desktop          # run the desktop app from source
 To build the installer:
 
 ```sh
-npm run build:tmux
-npm run build:whisper
-npm run desktop:dmg -- --arm64
-# the DMG is written to release/
+npm run build:tmux -- arm64      # or x64; each writes vendor/tmux/<arch>/bin/tmux
+npm run build:whisper -- arm64   # or x64; x64 is CPU-only (no Metal)
+npm run desktop:dmg -- --arm64   # or --x64, or both flags for two DMGs
+# the DMGs are written to release/ as Gloss-<version>-<arch>.dmg
 ```
 
 `npm run desktop:install` builds and installs the app into *Applications* locally.

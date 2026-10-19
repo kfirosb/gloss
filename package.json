@@ -1,6 +1,6 @@
 {
   "name": "language-assistant",
-  "version": "0.16.2",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,9 +16,7 @@
     "test:e2e": "playwright test",
     "start": "node dist/server/runtime/cli.js",
     "desktop": "npm run build && electron .",
-    "predesktop:package": "node scripts/check-tmux.mjs && node scripts/check-whisper.mjs",
     "desktop:package": "npm run build && electron-builder --mac --dir",
-    "predesktop:dmg": "node scripts/check-tmux.mjs && node scripts/check-whisper.mjs",
     "desktop:dmg": "npm run build && electron-builder --mac dmg",
     "desktop:install": "sh scripts/install-mac.sh",
     "build:tmux": "sh scripts/build-tmux.sh",
@@ -54,6 +52,7 @@
   "build": {
     "appId": "local.language-assistant",
     "productName": "Gloss",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": false,
     "directories": {
       "output": "release"
@@ -73,13 +72,14 @@
         "NSMicrophoneUsageDescription": "Gloss uses the microphone to dictate into the composer."
       }
     },
+    "beforePack": "scripts/check-vendor.mjs",
     "afterPack": "scripts/adhoc-sign.mjs",
     "asarUnpack": [
       "node_modules/node-pty/**"
     ],
     "extraResources": [
       {
-        "from": "vendor/tmux/bin/tmux",
+        "from": "vendor/tmux/${arch}/bin/tmux",
         "to": "bin/tmux"
       },
       {
@@ -91,7 +91,7 @@
         "to": "licenses/LIBEVENT-LICENSE"
       },
       {
-        "from": "vendor/whisper/bin/whisper-server",
+        "from": "vendor/whisper/${arch}/bin/whisper-server",
         "to": "bin/whisper-server"
       },
       {
