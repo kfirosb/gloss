@@ -50,7 +50,7 @@
   },
   "main": "desktop/main.mjs",
   "build": {
-    "appId": "local.language-assistant",
+    "appId": "io.github.kfirosb.gloss",
     "productName": "Gloss",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": false,
@@ -67,13 +67,16 @@
       "target": [
         "dir"
       ],
-      "identity": null,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Gloss uses the microphone to dictate into the composer."
       }
     },
     "beforePack": "scripts/check-vendor.mjs",
-    "afterPack": "scripts/adhoc-sign.mjs",
+    "afterPack": "scripts/sign-mac.mjs",
     "asarUnpack": [
       "node_modules/node-pty/**"
     ],

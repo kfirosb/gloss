@@ -47,11 +47,7 @@ The cask installs the build for your chip (Apple Silicon or Intel); later releas
 2. Open the DMG and drag the app into *Applications*.
 3. Launch it from Spotlight or the Dock.
 
-The app is ad-hoc signed and not notarized, so macOS will say it cannot verify the app on first launch. Choose *Done*, then open *System Settings > Privacy & Security* and click *Open Anyway*. If macOS instead says the app is damaged, run this once in Terminal:
-
-```sh
-xattr -cr "/Applications/Gloss.app"
-```
+Releases are signed with the maintainer's Apple Developer ID and notarized by Apple, so macOS opens them without a security prompt. Releases before 0.18.0 were ad-hoc signed: if you still have one and macOS says it cannot verify the app, choose *Done*, then open *System Settings > Privacy & Security* and click *Open Anyway*.
 
 ### Requirements
 

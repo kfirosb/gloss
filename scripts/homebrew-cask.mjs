@@ -69,15 +69,13 @@ export function renderCask({ version, sha256 }) {
   zap trash: [
     "~/.language-assistant",
     "~/Library/Application Support/language-assistant",
-    "~/Library/Preferences/local.language-assistant.plist",
-    "~/Library/Saved Application State/local.language-assistant.savedState",
+    "~/Library/Preferences/io.github.kfirosb.gloss.plist",
+    "~/Library/Saved Application State/io.github.kfirosb.gloss.savedState",
   ]
 
   caveats <<~EOS
-    Gloss is ad-hoc signed and not notarized. On first launch macOS says it
-    cannot verify the app: choose Done, then System Settings > Privacy &
-    Security > Open Anyway. Gloss needs Codex or Claude Code signed in, and
-    ripgrep (brew install ripgrep) for file search.
+    Gloss needs Codex or Claude Code signed in, and ripgrep
+    (brew install ripgrep) for file search.
   EOS
 end
 `;

@@ -54,6 +54,20 @@ npm ci
 
 Replace placeholders before running commands. Use Node.js 24 or newer for the current project. A worktree created by an agent tool may hold only a stub `node_modules` that resolves packages from the parent checkout; tests and type checks can pass that way, but `electron-builder` packages the worktree's own `node_modules`, so always run `npm ci` in the release worktree before building. Update the Mac release paragraph in `docs/reference.md` with the new version and relevant changes.
 
+## 3a. Signing and notarization prerequisites
+
+Since Gloss 0.18.0 releases are signed with the maintainer's Developer ID and notarized by Apple, so a downloaded copy opens with no Gatekeeper dialog. electron-builder does the signing (hardened runtime, `build/entitlements.mac.plist`) and the notarization (`notarize: true`); both are configured in `package.json` and need nothing from the command line. Before building, check that this Mac has what they rely on:
+
+```sh
+security find-identity -v -p codesigning       # must list "Developer ID Application: kfir bechavod (UD3JN5GBRK)"
+set -a; . ~/.config/gloss-signing/notarize.env; set +a
+env | grep -c '^APPLE_API_' # 3: APPLE_API_KEY (path to the .p8 file), APPLE_API_KEY_ID, APPLE_API_ISSUER
+```
+
+The identity lives in the login keychain with Apple's Developer ID G2 intermediate; `codesign` was granted access without a prompt. If `find-identity` reports 0 valid identities, the intermediate is missing (`~/.config/gloss-signing/DeveloperIDG2CA.cer`, or https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer) or the certificate expired (November 2027; make a new one from the request file in the same folder). The notarization credentials are an App Store Connect API key kept outside the repository in `~/.config/gloss-signing`; never commit the `.p8` file or the env file, and never print their contents.
+
+Run the packaging command from a terminal with keychain access: under the agent sandbox `codesign` fails with `errSecInternalComponent` before signing anything, so an agent session must run `desktop:dmg` outside its sandbox. Signing happens whichever way the build is started, but notarization only when the three `APPLE_API_*` variables are in the environment of the `electron-builder` process. Without them electron-builder logs `skipped macOS notarization` and the DMG is signed but not notarized, which still shows a Gatekeeper dialog on other Macs; do not deliver such a build as a release. When the keychain has no Developer ID at all, the `afterPack` hook (`scripts/sign-mac.mjs`) falls back to an ad-hoc signature as before 0.18.0 and says so in the build log.
+
 ## 4. Validate source and build the DMG
 
 ```sh
@@ -91,6 +105,18 @@ shasum -a 256 'Gloss-<version>-x64.dmg' > 'Gloss-<version>-x64.dmg.sha256'
 
 Run these from the appropriate directory; return to the repository root for subsequent Git commands. Keep older released DMGs available. Read version, architecture, and minimum macOS requirements from the produced app, rather than assuming they stayed unchanged.
 
+Then confirm the signature and the notarization on each packaged app (`release/mac-arm64/Gloss.app` and `release/mac/Gloss.app`), before and independently of the functional checks below:
+
+```sh
+codesign --verify --deep --strict --verbose=2 '<app>'
+codesign -dv --verbose=2 '<app>' 2>&1 | grep -E 'Authority|TeamIdentifier|flags'   # Developer ID Application, TeamIdentifier=UD3JN5GBRK, flags include runtime
+codesign -d --entitlements - '<app>' 2>/dev/null | grep -c 'audio-input'            # 1: the microphone entitlement is present
+xcrun stapler validate '<app>'                                                       # "The validate action worked!"
+spctl -a -vv -t exec '<app>'                                                         # "accepted" with "source=Notarized Developer ID"
+```
+
+The bundled `Contents/Resources/bin/tmux` and `whisper-server` must show the same Developer ID authority (`codesign -dv` on each). A build whose `spctl` line says `Unnotarized Developer ID` was signed but not notarized: check the `APPLE_API_*` variables and rebuild rather than shipping it.
+
 ## 5. Verify the packaged app
 
 Import tests alone are insufficient: the first desktop build imported successfully but failed on actual startup. Verify the real `.app` with its bundled runtime and assets, ideally from the DMG or a temporary installation outside the repository so missing dependencies cannot resolve from the development checkout. Verify both architectures: the x64 app runs on this Apple Silicon Mac under Rosetta (launch its `Contents/MacOS/Gloss` binary through `arch -x86_64`, and check the About panel says Intel), which exercises the x64 Electron, node-pty, tmux and whisper-server but cannot catch Intel-only CPU or GPU issues; say so in the release notes.
@@ -113,11 +139,11 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 
 1. Commit the release changes on the release branch.
 2. Create a new annotated tag `v<version>` at that commit.
-3. Record the commit, included `main` revision, requirements, release changes, verification results, and known limitations in `release/RELEASE-NOTES-<version>.txt`.
+3. Record the commit, included `main` revision, requirements, release changes, verification results (including the signing and notarization checks), and known limitations in `release/RELEASE-NOTES-<version>.txt`.
 4. Provide clickable local links to both DMGs and, when useful, their checksums and release notes. If the user asks for the release to be delivered, move the DMGs, their `.sha256` files and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
 5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
-Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
+Describe the result as a **local DMG release**. Do not claim it was uploaded. Builds are Developer ID signed and notarized; say which `spctl` result each DMG's app gave, and if a build is only signed or only ad-hoc signed say so and do not deliver it as a release. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
 ## 7. Update the Homebrew tap after publishing
 

@@ -8,12 +8,12 @@ Status: high priority; captured 2026-10-19 after a first outside user got Gateke
 
 Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) and not notarized, so every download shows that dialog and the "Open Anyway" path got harder on macOS Sequoia. Only Developer ID signing plus notarization removes it. The Mac App Store is not an option: the app spawns tmux, reads Codex and Claude session files in the home folder, and runs a local server, which the App Sandbox forbids.
 
-- [ ] Enroll in the Apple Developer Program (99 USD per year; identity verification takes one to two days, so start first).
-- [ ] Change the bundle id from `local.language-assistant` to a real reverse-DNS id before the first signed release; changing it later resets macOS permission grants (microphone and others) for existing users.
-- [ ] Create a Developer ID Application certificate and keep it out of the repository (Keychain or CI secrets).
-- [ ] electron-builder: set the identity, hardened runtime, and entitlements (microphone, Electron JIT); sign the bundled `tmux` and `whisper-server` binaries with the same identity.
-- [ ] Notarize with `notarytool` (app-specific password or App Store Connect API key), staple the ticket to the app and the DMG, and verify with `spctl -a -vv` on a clean machine.
-- [ ] Update [mac-release-protocol.md](mac-release-protocol.md), the README install section, and the release-notes template: drop the "unsigned" wording once it is true.
+- [x] Enroll in the Apple Developer Program (99 USD per year; identity verification takes one to two days, so start first). Approved 2026-10-19; team id UD3JN5GBRK.
+- [x] Change the bundle id from `local.language-assistant` to a real reverse-DNS id before the first signed release; changing it later resets macOS permission grants (microphone and others) for existing users. Now `io.github.kfirosb.gloss` (branch `signing`); existing installs are asked for the microphone once more, and the first signed release must say so.
+- [x] Create a Developer ID Application certificate and keep it out of the repository (Keychain or CI secrets). In the login keychain with the Developer ID G2 intermediate; `codesign` is allowed without a prompt. The request and certificate files are in `~/.config/gloss-signing`; the private key exists only in the keychain.
+- [x] electron-builder: set the identity, hardened runtime, and entitlements (microphone, Electron JIT); sign the bundled `tmux` and `whisper-server` binaries with the same identity. Branch `signing`: `build/entitlements.mac.plist`, `hardenedRuntime`, `notarize: true`; `scripts/sign-mac.mjs` keeps the ad-hoc fallback only when the keychain has no Developer ID.
+- [ ] Notarize with an App Store Connect API key (`APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` in `~/.config/gloss-signing/notarize.env`), let electron-builder staple the ticket, and verify with `spctl -a -vv` on a clean machine. Waiting for the API key.
+- [x] Update [mac-release-protocol.md](mac-release-protocol.md), the README install section, and the release-notes template: drop the "unsigned" wording once it is true. Done on branch `signing`; the Homebrew caveat about Gatekeeper is gone too.
 
 ## 21. In-app updates from GitHub Releases
 
