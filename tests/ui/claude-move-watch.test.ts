@@ -149,6 +149,41 @@ describe('a move in flight', () => {
     expect(takeMoveNotice(f.client.sessionId)).toBeUndefined();
   });
 
+  it('treats a cancel that failed as not sent: the wait is still watched and its outcome still reported', async () => {
+    const f = fakeClient({ state: 'busy', reason: 'working', process: PROCESS });
+    const close = attachMoveView(f.client);
+    f.answer({ state: 'waiting' });
+    await requestMove(f.client, { action: 'when-idle', expected: PROCESS });
+    f.answer(new Error('Network down'));
+    await requestMove(f.client, { action: 'cancel' });
+    expect(moveViewOf(f.client.sessionId)).toMatchObject({
+      phase: 'in-flight',
+      error: 'Network down',
+    });
+    close();
+    f.answer(undefined);
+    f.set({ state: 'waiting' });
+    await vi.advanceTimersByTimeAsync(MOVE_STATUS_POLL_MS);
+    expect(takeMoveNotice(f.client.sessionId)).toBeUndefined();
+    f.set({ state: 'in-gloss', failure: { reason: 'Claude closed.' } });
+    await vi.advanceTimersByTimeAsync(MOVE_STATUS_POLL_MS);
+    expect(takeMoveNotice(f.client.sessionId)).toBe('Claude closed.');
+  });
+
+  it('keeps watching when the cancel came too late and the wait already became a move', async () => {
+    const f = fakeClient({ state: 'busy', reason: 'working', process: PROCESS });
+    const close = attachMoveView(f.client);
+    f.answer({ state: 'waiting' });
+    await requestMove(f.client, { action: 'when-idle', expected: PROCESS });
+    f.answer({ state: 'moving' });
+    await requestMove(f.client, { action: 'cancel' });
+    expect(moveViewOf(f.client.sessionId).phase).toBe('in-flight');
+    close();
+    f.set({ state: 'unavailable', reason: 'x', failure: { reason: 'Not closed.' } });
+    await vi.advanceTimersByTimeAsync(MOVE_STATUS_POLL_MS);
+    expect(takeMoveNotice(f.client.sessionId)).toBe('Not closed.');
+  });
+
   it('reports a request that failed, without retrying it', async () => {
     const f = fakeClient({ state: 'ready', process: PROCESS });
     const close = attachMoveView(f.client);

@@ -1,5 +1,9 @@
-import { useRef, useState } from 'react';
-import type { ClaudeMoveFailure, ClaudeMoveRequest } from '../runtime/claude-move.js';
+import { useEffect, useRef, useState } from 'react';
+import type {
+  ClaudeMoveFailure,
+  ClaudeMoveRequest,
+  ClaudeMoveStatus,
+} from '../runtime/claude-move.js';
 import type { SessionClient } from './session-client.js';
 import { MOVE_DONE_TEXT, requestMove, useMoveView } from './claude-move-watch.js';
 
@@ -47,14 +51,23 @@ function FailureNote({ failure }: { failure: ClaudeMoveFailure }) {
  * Spec 5: Move to Gloss for one outside Claude session. Nothing is sent before the user confirms, and the identity
  * sent is the one the user saw. A move started here keeps being watched after this closes (claude-move-watch).
  */
+type Confirmable = Exclude<ClaudeMoveRequest, { action: 'cancel' }>;
+/** A confirmation stands only while the status still shows the process it was opened for. */
+const stillConfirmable = (request: Confirmable, status: ClaudeMoveStatus | undefined) =>
+  (status?.state === 'ready' || status?.state === 'busy') &&
+  status.state === (request.action === 'move' ? 'ready' : 'busy') &&
+  status.process.pid === request.expected.pid &&
+  status.process.procStart === request.expected.procStart;
 export function MoveToGloss({ client }: { client: SessionClient }) {
   const { status, pending, error } = useMoveView(client);
-  const [confirming, setConfirming] = useState<Exclude<
-    ClaudeMoveRequest,
-    { action: 'cancel' }
-  > | null>(null);
+  const [opened, setOpened] = useState<Confirmable | null>(null);
+  // Never post an identity the status no longer shows (another dialog moved it, or the process changed).
+  const confirming = opened && stillConfirmable(opened, status) ? opened : null;
+  useEffect(() => {
+    if (opened && !confirming) setOpened(null);
+  }, [opened, confirming]);
   const act = (request: ClaudeMoveRequest) => {
-    setConfirming(null);
+    setOpened(null);
     void requestMove(client, request);
   };
   const busy = pending !== undefined;
@@ -64,10 +77,10 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
       {confirming ? (
         <div role="group" aria-label="Confirm Move to Gloss">
           <p>{MOVE_CONFIRMATION}</p>
-          <button type="button" className="primary" onClick={() => act(confirming)}>
+          <button type="button" className="primary" disabled={busy} onClick={() => act(confirming)}>
             Move
           </button>
-          <button type="button" onClick={() => setConfirming(null)}>
+          <button type="button" onClick={() => setOpened(null)}>
             Cancel
           </button>
         </div>
@@ -77,7 +90,7 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
         <button
           type="button"
           disabled={busy}
-          onClick={() => setConfirming({ action: 'move', expected: status.process })}
+          onClick={() => setOpened({ action: 'move', expected: status.process })}
         >
           Move to Gloss
         </button>
@@ -89,7 +102,7 @@ export function MoveToGloss({ client }: { client: SessionClient }) {
           <button
             type="button"
             disabled={busy}
-            onClick={() => setConfirming({ action: 'when-idle', expected: status.process })}
+            onClick={() => setOpened({ action: 'when-idle', expected: status.process })}
           >
             Move when it finishes
           </button>

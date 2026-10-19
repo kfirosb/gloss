@@ -23,10 +23,12 @@ const EXITED = 'Claude closed as soon as Gloss reopened the session.';
 async function moveRoute(target: Page | BrowserContext, initial: ClaudeMoveStatus) {
   let status = initial;
   let next: ClaudeMoveStatus | undefined;
+  let held: Promise<void> | undefined;
   const posts: unknown[] = [];
-  await target.route('**/api/sessions/*/claude-move', (route) => {
+  await target.route('**/api/sessions/*/claude-move', async (route) => {
     if (route.request().method() === 'POST') {
       posts.push(route.request().postDataJSON());
+      await held;
       if (next) status = next;
       next = undefined;
     }
@@ -34,6 +36,17 @@ async function moveRoute(target: Page | BrowserContext, initial: ClaudeMoveStatu
   });
   return {
     posts,
+    /** POSTs wait until the returned function is called. */
+    hold() {
+      let release = () => {};
+      held = new Promise((resolve) => {
+        release = () => {
+          held = undefined;
+          resolve();
+        };
+      });
+      return release;
+    },
     set(value: ClaudeMoveStatus) {
       status = value;
     },
@@ -178,7 +191,10 @@ async function tabsWithMove(context: BrowserContext) {
       body: 'data: ' + JSON.stringify(catalog) + '\n\n',
     }),
   );
-  return moveRoute(context, { state: 'ready', process: PROCESS });
+  return {
+    ...(await moveRoute(context, { state: 'ready', process: PROCESS })),
+    records: f.records,
+  };
 }
 
 test('the session tab menu offers Move to Gloss only for outside Claude sessions', async ({
@@ -225,4 +241,43 @@ test('a move whose tab-menu dialog was closed reports its outcome on that sessio
   await expect(page.getByRole('status').filter({ hasText: EXITED })).toContainText(
     MANUAL.cdCommand,
   );
+});
+
+test('two dialogs for one session send one move, and a confirmation never outlives its status', async ({
+  page,
+  context,
+}) => {
+  const move = await tabsWithMove(context);
+  // The workspace shows the connect dialog only for a Claude record.
+  for (const record of move.records) record.target.agent = 'claude';
+  await context.route('**/api/sessions/*/claude-route', (r) =>
+    r.fulfill({ json: { transport: null, reason: 'Gloss can’t reach this session yet.' } }),
+  );
+  await context.route('**/api/sessions/*/claude-channel', (r) =>
+    r.fulfill({ json: { state: 'setup-required' } }),
+  );
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session A/ }).click();
+  await page.getByText(/Connect this session to Gloss/).click();
+  const connect = page.locator('.claude-connection');
+  await connect.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const connectConfirm = connect.getByRole('group', { name: 'Confirm Move to Gloss' });
+  await expect(connectConfirm).toBeVisible();
+  await tabs.getByRole('tab', { name: /Session A/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Gloss…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move to Gloss' });
+  await dialog.getByRole('button', { name: 'Move to Gloss', exact: true }).click();
+  const release = move.hold();
+  move.afterPost({ state: 'in-gloss' });
+  await dialog.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(dialog.getByText('Moving the session to Gloss…', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close Move to Gloss', exact: true }).click();
+  // While the first move is being sent, the other dialog's confirmation can't send a second one.
+  await expect(connectConfirm.getByRole('button', { name: 'Move', exact: true })).toBeDisabled();
+  release();
+  // The session left the state the confirmation was opened from, so it is gone, not left armed.
+  await expect(connectConfirm).toHaveCount(0);
+  await expect(connect.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
 });

@@ -132,6 +132,9 @@ function resolve(watch: Watch) {
   notices.set(watch.client.sessionId, text);
   for (const listener of noticeListeners) listener();
 }
+/** Whether the server still has a wait or a move for the session, or the reopen is being checked. */
+const moveUnderway = (status: ClaudeMoveStatus) =>
+  status.state === 'waiting' || status.state === 'moving' || status.state === 'in-gloss';
 /** Decides, after each status, whether the move the user started has an outcome yet. */
 function settle(watch: Watch) {
   const { phase, pending, status } = watch.view;
@@ -202,13 +205,19 @@ export async function requestMove(client: MoveClient, request: ClaudeMoveRequest
   const watch = watchFor(client);
   const cancel = request.action === 'cancel';
   watch.inGlossSince = undefined;
-  update(watch, { pending: request.action, error: '', phase: cancel ? 'none' : 'in-flight' });
+  // A cancel changes nothing until the server answers: its wait stays armed until then.
+  update(watch, { pending: request.action, error: '', ...(cancel ? {} : { phase: 'in-flight' }) });
   const number = ++watch.issued;
   try {
     const value = await client.moveClaude(request);
     if (!current(watch)) return;
     update(watch, { pending: undefined });
     apply(watch, number, value);
+    if (cancel) {
+      // Only an answer that shows the wait gone ends the watch; a wait that already became a move is still watched.
+      const answer = readMoveStatus(value);
+      update(watch, { phase: answer && !moveUnderway(answer) ? 'none' : 'in-flight' });
+    }
   } catch (error) {
     if (!current(watch)) return;
     update(watch, {
@@ -219,6 +228,8 @@ export async function requestMove(client: MoveClient, request: ClaudeMoveRequest
       ),
     });
     if (!cancel) return resolve(watch);
+    // The cancel may not have reached the server, so its wait is treated as still armed.
+    update(watch, { phase: 'in-flight' });
   }
   settle(watch);
   if (!needed(watch)) stop(watch);
