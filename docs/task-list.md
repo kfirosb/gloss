@@ -103,6 +103,21 @@ Verification (2026-10-18):
   - Browser: `PLAYWRIGHT_PORT=4321 npx playwright test`: 315/315 in 2.1 min, no reruns needed.
   - `npm run build` succeeds with Vite's existing chunk-size advisory.
 
+## 27. More languages
+
+Status: captured on 2026-10-19; needs design. The user wants any language the AI can translate, not only Hebrew.
+
+Today the settings model already stores language codes per field (write, send, reply, assist), but `SUPPORTED_LANGUAGES` in `src/core/language-settings.ts` allows only `he` and `en`, and Hebrew is assumed in the UI text, placeholders, dictation (`he`/`en` only), right-to-left layout, and labels such as "Summarize in Hebrew".
+
+- [ ] Let the user pick any language for writing, replies and the assistant; instructions sent to coding agents stay in English (shared constraint).
+- [ ] Decide how the list is offered: a fixed list of common languages, free entry of any language name or code, or both; validate codes instead of the current two-value allowlist.
+- [ ] Set text direction from the chosen language (right-to-left for Hebrew, Arabic, Persian, Urdu and others; left-to-right otherwise) instead of from a Hebrew check.
+- [ ] Replace Hebrew-specific labels and placeholders ("Summarize in Hebrew", "כתוב בעברית…") with the chosen language's name.
+- [ ] Translation prompts: name the target language instead of assuming Hebrew; check quality and placeholder handling on a few very different languages (for example Arabic, Russian, Japanese, Spanish).
+- [ ] Dictation: whisper supports many languages; pass the chosen language, and say clearly when one is not supported.
+- [ ] Decide whether the app's own interface text is translated too, or stays English with only the conversation translated.
+- [ ] Existing users keep Hebrew settings unchanged after the update.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
