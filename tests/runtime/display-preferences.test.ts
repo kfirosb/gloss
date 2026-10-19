@@ -38,6 +38,7 @@ it('recovers from unavailable, corrupt and unknown-version preferences', () => {
       theme: 'dark',
       darkStyle: 'graphite',
       filesSide: 'left',
+      moveWithoutConfirmation: false,
     });
   expect(() =>
     writeDisplayPreferences(readDisplayPreferences(), {
@@ -61,6 +62,7 @@ it('persists validated per-session modes and folder state without routing or cap
       theme: 'dark',
       darkStyle: 'graphite',
       filesSide: 'left',
+      moveWithoutConfirmation: false,
     },
     s,
   );
@@ -75,6 +77,7 @@ it('persists validated per-session modes and folder state without routing or cap
     theme: 'dark',
     darkStyle: 'graphite',
     filesSide: 'left',
+    moveWithoutConfirmation: false,
   });
   const bad = storage(
     '{"version":1,"collapsed":"yes","grouping":"no","assistantModes":{"A":"compact","B":"bad"},"capability":"secret"}',
@@ -90,6 +93,7 @@ it('persists validated per-session modes and folder state without routing or cap
     theme: 'dark',
     darkStyle: 'graphite',
     filesSide: 'left',
+    moveWithoutConfirmation: false,
   });
 });
 
@@ -122,6 +126,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     theme: 'dark',
     darkStyle: 'graphite',
     filesSide: 'left',
+    moveWithoutConfirmation: false,
   });
   writeDisplayPreferences(
     {
@@ -135,6 +140,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
       theme: 'dark',
       darkStyle: 'graphite',
       filesSide: 'left',
+      moveWithoutConfirmation: false,
     },
     s,
   );
@@ -149,6 +155,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     theme: 'dark',
     darkStyle: 'graphite',
     filesSide: 'left',
+    moveWithoutConfirmation: false,
   });
 });
 
@@ -167,6 +174,7 @@ it('keeps long-lived tab order beyond 200 keys and prunes only vanished keys, fo
       theme: 'dark',
       darkStyle: 'graphite',
       filesSide: 'left',
+      moveWithoutConfirmation: false,
     },
     s,
   );
@@ -301,6 +309,19 @@ it('defaults the Files column to the left, round-trips the right and drops a mal
       storage(JSON.stringify({ version: 1, collapsed: true, filesSide: side })),
     );
     expect(read.filesSide).toBe('left');
+    expect(read.collapsed).toBe(true);
+  }
+});
+it('asks before Move to Gloss by default and keeps only a real opt-out', () => {
+  expect(readDisplayPreferences(storage()).moveWithoutConfirmation).toBe(false);
+  const s = storage();
+  writeDisplayPreferences({ ...readDisplayPreferences(s), moveWithoutConfirmation: true }, s);
+  expect(readDisplayPreferences(s).moveWithoutConfirmation).toBe(true);
+  for (const value of ['true', 1, null, {}]) {
+    const read = readDisplayPreferences(
+      storage(JSON.stringify({ version: 1, collapsed: true, moveWithoutConfirmation: value })),
+    );
+    expect(read.moveWithoutConfirmation).toBe(false);
     expect(read.collapsed).toBe(true);
   }
 });

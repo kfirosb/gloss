@@ -34,6 +34,8 @@ export interface DisplayPreferences {
   theme: Theme;
   darkStyle: DarkStyle;
   filesSide: FilesSide;
+  /** "Don't ask again" for Move to Gloss (spec 5.2) on this device: the user's click is then the confirmation. */
+  moveWithoutConfirmation: boolean;
   filesWindow?: FilesWindowGeometry;
 }
 const maxFolders = 500;
@@ -49,6 +51,7 @@ const defaults = (): DisplayPreferences => ({
   theme: 'dark',
   darkStyle: 'graphite',
   filesSide: 'left',
+  moveWithoutConfirmation: false,
 });
 const clampWidth = (w: unknown) =>
   typeof w === 'number' && Number.isFinite(w) ? clampSidebarWidth(w) : defaults().sidebarWidth;
@@ -78,6 +81,7 @@ function validated(value: unknown): DisplayPreferences {
     theme,
     darkStyle,
     filesSide: v.filesSide === 'right' ? 'right' : 'left',
+    moveWithoutConfirmation: v.moveWithoutConfirmation === true,
     assistantModes: Object.fromEntries(
       Object.entries(objectOf(v.assistantModes)).filter(
         ([, mode]) => mode === 'full' || mode === 'compact',
