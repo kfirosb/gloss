@@ -297,9 +297,6 @@ export class SessionClient {
       this.base + '/activity/tasks/' + encodeURIComponent(taskId) + '/output?end=' + end,
     );
   }
-  translateActivityReport(taskId: string) {
-    return this.action({ type: 'translate-activity-report', taskId });
-  }
   async subscribe(listener: (value: SessionEnvelope) => void, signal: AbortSignal) {
     while (!signal.aborted) {
       try {

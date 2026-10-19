@@ -364,9 +364,6 @@ export function createSessionManager(options: {
         case 'translate-message':
           await w.translateMessage(action.sourceId);
           break;
-        case 'translate-activity-report':
-          await w.translateActivityReport(action.taskId);
-          break;
         case 'older-history':
           await w.loadOlderHistory();
           break;

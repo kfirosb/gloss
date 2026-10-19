@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActivityEvent, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
+import type { ActivityEvent, ActivitySnapshot } from '../core/activity-contracts.js';
 import { applyActivityEvent, emptyActivity } from '../core/activity-reducer.js';
 import type { SessionClient } from './session-client.js';
 
@@ -73,81 +73,6 @@ function useStreamSlot(active: boolean): boolean | undefined {
     };
   }, [active]);
   return active ? open : undefined;
-}
-
-/**
- * The finished subagent reports to ask a translation for, recording each in `requested`. A report is
- * asked for once; a resumed agent's new report has a new key, so it is asked for again.
- */
-export function takeReportRequests(
-  sessionId: string,
-  tasks: readonly ActivityTask[],
-  requested: Set<string>,
-): string[] {
-  const ids: string[] = [];
-  for (const task of tasks) {
-    if (task.kind !== 'subagent' || !task.report || task.reportTranslation) continue;
-    const key = JSON.stringify([sessionId, task.id, task.report]);
-    if (requested.has(key)) continue;
-    requested.add(key);
-    ids.push(task.id);
-  }
-  return ids;
-}
-
-/** Translates reports once per view/language, with an explicit retry after failure. */
-export function useReportTranslations(
-  client: Pick<SessionClient, 'translateActivityReport' | 'sessionId'>,
-  tasks: readonly ActivityTask[],
-  translationOn: boolean,
-  replyLanguage: string,
-) {
-  const requested = useRef(new Set<string>());
-  const generation = useRef(0);
-  const scope = useRef({ client, replyLanguage });
-  const mounted = useRef(false);
-  const [failures, setFailures] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    mounted.current = true;
-    // Development-mode effect replay is still the same request scope.
-    if (scope.current.client !== client || scope.current.replyLanguage !== replyLanguage) {
-      scope.current = { client, replyLanguage };
-      generation.current++;
-      requested.current.clear();
-      setFailures(new Set());
-    }
-    return () => {
-      mounted.current = false;
-    };
-  }, [client, replyLanguage]);
-  const request = useCallback(
-    (task: ActivityTask) => {
-      const owner = generation.current;
-      const key = JSON.stringify([client.sessionId, task.id, task.report]);
-      setFailures((previous) => {
-        const next = new Set(previous);
-        next.delete(key);
-        return next;
-      });
-      void client.translateActivityReport(task.id).catch(() => {
-        // A late failure must not mark another session or language's request as failed.
-        if (mounted.current && owner === generation.current)
-          setFailures((previous) => new Set([...previous, key]));
-      });
-    },
-    [client],
-  );
-  useEffect(() => {
-    if (!translationOn) return;
-    const ids = new Set(takeReportRequests(client.sessionId, tasks, requested.current));
-    for (const task of tasks) if (ids.has(task.id)) request(task);
-  }, [client, tasks, translationOn, replyLanguage, request]);
-  return {
-    retry: request,
-    failed: (task: ActivityTask) =>
-      task.reportTranslation?.status === 'error' ||
-      failures.has(JSON.stringify([client.sessionId, task.id, task.report])),
-  };
 }
 
 export interface StreamState {

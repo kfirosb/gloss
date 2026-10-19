@@ -39,7 +39,6 @@ export type Action =
   | { type: 'discard'; draftId: string }
   | { type: 'send'; draftId: string; revision: number; transport?: DeliveryTransport }
   | { type: 'translate-message'; sourceId: string }
-  | { type: 'translate-activity-report'; taskId: string }
   | { type: 'older-history' };
 export interface RuntimeSnapshot {
   sessionId?: string;

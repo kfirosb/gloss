@@ -149,7 +149,7 @@ describe('activity reducer', () => {
     expect(s.tasks[0]).toMatchObject({ status: 'finished', report: 'All good.', finishedAt: 'T' });
     expect(s.running).toBe(0);
   });
-  it('attaches an async subagent report by agentId and resets a stale translation', () => {
+  it('attaches an async subagent report by agentId', () => {
     let s = applyActivityEvent(emptyActivity(), {
       kind: 'task-start',
       task: {
@@ -166,22 +166,13 @@ describe('activity reducer', () => {
     expect(s.tasks[0]).toMatchObject({ status: 'running', report: 'Found it.' });
     s = applyActivityEvent(s, { kind: 'task-end', id: 'a3', status: 'finished', finishedAt: 'T' });
     expect(s.tasks[0]).toMatchObject({ status: 'finished', report: 'Found it.' });
-    const translated = {
-      ...s,
-      tasks: [
-        { ...s.tasks[0]!, reportTranslation: { text: 'נמצא.', status: 'complete' as const } },
-      ],
-    };
-    expect(
-      applyActivityEvent(translated, { kind: 'report', agentId: 'ag3', report: 'Found it.' }),
-    ).toBe(translated);
-    const resumed = applyActivityEvent(translated, {
+    expect(applyActivityEvent(s, { kind: 'report', agentId: 'ag3', report: 'Found it.' })).toBe(s);
+    const resumed = applyActivityEvent(s, {
       kind: 'report',
       agentId: 'ag3',
       report: 'Second run.',
     });
     expect(resumed.tasks[0]!.report).toBe('Second run.');
-    expect(resumed.tasks[0]!.reportTranslation).toBeUndefined();
     const unknown = applyActivityEvent(s, { kind: 'report', agentId: 'nope', report: 'x' });
     expect(unknown).toBe(s);
     const long = applyActivityEvent(s, {

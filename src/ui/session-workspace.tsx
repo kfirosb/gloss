@@ -1243,8 +1243,6 @@ export function SessionWorkspace({
           <ActivityView
             client={client}
             activity={snapshot.activity}
-            translationOn={needsReplyTranslation(languageSettings)}
-            replyLanguage={languageSettings.reply}
             agentIsClaude={isClaude}
             disconnected={snapshot.codingState === 'disconnected'}
           />

@@ -1,15 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  ActivityCall,
-  ActivityEvent,
-  ActivityTask,
-} from '../../src/core/activity-contracts.js';
+import type { ActivityCall, ActivityEvent } from '../../src/core/activity-contracts.js';
 import { emptyActivity } from '../../src/core/activity-reducer.js';
 import {
   ACTIVITY_STREAM_LIMIT,
   StreamSlots,
   foldStreamEvents,
-  takeReportRequests,
 } from '../../src/ui/use-activity-streams.js';
 
 const call = (id: string, position: number): ActivityCall => ({
@@ -107,34 +102,5 @@ describe('activity stream slots', () => {
     const c = recorder();
     slots.claim(c.set);
     expect(c.states).toEqual([true]);
-  });
-});
-
-describe('report translation requests', () => {
-  const report = (text: string, over: Partial<ActivityTask> = {}): ActivityTask => ({
-    kind: 'subagent',
-    id: 'a1',
-    description: 'Review',
-    position: 1,
-    depth: 0,
-    status: 'finished',
-    report: text,
-    ...over,
-  });
-  it('asks once per report, and again when the report changes', () => {
-    const requested = new Set<string>();
-    expect(takeReportRequests('s1', [report('First.')], requested)).toEqual(['a1']);
-    expect(takeReportRequests('s1', [report('First.')], requested)).toEqual([]);
-    expect(takeReportRequests('s1', [report('Second.')], requested)).toEqual(['a1']);
-    expect(takeReportRequests('s2', [report('Second.')], requested)).toEqual(['a1']);
-  });
-  it('skips translated, report-less and background tasks', () => {
-    const requested = new Set<string>();
-    const tasks = [
-      report('Done.', { reportTranslation: { text: 'בוצע.', status: 'complete' } }),
-      report('', { id: 'a2' }),
-      report('Out.', { id: 'b1', kind: 'background' }),
-    ];
-    expect(takeReportRequests('s1', tasks, requested)).toEqual([]);
   });
 });

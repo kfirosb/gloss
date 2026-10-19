@@ -1,13 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActivityCall, ActivitySnapshot, ActivityTask } from '../core/activity-contracts.js';
-import { languageDirection, type LanguageCode } from '../core/language-settings.js';
 import { RichText } from './rich-text.js';
 import type { SessionClient } from './session-client.js';
-import { useOutputTail, useReportTranslations, useSubagentStream } from './use-activity-streams.js';
+import { useOutputTail, useSubagentStream } from './use-activity-streams.js';
 
 type ActivityClient = Pick<
   SessionClient,
-  'sessionId' | 'subagentActivity' | 'outputTail' | 'outputWindow' | 'translateActivityReport'
+  'sessionId' | 'subagentActivity' | 'outputTail' | 'outputWindow'
 >;
 type CardStatus = ActivityTask['status'] | 'unknown';
 /** Pixels from the bottom that still count as "at the bottom" for the output tail's auto-scroll. */
@@ -134,32 +133,12 @@ function SubagentTimeline({
   );
 }
 
-function Report({
-  task,
-  translationOn,
-  replyLanguage,
-}: {
-  task: ActivityTask;
-  translationOn: boolean;
-  replyLanguage: LanguageCode;
-}) {
+function Report({ task }: { task: ActivityTask }) {
   if (!task.report) return null;
-  const translation = task.reportTranslation;
-  if (translationOn && translation?.status === 'complete')
-    return (
-      <div className="activity-report" dir={languageDirection(replyLanguage)}>
-        <RichText language={replyLanguage} text={translation.text} />
-      </div>
-    );
   return (
-    <>
-      <div className="activity-report" dir="ltr">
-        <RichText language="auto" text={task.report} />
-      </div>
-      {translationOn && translation?.status === 'pending' && (
-        <p className="activity-meta">Translating the report…</p>
-      )}
-    </>
+    <div className="activity-report" dir="ltr">
+      <RichText language="auto" text={task.report} />
+    </div>
   );
 }
 
@@ -206,18 +185,10 @@ function TaskCard({
   client,
   task,
   disconnected,
-  translationOn,
-  replyLanguage,
-  translationFailed,
-  retryTranslation,
 }: {
   client: ActivityClient;
   task: ActivityTask;
   disconnected: boolean;
-  translationOn: boolean;
-  replyLanguage: LanguageCode;
-  translationFailed: boolean;
-  retryTranslation: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const status: CardStatus = disconnected && task.status === 'running' ? 'unknown' : task.status;
@@ -288,19 +259,7 @@ function TaskCard({
         <SubagentTimeline client={client} taskId={task.id} active={!disconnected} />
       )}
       {!subagent && open && !disconnected && <OutputPanel client={client} taskId={task.id} />}
-      {subagent && (open || task.status === 'running') && (
-        <>
-          <Report task={task} translationOn={translationOn} replyLanguage={replyLanguage} />
-          {translationOn && translationFailed && (
-            <p className="activity-meta" role="status">
-              Translation unavailable.{' '}
-              <button type="button" className="activity-button" onClick={retryTranslation}>
-                Retry translation
-              </button>
-            </p>
-          )}
-        </>
-      )}
+      {subagent && (open || task.status === 'running') && <Report task={task} />}
     </article>
   );
 }
@@ -308,22 +267,17 @@ function TaskCard({
 export function ActivityView({
   client,
   activity,
-  translationOn,
-  replyLanguage,
   agentIsClaude,
   disconnected,
 }: {
   client: ActivityClient;
   activity: ActivitySnapshot | undefined;
-  translationOn: boolean;
-  replyLanguage: LanguageCode;
   agentIsClaude: boolean;
   disconnected: boolean;
 }) {
   const tasks = activity?.tasks ?? [];
   const calls = activity?.calls ?? [];
   const gaps = activity?.gaps ?? [];
-  const translations = useReportTranslations(client, tasks, translationOn, replyLanguage);
   const newest = [...tasks].reverse();
   const groups = [
     {
@@ -355,10 +309,6 @@ export function ActivityView({
                   client={client}
                   task={task}
                   disconnected={disconnected}
-                  translationOn={translationOn}
-                  replyLanguage={replyLanguage}
-                  translationFailed={translations.failed(task)}
-                  retryTranslation={() => translations.retry(task)}
                 />
               )),
             ])}

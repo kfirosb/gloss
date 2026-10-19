@@ -55,7 +55,6 @@ const activity = (): ActivitySnapshot => ({
       status: 'finished',
       agentType: 'Explore',
       report: 'Found three callers.',
-      reportTranslation: { text: 'נמצאו שלושה קוראים.', status: 'complete' },
     }),
     task({
       id: 'a1',
@@ -105,10 +104,7 @@ async function open(
   await page.route('**/api/sessions/*/claude-channel', (route) =>
     route.fulfill({ json: { state: 'connected' } }),
   );
-  const translations: string[] = [];
   await page.route('**/api/sessions/*/actions', (route) => {
-    const action = route.request().postDataJSON();
-    if (action.type === 'translate-activity-report') translations.push(action.taskId);
     return route.fulfill({ json: { sessionId: snapshot.id, sequence: 1, snapshot } });
   });
   const streams: string[] = [];
@@ -124,7 +120,7 @@ async function open(
     route.fulfill({ json: { text: 'earlier\n', start: 0, end: 8, size: 100 } }),
   );
   await page.goto('/#capability=test');
-  return { translations, streams, snapshot };
+  return { streams, snapshot };
 }
 const activityRadio = (page: Page) =>
   page
@@ -134,7 +130,7 @@ const activityRadio = (page: Page) =>
 test('the Activity view shows running tasks, their streams and the tool timeline', async ({
   page,
 }) => {
-  const { translations } = await open(page, claude);
+  await open(page, claude);
   await expect(activityRadio(page)).toHaveText('Activity2');
   await activityRadio(page).click();
   const view = page.locator('.activity');
@@ -171,9 +167,7 @@ test('the Activity view shows running tasks, their streams and the tool timeline
   await expect(view.locator('[data-status="finished"]')).toHaveCount(1);
   await expect(finished.locator('.activity-report')).toHaveCount(0);
   await finished.getByRole('button', { name: /Find every caller/ }).click();
-  await expect(finished.locator('.activity-report[dir="rtl"]')).toHaveText('נמצאו שלושה קוראים.');
-  // The translated report needs no new translation request.
-  expect(translations).toEqual([]);
+  await expect(finished.locator('.activity-report[dir="ltr"]')).toHaveText('Found three callers.');
 
   const rows = view.locator('.activity-main [data-call]');
   await expect(rows).toHaveCount(3);
@@ -214,29 +208,6 @@ test('a disconnected session shows no running task and opens no stream', async (
   await expect(background.getByRole('button', { name: 'Show output' })).toHaveCount(0);
   await expect(page.locator('[data-task="a0"]')).toHaveAttribute('data-status', 'finished');
   expect(streams).toEqual([]);
-});
-
-test('a finished report is translated once when translation is on', async ({ page }) => {
-  const value = activity();
-  const finished = value.tasks.find((t) => t.id === 'a0');
-  if (finished) {
-    delete finished.reportTranslation;
-    finished.report = 'Found **three** callers.';
-  }
-  const { translations } = await open(page, claude, 'idle', value);
-  await activityRadio(page).click();
-  await page
-    .locator('[data-task="a0"]')
-    .getByRole('button', { name: /Find every caller/ })
-    .click();
-  const report = page.locator('[data-task="a0"] .activity-report');
-  await expect(report).toHaveText('Found three callers.');
-  // The report is markdown, rendered like a reply.
-  await expect(report.locator('strong')).toHaveText('three');
-  await expect.poll(() => translations).toEqual(['a0']);
-  await page.locator('[data-call="c-bash"]').getByRole('button').click();
-  await page.locator('[data-call="c-bash"]').getByRole('button').click();
-  expect(translations).toEqual(['a0']);
 });
 
 test('an expanded subagent lists the tasks it started, outside the main badge', async ({
@@ -303,26 +274,6 @@ test('a third activity stream pauses the oldest until another closes', async ({ 
   await expect.poll(() => streams).toEqual(['a1', 'a2', 'b1', 'a1']);
 });
 
-test('a failed report request can be retried without reopening Activity', async ({ page }) => {
-  const value = activity();
-  delete value.tasks[0]!.reportTranslation;
-  await open(page, claude, 'idle', value);
-  let attempts = 0;
-  await page.route('**/api/sessions/*/actions', async (route) => {
-    if (route.request().postDataJSON().type !== 'translate-activity-report')
-      return route.fallback();
-    attempts++;
-    if (attempts === 1) return route.fulfill({ status: 503, json: { error: 'Unavailable' } });
-    return route.fulfill({ json: {} });
-  });
-  await activityRadio(page).click();
-  const card = page.locator('[data-task="a0"]');
-  await card.getByRole('button', { name: /Find every caller/ }).click();
-  await expect(card.getByRole('button', { name: 'Retry translation' })).toBeVisible();
-  await card.getByRole('button', { name: 'Retry translation' }).click();
-  await expect.poll(() => attempts).toBe(2);
-});
-
 test('an expanded task stays open when it finishes', async ({ page }) => {
   const { snapshot } = await open(page, claude);
   let events: Route | undefined;
@@ -345,17 +296,4 @@ test('an expanded task stays open when it finishes', async ({ page }) => {
     'true',
   );
   await expect(card.locator('[data-call="s-grep"]')).toHaveCount(1);
-});
-
-test('a report translation error offers a manual retry', async ({ page }) => {
-  const value = activity();
-  value.tasks[0]!.reportTranslation = { text: 'Found three callers.', status: 'error' };
-  const { translations } = await open(page, claude, 'idle', value);
-  await activityRadio(page).click();
-  const card = page.locator('[data-task="a0"]');
-  await card.getByRole('button', { name: /Find every caller/ }).click();
-  await expect(card.getByRole('button', { name: 'Retry translation' })).toBeVisible();
-  expect(translations).toEqual([]);
-  await card.getByRole('button', { name: 'Retry translation' }).click();
-  await expect.poll(() => translations).toEqual(['a0']);
 });

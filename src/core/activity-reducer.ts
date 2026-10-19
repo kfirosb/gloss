@@ -117,10 +117,8 @@ export function applyActivityEvent(
         (task) => task.kind === 'subagent' && task.agentId === event.agentId,
       );
       if (index < 0 || state.tasks[index]!.report === report) return state;
-      // A resumed agent hands back a new report; its old translation no longer applies.
-      const { reportTranslation: _stale, ...task } = state.tasks[index]!;
       const tasks = [...state.tasks];
-      tasks[index] = { ...task, report };
+      tasks[index] = { ...state.tasks[index]!, report };
       return withTasks(state, tasks);
     }
     case 'task-output':

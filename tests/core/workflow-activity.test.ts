@@ -1,4 +1,3 @@
-import type { LanguageSettings } from '../../src/core/language-settings.js';
 import { expect, it, vi } from 'vitest';
 import { FakeAgent } from '../helpers/fake-agent.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
@@ -19,15 +18,12 @@ const task = (kind: ActivityTask['kind'], id: string): ActivityTask => ({
 });
 
 function setup() {
-  let settings: LanguageSettings = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
   const agent = new FakeAgent('claude');
   const language = new FakeLanguageSession();
   const store = new MemoryConversationStore();
   const save = vi.spyOn(store, 'save');
-  const putTranslation = vi.spyOn(store, 'putTranslation');
-  const translate = vi.spyOn(language, 'translate');
   const workflow = createWorkflow({
-    languageSettings: () => settings,
+    languageSettings: () => ({ write: 'he', send: 'en', reply: 'he', assist: 'he' }),
     conversationId: 'conv',
     language: 'he',
     languageModel: 'test',
@@ -42,14 +38,8 @@ function setup() {
     language,
     store,
     save,
-    putTranslation,
-    translate,
     workflow,
     emit,
-    setReply(reply: string) {
-      settings = { ...settings, reply };
-      workflow.refreshLanguageSettings();
-    },
   };
 }
 
@@ -90,41 +80,6 @@ it('resets activity on reconnect', async () => {
   }
 });
 
-it('translates a finished subagent report on request and caches it', async () => {
-  const { workflow, emit, language, translate, putTranslation } = setup();
-  language.translationReply = 'הכל טוב.';
-  try {
-    emit({ kind: 'task-start', task: task('subagent', 'a1') });
-    emit({ kind: 'task-end', id: 'a1', status: 'finished', report: 'All good.' });
-    await workflow.connect(target);
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('All good.');
-    await workflow.translateActivityReport('a1');
-    await expect
-      .poll(() => workflow.snapshot().activity!.tasks[0]!.reportTranslation)
-      .toEqual({ text: 'הכל טוב.', status: 'complete' });
-    expect(putTranslation).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceScope: 'conv:activity', sourceId: 'a1' }),
-      'הכל טוב.',
-    );
-    await workflow.translateActivityReport('a1');
-    expect(translate).toHaveBeenCalledTimes(1);
-  } finally {
-    await workflow.close();
-  }
-});
-
-it('refuses a report translation when the task has no report', async () => {
-  const { workflow } = setup();
-  try {
-    await workflow.connect(target);
-    await expect(workflow.translateActivityReport('missing')).rejects.toThrow(
-      'Report unavailable for translation',
-    );
-  } finally {
-    await workflow.close();
-  }
-});
-
 it('publishes a batch of activity events once, not once per event', async () => {
   const { workflow, emit } = setup();
   try {
@@ -139,111 +94,6 @@ it('publishes a batch of activity events once, not once per event', async () => 
     await expect.poll(() => workflow.snapshot().activity?.calls.length).toBe(200);
     await expect.poll(() => listener.mock.calls.at(-1)?.[0].activity?.calls.length).toBe(200);
     expect(listener.mock.calls.length).toBeLessThan(10);
-  } finally {
-    await workflow.close();
-  }
-});
-
-it('answers a report translation request before the translation finishes', async () => {
-  const { workflow, emit, language, translate } = setup();
-  let finish: (text: string) => void = () => {};
-  translate.mockImplementation((text) => {
-    language.translated.push(text);
-    return new Promise<string>((resolve) => {
-      finish = resolve;
-    });
-  });
-  try {
-    emit({ kind: 'task-start', task: task('subagent', 'a1') });
-    emit({ kind: 'task-end', id: 'a1', status: 'finished', report: 'All good.' });
-    await workflow.connect(target);
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('All good.');
-    await workflow.translateActivityReport('a1');
-    expect(workflow.snapshot().activity!.tasks[0]!.reportTranslation?.status).toBe('pending');
-    await expect.poll(() => translate.mock.calls.length).toBe(1);
-    finish('הכל טוב.');
-    await expect
-      .poll(() => workflow.snapshot().activity!.tasks[0]!.reportTranslation)
-      .toEqual({ text: 'הכל טוב.', status: 'complete' });
-  } finally {
-    await workflow.close();
-  }
-});
-
-it('drops a report translation when the report changed while translating', async () => {
-  const { workflow, emit, language, translate } = setup();
-  let finish: (text: string) => void = () => {};
-  translate.mockImplementation((text) => {
-    language.translated.push(text);
-    return new Promise<string>((resolve) => {
-      finish = resolve;
-    });
-  });
-  try {
-    emit({ kind: 'task-start', task: task('subagent', 'a1') });
-    emit({ kind: 'task-launched', id: 'a1', agentId: 'ag1', async: true });
-    emit({ kind: 'report', agentId: 'ag1', report: 'First run.' });
-    await workflow.connect(target);
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('First run.');
-    await workflow.translateActivityReport('a1');
-    await expect.poll(() => translate.mock.calls.length).toBe(1);
-    emit({ kind: 'report', agentId: 'ag1', report: 'Second run.' });
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('Second run.');
-    finish('ריצה ראשונה.');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(workflow.snapshot().activity!.tasks[0]!.reportTranslation).toBeUndefined();
-  } finally {
-    await workflow.close();
-  }
-});
-
-it('invalidates completed report translations when the reply language changes', async () => {
-  const { workflow, emit, language, setReply } = setup();
-  try {
-    emit({ kind: 'task-start', task: task('subagent', 'a1') });
-    emit({ kind: 'task-end', id: 'a1', status: 'finished', report: 'Report.' });
-    await workflow.connect(target);
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('Report.');
-    language.translationReply = 'Hebrew report';
-    await workflow.translateActivityReport('a1');
-    await expect
-      .poll(() => workflow.snapshot().activity?.tasks[0]?.reportTranslation?.status)
-      .toBe('complete');
-    setReply('en');
-    expect(workflow.snapshot().activity?.tasks[0]?.reportTranslation).toBeUndefined();
-    await expect(workflow.translateActivityReport('a1')).rejects.toThrow('Translation is off');
-    setReply('he');
-    await workflow.translateActivityReport('a1');
-    await expect
-      .poll(() => workflow.snapshot().activity?.tasks[0]?.reportTranslation?.text)
-      .toBe('Hebrew report');
-  } finally {
-    await workflow.close();
-  }
-});
-
-it('rejects an in-flight translation across reply language changes, even when switched back', async () => {
-  const { workflow, emit, translate, setReply } = setup();
-  let finish = (_text: string) => {};
-  translate.mockImplementation(
-    () =>
-      new Promise<string>((resolve) => {
-        finish = resolve;
-      }),
-  );
-  try {
-    emit({ kind: 'task-start', task: task('subagent', 'a1') });
-    emit({ kind: 'task-end', id: 'a1', status: 'finished', report: 'Report.' });
-    await workflow.connect(target);
-    await expect.poll(() => workflow.snapshot().activity?.tasks[0]?.report).toBe('Report.');
-    await workflow.translateActivityReport('a1');
-    await expect.poll(() => translate.mock.calls.length).toBe(1);
-    setReply('en');
-    setReply('he');
-    finish('Old Hebrew report');
-    // Drains the promise chain that completes translateReport, without a timing sleep.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(workflow.snapshot().activity?.tasks[0]?.reportTranslation).toBeUndefined();
   } finally {
     await workflow.close();
   }
