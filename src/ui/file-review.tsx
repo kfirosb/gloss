@@ -9,6 +9,13 @@ import {
 import { RichText } from './rich-text.js';
 import { errorMessage } from './error-message.js';
 type Mode = 'summary' | 'translation';
+function SavedMark() {
+  return (
+    <span className="file-review-saved" aria-hidden="true">
+      ✓
+    </span>
+  );
+}
 export function FileReview({
   client,
   preview,
@@ -24,8 +31,30 @@ export function FileReview({
   const [results, setResults] = useState<Partial<Record<Mode, string>>>({});
   const [loading, setLoading] = useState<Mode | null>(null);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState<Partial<Record<Mode, boolean>>>({});
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
+  const { relativePath, version, state } = preview;
+  useEffect(() => {
+    // Only text previews show the chips, so other files need no status request.
+    if (!version || state !== 'text') return;
+    const controller = new AbortController();
+    client
+      .fileReviewStatus(relativePath, version, controller.signal)
+      .then((status) => {
+        if (controller.signal.aborted) return;
+        // Merge: a review finished meanwhile must keep its mark against a slow status response.
+        setSaved((current) => ({
+          summary: current.summary || status.summary,
+          translation: current.translation || status.translation,
+        }));
+      })
+      .catch(() => {
+        // Best-effort: the marks are only a hint, and a failed status request must not
+        // disturb the preview; the chips simply stay unmarked.
+      });
+    return () => controller.abort();
+  }, [client, relativePath, version, state]);
   const review = async (next: Mode) => {
     if (loading) return;
     if (results[next]) {
@@ -48,6 +77,7 @@ export function FileReview({
       if (result.path !== preview.relativePath || result.mode !== next || !result.text.trim())
         throw new Error('File review unavailable; try again');
       setResults((current) => ({ ...current, [next]: result.text }));
+      setSaved((current) => ({ ...current, [next]: true }));
       setMode(next);
     } catch (error) {
       if (!controller.signal.aborted) setError(errorMessage(error, 'File review failed'));
@@ -62,22 +92,30 @@ export function FileReview({
       <div className="file-review-controls" aria-label="File review tools">
         <button
           type="button"
-          title="Brief Hebrew summary"
+          title={saved.summary ? 'Saved summary — shows instantly' : 'Brief Hebrew summary'}
+          data-saved={saved.summary ? 'true' : undefined}
           aria-pressed={mode === 'summary'}
           disabled={!!loading}
           onClick={() => void review('summary')}
         >
           TL;DR
+          {saved.summary && <SavedMark />}
         </button>
         {needsReplyTranslation(languageSettings) && (
           <button
             type="button"
-            title="Translate the full file into Hebrew"
+            title={
+              saved.translation
+                ? 'Saved translation — shows instantly'
+                : 'Translate the full file into Hebrew'
+            }
+            data-saved={saved.translation ? 'true' : undefined}
             aria-pressed={mode === 'translation'}
             disabled={!!loading}
             onClick={() => void review('translation')}
           >
             Translate
+            {saved.translation && <SavedMark />}
           </button>
         )}
         {(mode !== 'original' || loading) && (

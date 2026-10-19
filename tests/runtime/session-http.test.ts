@@ -527,6 +527,20 @@ it('reviews the complete file, authenticates requests and rejects stale previews
   expect(result.status).toBe(200);
   expect((await result.json()).text).toBe('תקציר');
   expect(summary).toHaveBeenCalledWith(text, 'he', expect.any(AbortSignal));
+  const statusRoute =
+    'sessions/A/files/review-status?path=' +
+    encodeURIComponent(relative) +
+    '&version=' +
+    encodeURIComponent(preview.version);
+  expect((await request(statusRoute, 'GET', undefined, false)).status).toBe(401);
+  const status = await request(statusRoute);
+  expect(status.status).toBe(200);
+  expect(status.headers.get('cache-control')).toBe('no-store');
+  expect(await status.json()).toEqual({ summary: true, translation: false });
+  expect((await request('sessions/A/files/review-status?path=&version=')).status).toBe(400);
+  const cached = await request('sessions/A/files/review', 'POST', body);
+  expect((await cached.json()).text).toBe('תקציר');
+  expect(summary).toHaveBeenCalledTimes(1);
   expect(
     (await request('sessions/A/files/review', 'POST', { ...body, mode: 'translation' })).status,
   ).toBe(200);

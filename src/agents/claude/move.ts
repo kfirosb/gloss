@@ -1,6 +1,6 @@
 import { shellQuote } from '../../core/command-text.js';
 import type { LaunchState } from '../../core/session-contracts.js';
-import { claudeActivity } from './activity.js';
+import { claudeActivity } from './coding-state.js';
 import { isClaudeExecutable, type ProcessInfo } from './process-probe.js';
 import { isTerminalRecord, trustedProcStart, type ClaudeSessionRecord } from './session-records.js';
 

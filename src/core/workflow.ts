@@ -41,6 +41,12 @@ import type {
   Target,
 } from './contracts.js';
 import { TRANSLATION_PROMPT_VERSION } from './language-style.js';
+import {
+  FILE_REVIEW_PROMPT_VERSION,
+  type FileReviewKey,
+  type FileReviewMode,
+  type FileReviewScope,
+} from './file-review-contracts.js';
 import { randomUUID } from 'node:crypto';
 import { ResponseSummaries } from './response-summaries.js';
 import type { SummarySource, ResponseSummary } from './summary-contracts.js';
@@ -52,6 +58,8 @@ import {
   type LanguageSettings,
 } from './language-settings.js';
 import { translateMessageResult } from './translations.js';
+import type { ActivityEvent } from './activity-contracts.js';
+import { applyActivityEvent, emptyActivity } from './activity.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
 
 export interface WorkflowDependencies {
@@ -73,9 +81,12 @@ export interface WorkflowDependencies {
 export interface Workflow {
   reviewFileText(
     text: string,
-    mode: 'summary' | 'translation',
+    mode: FileReviewMode,
     signal: AbortSignal,
+    cache?: FileReviewScope,
   ): Promise<string>;
+  /** Which reviews of this file version are already stored for the current language and model. */
+  fileReviewStatus(cache: FileReviewScope): Record<FileReviewMode, boolean>;
   summarizeResponse(source: SummarySource): Promise<ResponseSummary>;
   connect(target: Target): Promise<void>;
   ingestSourceMessage(message: SourceMessage): void;
@@ -93,6 +104,10 @@ export interface Workflow {
   translateComposer(text: string): Promise<string>;
   refreshLanguageSettings(): void;
   translateMessage(sourceId: string): Promise<void>;
+  translateActivityReport(taskId: string): Promise<void>;
+  subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
+  /** The validated path of a background task's output file. */
+  backgroundOutput(taskId: string): Promise<string>;
   prepareDirect(indices: number[], expected?: { id: string; revision: number }): Promise<Draft>;
   sendReview(
     id: string,
@@ -304,7 +319,15 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     });
   };
 
+  /** A scheduled publish of activity changes; any publish before it carries them too. */
+  let activityPublish: ReturnType<typeof setTimeout> | undefined;
+  const cancelActivityPublish = () => {
+    if (activityPublish === undefined) return;
+    clearTimeout(activityPublish);
+    activityPublish = undefined;
+  };
   const publish = (persist = true) => {
+    cancelActivityPublish();
     state.languageSettings = settings;
     state.language = settings.assist;
     if (persist) deps.store.save(copy(state));
@@ -571,9 +594,63 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
   };
 
+  /** Translates one subagent report and writes it back only onto the same task, report and connection. */
+  const translateReport = async (taskId: string, position: number, report: string) => {
+    const generation = connectionGeneration;
+    const target = settings.reply;
+    const abort = new AbortController();
+    activeLanguageOperations.add(abort);
+    let result: { text: string; status: string };
+    try {
+      result = await translateMessageResult(
+        {
+          sourceScope: `${state.id}:activity`,
+          sourceId: taskId,
+          sourceRevision: position,
+          text: report,
+          complete: true,
+          language: target,
+          promptLanguage: languageName(target),
+          model: state.languageModel,
+          promptVersion: TRANSLATION_PROMPT_VERSION,
+          signal: abort.signal,
+        },
+        { store: deps.store, session: deps.languageSession },
+      );
+    } catch {
+      // The translation cache failed; the English report stays in place.
+      result = { text: report, status: 'error' };
+    } finally {
+      activeLanguageOperations.delete(abort);
+    }
+    const current = state.activity?.tasks.find((candidate) => candidate.id === taskId);
+    // A resumed agent may have handed back a new report meanwhile; this translation is of the old one.
+    if (closed || generation !== connectionGeneration || !current || current.report !== report)
+      return;
+    current.reportTranslation = {
+      text: result.text,
+      status: result.status === 'complete' ? 'complete' : 'error',
+    };
+    publish(false);
+  };
+
   /** Channel deliveries Claude has read into its context and not yet answered with a finished turn. */
   const seenChannel = new Set<string>();
   const consumeEvent = async (event: AgentEvent, active: CodingConnection) => {
+    if (event.type === 'activity') {
+      // Activity is derived from the transcript on every attach, so it is published but never persisted.
+      // An attach replays hundreds of events at once, and every publish clones and sends the whole
+      // snapshot, so a batch is published once after the events already delivered are folded.
+      const next = applyActivityEvent(state.activity ?? emptyActivity(), event.event);
+      if (next !== state.activity) {
+        state.activity = next;
+        activityPublish ??= setTimeout(() => {
+          activityPublish = undefined;
+          if (!closed) publish(false);
+        }, 0);
+      }
+      return;
+    }
     if (event.type === 'usage') {
       deps.onUsage?.(event.usage);
       return;
@@ -715,13 +792,24 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     return result;
   };
 
+  const fileReviewKey = (cache: FileReviewScope, mode: FileReviewMode): FileReviewKey => ({
+    ...cache,
+    mode,
+    language: mode === 'summary' ? settings.assist : settings.reply,
+    model: state.languageModel,
+    promptVersion: FILE_REVIEW_PROMPT_VERSION,
+  });
+
   const workflow: Workflow = {
-    async reviewFileText(text, mode, signal) {
+    async reviewFileText(text, mode, signal, cache) {
       requireOpen();
       signal.throwIfAborted();
       if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_CHARS)
         throw new Error(`File review requires text of at most ${MAX_TEXT_CHARS} characters`);
       if (mode !== 'summary' && mode !== 'translation') throw new Error('Invalid file review mode');
+      const key = cache && fileReviewKey(cache, mode);
+      const stored = key && deps.store.getFileReview(key);
+      if (stored !== undefined) return stored;
       const version = languageContextVersion;
       const result = await languageOperation(version, async (operationSignal) => {
         const combined = AbortSignal.any([signal, operationSignal]);
@@ -737,7 +825,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       requireCurrentContext(version);
       if (!result || (mode === 'summary' && result.length > MAX_SUMMARY_CHARS))
         throw new Error('Invalid file review output');
+      // Stored before the manager's post-review re-read; keyed by the pre-review version, so a changed file never gets it.
+      if (key) deps.store.putFileReview(key, result);
       return result;
+    },
+    fileReviewStatus(cache) {
+      requireOpen();
+      return {
+        summary: deps.store.getFileReview(fileReviewKey(cache, 'summary')) !== undefined,
+        translation: deps.store.getFileReview(fileReviewKey(cache, 'translation')) !== undefined,
+      };
     },
     summarizeResponse: (source) => summaries.summarize(source),
     async connect(target) {
@@ -761,6 +858,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!sameTarget(attached.target, target))
         throw new Error('Adapter attached to a different target');
       connection = attached;
+      state.activity = emptyActivity();
       state.capabilities = copy(attached.capabilities);
       delete state.historyCursor;
       const targetUnchanged = state.target !== undefined && sameTarget(state.target, target);
@@ -1562,6 +1660,39 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       translateIfNeeded(message);
     },
 
+    subagentActivity(taskId, signal) {
+      requireOpen();
+      const activity = connection?.activity;
+      if (!activity) throw new Error('Activity unavailable');
+      if (!state.activity?.tasks.some((task) => task.id === taskId))
+        throw new Error('Unknown task');
+      return activity.subagent(taskId, signal);
+    },
+
+    async backgroundOutput(taskId) {
+      requireOpen();
+      const activity = connection?.activity;
+      if (!activity) throw new Error('Activity unavailable');
+      if (!state.activity?.tasks.some((task) => task.id === taskId))
+        throw new Error('Unknown task');
+      return activity.outputPath(taskId);
+    },
+
+    async translateActivityReport(taskId) {
+      requireOpen();
+      const task = state.activity?.tasks.find((candidate) => candidate.id === taskId);
+      const report = task?.report;
+      if (!task || !report) throw new Error('Report unavailable for translation');
+      if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
+      if (task.reportTranslation?.status === 'complete') return;
+      if (task.reportTranslation?.status === 'pending') return;
+      task.reportTranslation = { text: report, status: 'pending' };
+      publish(false);
+      // Like a message translation, the request is answered at once; the pending and finished states
+      // reach the client through snapshots, so a slow translation never holds the request open.
+      void translateReport(taskId, task.position, report);
+    },
+
     subscribe(listener) {
       requireOpen();
       listeners.add(listener);
@@ -1575,6 +1706,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       summaries.close();
       if (closed) return;
       closed = true;
+      cancelActivityPublish();
       connectionGeneration += 1;
       eventAbort?.abort();
       for (const abort of activeLanguageOperations) abort.abort();

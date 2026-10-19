@@ -1,7 +1,10 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
+import { parseClaudeActivity } from './activity.js';
+import { validateBackgroundOutputPath } from './background-output.js';
+import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -31,7 +34,7 @@ import {
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
-import { claudeActivity } from './activity.js';
+import { claudeActivity } from './coding-state.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
 import { isClaudeExecutable, readProcess } from './process-probe.js';
@@ -98,8 +101,11 @@ export type ClaudeProtocolVersion = string;
 export function supportsClaudeProtocol(version: unknown): version is ClaudeProtocolVersion {
   return typeof version === 'string' && version.trim().length > 0;
 }
-export { claudeActivity } from './activity.js';
+export { claudeActivity } from './coding-state.js';
 type ClaudeLiveness = ReturnType<typeof createClaudeLiveness>;
+/** Bounded memory of background output files named in the transcript. */
+const MAX_REMEMBERED_OUTPUTS = 200;
+
 function claudeLiveness(options: ClaudeAdapterOptions): ClaudeLiveness {
   return createClaudeLiveness({
     ...(options.runner ? { runner: options.runner } : {}),
@@ -283,7 +289,12 @@ export function peerTag(requestId: string): string {
 const PEER_MARKER = new RegExp(
   `^\\[(?:gloss:([0-9a-f]{${PEER_TAG_HEX_CHARS}})|Language Assistant delivery: (${REQUEST_ID_SOURCE}))\\]\\n`,
 );
-export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef: string): Parsed {
+export function parseClaudeRecord(
+  record: JsonRecord,
+  offset: number,
+  sessionRef: string,
+  depth = 0,
+): Parsed {
   if (record.sessionId !== undefined && record.sessionId !== sessionRef)
     throw new Error('Transcript identity mismatch');
   // A channel message that arrives during a running turn is queued into it as an attachment.
@@ -300,12 +311,14 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
   const origin = recordOf(record.origin);
   if (record.sessionId !== sessionRef || typeof record.uuid !== 'string' || !message)
     throw new Error('Malformed Claude message');
-  if (record.type === 'assistant' && message.stop_reason !== 'end_turn') return {};
+  const activity = parseClaudeActivity(record, offset, depth);
+  const carried = activity.length ? { activity } : {};
+  if (record.type === 'assistant' && message.stop_reason !== 'end_turn') return carried;
   const peer = record.type === 'user' && origin?.kind === 'peer';
   let deliveryId = peer && typeof origin?.msg_id === 'string' ? origin.msg_id : undefined;
   if (record.isMeta && !peer) {
     const seen = record.type === 'user' ? channelRequest(origin, message.content) : undefined;
-    return seen ? { channelSeen: seen } : {};
+    return seen ? { ...carried, channelSeen: seen } : carried;
   }
   const body = message.content;
   let text = typeof body === 'string' ? body : textBlocks(body).join('\n');
@@ -317,12 +330,13 @@ export function parseClaudeRecord(record: JsonRecord, offset: number, sessionRef
     const markerId = marker?.[1] ?? marker?.[2];
     if (marker && markerId) {
       // Older Claude versions also record our msg_id (the full request id); it must name the same delivery.
-      if (deliveryId && deliveryId !== markerId && peerTag(deliveryId) !== markerId) return {};
+      if (deliveryId && deliveryId !== markerId && peerTag(deliveryId) !== markerId) return carried;
       deliveryId = markerId;
       text = text.slice(marker[0].length);
     }
   }
   return {
+    ...carried,
     ...(text
       ? {
           message: {
@@ -487,7 +501,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       const transcript = new Transcript(
         path,
         (record, offset) => parseClaudeRecord(record, offset, target.sessionRef),
-        options.pageSize,
+        {
+          ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
+          activityLookback: true,
+        },
       );
       /** Reads the transcript for terminal confirmation only, where a queued prompt also counts. */
       const parseTyped = (record: JsonRecord, offset: number) =>
@@ -562,19 +579,31 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         after: number;
         channelDone: boolean;
       };
+      // Background output paths come only from the transcript, keyed by the starting tool_use id.
+      const outputs = new Map<string, { taskId: string; outputPath: string }>();
+      const rememberOutputs = (events: AgentEvent[]) => {
+        for (const event of events) {
+          if (event.type !== 'activity' || event.event.kind !== 'task-output') continue;
+          const { id, taskId, outputPath } = event.event;
+          outputs.delete(id);
+          outputs.set(id, { taskId, outputPath });
+          if (outputs.size > MAX_REMEMBERED_OUTPUTS) outputs.delete(outputs.keys().next().value!);
+        }
+        return events;
+      };
       const feed = {
         get caughtUp() {
           return transcript.caughtUp;
         },
         initialize: () => transcript.initialize(),
         takeInitial: () => [
-          ...transcript.takeInitial(),
+          ...rememberOutputs(transcript.takeInitial()),
           ...pendingChannelEvents.splice(0),
           ...pollReplies(),
         ],
         async poll() {
           return [
-            ...(await transcript.poll()),
+            ...rememberOutputs(await transcript.poll()),
             ...pendingChannelEvents.splice(0),
             ...pollReplies(),
           ];
@@ -960,6 +989,27 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           };
         },
       });
+      connection.activity = {
+        async *subagent(taskId, signal) {
+          const file = await findSubagentFile(subagentsDir(path, target.sessionRef), taskId);
+          if (!file) {
+            yield { kind: 'gap', reason: 'Subagent transcript not found yet' };
+            return;
+          }
+          yield* streamSubagent(file.path, target.sessionRef, file.meta.spawnDepth, signal);
+        },
+        async outputPath(id) {
+          const output = outputs.get(id);
+          const uid = process.getuid?.();
+          if (!output || uid === undefined) throw new Error('Output unavailable');
+          return validateBackgroundOutputPath(output.outputPath, {
+            projectDirName: basename(dirname(path)),
+            sessionRef: target.sessionRef,
+            taskId: output.taskId,
+            uid,
+          });
+        },
+      };
       connection.reconcileDelivery = async (delivery, earlier) => {
         if (
           delivery.target.agent !== target.agent ||

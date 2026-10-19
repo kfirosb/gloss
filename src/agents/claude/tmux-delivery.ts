@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { DIALOG_OPEN_REASON, type AgentMessage } from '../../core/contracts.js';
 import { classifyScreen, markersFor } from '../../runtime/attention-markers.js';
-import { claudeActivity } from './activity.js';
+import { claudeActivity } from './coding-state.js';
 import {
   inputBoxRules,
   inputWindowRows,

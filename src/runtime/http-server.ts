@@ -16,6 +16,7 @@ import { validateLanguageOverride } from '../core/language-settings.js';
 import { isLoopbackHost, isLoopbackOrigin, LOOPBACK_HOST } from './loopback.js';
 import { createAsyncCache } from '../core/async-cache.js';
 import { recordOf } from '../core/json-record.js';
+import { readOutputWindow, tailOutput } from './output-tail.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -318,6 +319,19 @@ async function sessionRoute(
       }
       return true;
     }
+    if (route === 'files/review-status' && req.method === 'GET') {
+      res.setHeader('cache-control', 'no-store');
+      respond(
+        res,
+        200,
+        await app.sessions.fileReviewStatus(
+          id,
+          url.searchParams.get('path') ?? '',
+          url.searchParams.get('version') ?? '',
+        ),
+      );
+      return true;
+    }
     if (route === 'files/media' && req.method === 'GET') {
       const controller = new AbortController();
       const cancel = () => controller.abort();
@@ -399,6 +413,69 @@ async function sessionRoute(
       await pipeline(Readable.from(readReferenceChunks(file)), res);
       return true;
     }
+  }
+  const subagent = /^activity\/subagents\/([^/]+)\/events$/.exec(route);
+  if (subagent && req.method === 'GET') {
+    const controller = new AbortController();
+    const cancel = () => controller.abort(new Error('Client closed subagent stream'));
+    res.once('close', cancel);
+    try {
+      // Validation errors surface here, before any SSE headers are written.
+      const stream = await app.sessions.subagentActivity(
+        id,
+        decodeURIComponent(subagent[1]!),
+        controller.signal,
+      );
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      for await (const event of stream) {
+        if (controller.signal.aborted) break;
+        res.write('data: ' + JSON.stringify(event) + '\n\n');
+      }
+      res.end();
+    } catch (error) {
+      if (!res.headersSent) throw error;
+      res.end();
+    } finally {
+      res.off('close', cancel);
+    }
+    return true;
+  }
+  const output = /^activity\/tasks\/([^/]+)\/output$/.exec(route);
+  if (output && req.method === 'GET') {
+    const endParam = url.searchParams.get('end');
+    const end = endParam === null ? undefined : Number(endParam);
+    if (end !== undefined && (!/^\d+$/.test(endParam!) || !Number.isSafeInteger(end))) {
+      respond(res, 400, { error: 'end must be a non-negative integer' });
+      return true;
+    }
+    // The path comes from the adapter's own parsed events, never from the client.
+    const file = await app.sessions.backgroundOutput(id, decodeURIComponent(output[1]!));
+    if (end !== undefined) {
+      respond(res, 200, await readOutputWindow(file, end));
+      return true;
+    }
+    const controller = new AbortController();
+    const cancel = () => controller.abort(new Error('Client closed output stream'));
+    res.once('close', cancel);
+    try {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      for await (const event of tailOutput(file, controller.signal)) {
+        if (controller.signal.aborted) break;
+        res.write('data: ' + JSON.stringify(event) + '\n\n');
+      }
+      res.end();
+    } finally {
+      res.off('close', cancel);
+    }
+    return true;
   }
   return attachmentRoute(app, req, res, route, id);
 }

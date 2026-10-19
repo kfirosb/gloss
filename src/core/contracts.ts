@@ -1,6 +1,7 @@
 import type { OpenSessionScan } from './session-catalog.js';
 import type { FileReference } from './file-references.js';
 import type { LanguageSettings } from './language-settings.js';
+import type { ActivityEvent, ActivitySnapshot } from './activity-contracts.js';
 export type { FileReference, FileReferenceStore, FileRegistry } from './file-references.js';
 export type AgentKind = 'claude' | 'codex';
 /** Composer request IDs; also embedded in native channel and delivery markers. */
@@ -178,6 +179,7 @@ export type AgentEvent =
   | { type: 'channel-seen'; requestId: string }
   | { type: 'status'; state: CodingState }
   | { type: 'delivery'; requestId: string; state: DeliveryState; reason?: string }
+  | { type: 'activity'; event: ActivityEvent }
   | { type: 'gap'; reason: string };
 export interface CodingConnection {
   target: Target;
@@ -209,6 +211,11 @@ export interface CodingConnection {
     openTerminal?: true;
   }>;
   detach(): Promise<void>;
+  /** Claude-only: on-demand activity detail that is not part of the main event stream. */
+  activity?: {
+    subagent(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
+    outputPath(taskId: string): Promise<string>;
+  };
 }
 export interface SendContext {
   panelSessionId: string;
@@ -289,6 +296,7 @@ export interface ConversationSnapshot {
   sourceSequence?: number;
   capabilities?: AgentCapabilities;
   sourceGaps?: string[];
+  activity?: ActivitySnapshot;
   hostMetadata?: Record<string, unknown>;
 }
 
@@ -326,6 +334,8 @@ export interface ConversationStore {
   releaseComposerAttempt(conversationId: string, requestId: string): void;
   getSummary(key: import('./summary-contracts.js').SummaryKey): string | undefined;
   putSummary(key: import('./summary-contracts.js').SummaryKey, text: string): void;
+  getFileReview(key: import('./file-review-contracts.js').FileReviewKey): string | undefined;
+  putFileReview(key: import('./file-review-contracts.js').FileReviewKey, text: string): void;
   load(id: string): ConversationSnapshot | undefined;
   save(snapshot: ConversationSnapshot): void;
   claimDelivery(delivery: Delivery): boolean;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { clampLayoutSize } from '../core/session-contracts.js';
 import { LIVE_VIEWS, type ConversationView, type LiveView } from './live-view.js';
+import { filesWindowGeometry, type FilesWindowGeometry } from './files-window-geometry.js';
 import { clampSidebarWidth } from './sidebar-frame.js';
 export type AssistantMode = 'full' | 'compact';
 export type Theme = 'light' | 'dark' | 'auto';
@@ -30,6 +31,7 @@ export interface DisplayPreferences {
   sidebarWidth: number;
   theme: Theme;
   darkStyle: DarkStyle;
+  filesWindow?: FilesWindowGeometry;
 }
 const maxFolders = 500;
 const key = 'language-assistant:display:v1';
@@ -64,6 +66,7 @@ function validated(value: unknown): DisplayPreferences {
   const v = value as Partial<DisplayPreferences>;
   const theme = v.theme === 'light' || v.theme === 'dark' || v.theme === 'auto' ? v.theme : 'dark';
   const darkStyle = DARK_STYLES.find((s) => s.value === v.darkStyle)?.value ?? 'graphite';
+  const filesWindow = filesWindowGeometry(v.filesWindow);
   return {
     version: 1,
     collapsed: v.collapsed === true,
@@ -90,6 +93,7 @@ function validated(value: unknown): DisplayPreferences {
         .map(([k, keys]) => [k, keys as string[]])
         .slice(-maxFolders),
     ),
+    ...(filesWindow && { filesWindow }),
   };
 }
 export function readDisplayPreferences(storage?: Storage): DisplayPreferences {

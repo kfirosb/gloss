@@ -93,9 +93,16 @@ for (const [width, height] of [
     await input.press('Enter');
     await expect(input).toHaveValue('Use @same');
     await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
-    await expect(page.getByRole('dialog', { name: 'File preview' })).toContainText('Read only');
+    await expect(page.getByRole('dialog', { name: 'Files' })).toContainText('Read only');
     await page.getByRole('button', { name: 'Attach file', exact: true }).click();
-    await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Files' }).getByRole('status')).toHaveText(
+      'Attached as File 2',
+    );
+    // Attach keeps keyboard focus inside the window, so Escape still closes it.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Files' })).toHaveCount(0);
+    // Opened from the composer's @-mention picker, so closing returns focus there.
+    await expect(input).toBeFocused();
     await expect(input).toHaveValue('Use \u200E@File 2 ');
     await expect(page.locator('.composer .attachment-card')).toHaveCount(2);
     await expect(page.locator('.composer .attachment-card').last()).toContainText('b/same.txt');

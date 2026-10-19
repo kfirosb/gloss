@@ -20,7 +20,8 @@ import type { AgentMessage, Delivery } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
-import { FileBrowser, FilePreviewDialog, FILE_DRAG_TYPE } from './file-browser.js';
+import { FILE_DRAG_TYPE } from './file-browser.js';
+import { FilesWindow } from './files-window.js';
 import { FilePicker, type FilePickerHandle } from './file-picker.js';
 import { InventoryPicker, detectInvocation, type InvocationMention } from './inventory-picker.js';
 import type { CardReference } from './attachment-cards.js';
@@ -50,6 +51,7 @@ import {
 } from './session-client.js';
 import { useWorkspace } from './use-workspace.js';
 
+import { ActivityView } from './activity-view.js';
 import { LiveTerminal } from './live-terminal.js';
 import { ViewRadios } from './live-view-switch.js';
 import { PaneDivider, useWideLayout } from './pane-divider.js';
@@ -57,6 +59,7 @@ import {
   CONVERSATION_VIEWS,
   LIVE_VIEWS,
   LIVE_VIEW_LABELS,
+  NO_ACTIVITY_TOOLTIP,
   NO_TERMINAL_TOOLTIP,
   approvalSwitch,
   historyView,
@@ -322,10 +325,13 @@ export function SessionWorkspace({
   // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
   // A manual choice saves itself and drops this override.
   const [approvalView, setApprovalView] = useState<LiveView | null>(null);
-  // A remembered terminal view falls back to its conversation side while there is no terminal to show.
+  // A remembered terminal view falls back to its conversation side while there is no terminal to show,
+  // and a remembered Activity view does the same for an agent that has no activity to show.
+  const savedView =
+    !isClaude && liveLayout.view === 'activity' ? liveLayout.conversation : liveLayout.view;
   const liveView: LiveView =
     (launchId && approvalView) ||
-    (launchId || !showsTerminal(liveLayout.view) ? liveLayout.view : liveLayout.conversation);
+    (launchId || !showsTerminal(savedView) ? savedView : liveLayout.conversation);
   const conversationView = selectView(liveView, liveLayout.conversation);
   const setLiveLayout = (change: Partial<LiveLayout>) =>
     setPreferences((value) => ({
@@ -557,7 +563,27 @@ export function SessionWorkspace({
     });
   };
   const [filesOpen, setFilesOpen] = useState(false);
+  const filesToggle = useRef<HTMLButtonElement>(null);
+  // Focus returns here when the window closes: the composer for @-mention opens, the link for file links.
+  const filesOpener = useRef<HTMLElement | null>(null);
+  const openFiles = () => {
+    if (!filesOpen)
+      filesOpener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setFilesOpen(true);
+  };
+  const closeFiles = (returnFocus = true) => {
+    setFilesOpen(false);
+    // A reopened window starts without the last attach's outcome.
+    setPreview((current) => current && { ...current, attached: '' });
+    setAttachError('');
+    const opener = filesOpener.current;
+    filesOpener.current = null;
+    if (returnFocus) (opener?.isConnected ? opener : filesToggle.current)?.focus();
+  };
   const [revealedFile, setRevealedFile] = useState('');
+  // Attach failures from the preview pane, kept apart from the workspace-wide error.
+  const [attachError, setAttachError] = useState('');
   const [preview, setPreview] = useState<{
     path: string;
     token: typeof mention;
@@ -572,24 +598,27 @@ export function SessionWorkspace({
   }, []);
   const openPreview = (path: string, token: typeof mention = null) => {
     setError('');
+    setAttachError('');
+    openFiles();
     setPreview({ path, token });
     setMention(null);
   };
   const openFileLink = (href: string, basePath = '') => {
     try {
       const path = localFilePath(href, record.canonicalRoot, basePath);
-      setFilesOpen(true);
       setRevealedFile(path);
       openPreview(path);
     } catch (error) {
       setError(errorMessage(error, 'File unavailable'));
     }
   };
-  const attachPath = async (path: string, token: typeof mention = null) => {
+  /** `fromPreview` reports failure in the preview pane; drops report it in the workspace. */
+  const attachPath = async (path: string, token: typeof mention = null, fromPreview = false) => {
     if (uploadLock.current) return;
     uploadLock.current = true;
     setUploading(true);
     setError('');
+    setAttachError('');
     setPreview((current) => (current?.path === path ? { ...current, attached: '' } : current));
     try {
       const file = await client.referenceFile(path);
@@ -629,7 +658,8 @@ export function SessionWorkspace({
         );
       }
     } catch (e) {
-      if (mounted.current) setError(errorMessage(e, 'File unavailable'));
+      if (mounted.current)
+        (fromPreview ? setAttachError : setError)(errorMessage(e, 'File unavailable'));
     } finally {
       uploadLock.current = false;
       if (mounted.current) setUploading(false);
@@ -1130,6 +1160,16 @@ export function SessionWorkspace({
         value={liveView}
         onChange={chooseLiveView}
         options={LIVE_VIEWS.map((view) => {
+          if (view === 'activity') {
+            const running = snapshot.codingState !== 'disconnected' && snapshot.activity?.running;
+            return {
+              value: view,
+              label: LIVE_VIEW_LABELS[view],
+              disabled: !isClaude,
+              title: isClaude ? undefined : NO_ACTIVITY_TOOLTIP,
+              badge: running ? <span className="live-view-count">{running}</span> : undefined,
+            };
+          }
           const unavailable = showsTerminal(view) && !launchId;
           return {
             value: view,
@@ -1236,7 +1276,17 @@ export function SessionWorkspace({
             }
           />
         )}
-        {liveView !== 'terminal' && (
+        {liveView === 'activity' && (
+          <ActivityView
+            client={client}
+            activity={snapshot.activity}
+            translationOn={needsReplyTranslation(languageSettings)}
+            replyLanguage={languageSettings.reply}
+            agentIsClaude={isClaude}
+            disconnected={snapshot.codingState === 'disconnected'}
+          />
+        )}
+        {liveView !== 'terminal' && liveView !== 'activity' && (
           <div className="live-conversation">
             {liveView === 'split' && (
               <ViewRadios
@@ -1589,144 +1639,136 @@ export function SessionWorkspace({
             <SessionLanguageControl client={client} settings={languageSettings} />
           </div>
           <QuotaBreakDialog provider={record.target.agent} usage={usage?.[record.target.agent]} />
-          <div className="file-workspace">
-            {filesOpen && (
-              <FileBrowser
-                client={client}
-                revealedFile={revealedFile}
-                onPreview={(path) => openPreview(path)}
-                onClose={() => setFilesOpen(false)}
+          <main className="app" dir="rtl">
+            <MovableWorkspace
+              assistantMode={assistantMode}
+              toolbar={
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setAssistantMode(assistantMode === 'full' ? 'compact' : 'full')}
+                  >
+                    {assistantMode === 'full' ? 'Minimize Assistant' : 'Show full Assistant'}
+                  </button>
+                  <button
+                    ref={filesToggle}
+                    type="button"
+                    className="files-toggle"
+                    aria-expanded={filesOpen}
+                    onClick={() => (filesOpen ? closeFiles(false) : openFiles())}
+                  >
+                    Files
+                  </button>
+                </>
+              }
+              layout={data.layout}
+              onLayout={(layout) =>
+                workspace.update((data) => {
+                  data.layout = layout;
+                })
+              }
+              panels={{ live: livePanel, assistant: assistantPanel, composer: composerPanel }}
+              liveSize={liveSize}
+              discussionSize={discussionSize}
+              setLiveSize={setLiveSize}
+              setDiscussionSize={setDiscussionSize}
+            />
+            {snapshot.codingState === 'disconnected' && (
+              <p className="notice">
+                This saved session is unavailable. Your workspace is preserved. Reconnect same
+                target to try again.
+              </p>
+            )}
+            {workspace.conflict && (
+              <aside className="workspace-notice" role="alert">
+                <strong>Workspace changed in another tab</strong>
+                <p>Your local content is preserved until you choose.</p>
+                <details>
+                  <summary>Saved content</summary>
+                  <pre>{workspace.conflict.data.composer}</pre>
+                </details>
+                <button onClick={() => workspace.resolveUseSaved()}>Use saved</button>
+                <button onClick={() => void workspace.resolveKeepLocal()}>Keep local</button>
+              </aside>
+            )}
+            {workspace.error && (
+              <p role="alert">
+                {workspace.error}
+                <button onClick={() => void workspace.flush()}>Retry save</button>
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
+            {review && (
+              <InstructionReviewDialog
+                review={review}
+                open={reviewOpen}
+                busy={preparing}
+                routeReady={routeReady}
+                blocked={
+                  sendGate(snapshot.codingState, snapshot.capabilities, routeTransport) === 'block'
+                }
+                {...(delivery ? { delivery } : {})}
+                error={reviewError}
+                onChange={(value) => saveReview({ ...review, localizedText: value })}
+                onClose={() => setReviewOpen(false)}
+                onSend={() => void sendReview()}
+                onReset={() => {
+                  setResetError('');
+                  setResetOpen(true);
+                }}
               />
             )}
-            <main className="app" dir="rtl">
-              <MovableWorkspace
-                assistantMode={assistantMode}
-                toolbar={
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setAssistantMode(assistantMode === 'full' ? 'compact' : 'full')
-                      }
-                    >
-                      {assistantMode === 'full' ? 'Minimize Assistant' : 'Show full Assistant'}
-                    </button>
-                    <button
-                      type="button"
-                      className="files-toggle"
-                      aria-expanded={filesOpen}
-                      onClick={() => setFilesOpen((value) => !value)}
-                    >
-                      Files
-                    </button>
-                  </>
-                }
-                layout={data.layout}
-                onLayout={(layout) =>
-                  workspace.update((data) => {
-                    data.layout = layout;
-                  })
-                }
-                panels={{ live: livePanel, assistant: assistantPanel, composer: composerPanel }}
-                liveSize={liveSize}
-                discussionSize={discussionSize}
-                setLiveSize={setLiveSize}
-                setDiscussionSize={setDiscussionSize}
-              />
-              {snapshot.codingState === 'disconnected' && (
-                <p className="notice">
-                  This saved session is unavailable. Your workspace is preserved. Reconnect same
-                  target to try again.
-                </p>
-              )}
-              {workspace.conflict && (
-                <aside className="workspace-notice" role="alert">
-                  <strong>Workspace changed in another tab</strong>
-                  <p>Your local content is preserved until you choose.</p>
-                  <details>
-                    <summary>Saved content</summary>
-                    <pre>{workspace.conflict.data.composer}</pre>
-                  </details>
-                  <button onClick={() => workspace.resolveUseSaved()}>Use saved</button>
-                  <button onClick={() => void workspace.resolveKeepLocal()}>Keep local</button>
-                </aside>
-              )}
-              {workspace.error && (
-                <p role="alert">
-                  {workspace.error}
-                  <button onClick={() => void workspace.flush()}>Retry save</button>
-                </p>
-              )}
-              {error && (
-                <p role="alert" className="error">
-                  {error}
-                </p>
-              )}
-              {review && (
-                <InstructionReviewDialog
-                  review={review}
-                  open={reviewOpen}
-                  busy={preparing}
-                  routeReady={routeReady}
-                  blocked={
-                    sendGate(snapshot.codingState, snapshot.capabilities, routeTransport) ===
-                    'block'
-                  }
-                  {...(delivery ? { delivery } : {})}
-                  error={reviewError}
-                  onChange={(value) => saveReview({ ...review, localizedText: value })}
-                  onClose={() => setReviewOpen(false)}
-                  onSend={() => void sendReview()}
-                  onReset={() => {
-                    setResetError('');
-                    setResetOpen(true);
-                  }}
-                />
-              )}
-              <ResetInstructionDialog
-                open={resetOpen}
-                pending={Boolean(delivery && isDeliveryUnresolved(delivery))}
-                busy={preparing}
-                error={resetError}
-                close={() => setResetOpen(false)}
-                reset={() => void resetInstruction()}
-              />
-              <ReplaceInstructionDialog
-                language={snapshot.language}
-                open={replaceOpen}
-                text={indexedDiscussion
-                  .filter((m) => selected.includes(m.index))
-                  .map((m) => m.text)
-                  .join('\n\n---\n\n')}
-                close={() => setReplaceOpen(false)}
-                keep={() => {
-                  setReplaceOpen(false);
-                  setReviewOpen(true);
-                }}
-                replace={() => void prepareSelected(true)}
-              />
-              <SelectionDialog
-                language={snapshot.language}
-                open={selectionOpen}
-                messages={indexedDiscussion.filter((m) => selected.includes(m.index))}
-                close={() => setSelectionOpen(false)}
-                remove={toggleSelection}
-                clear={clearSelection}
-              />
-              {preview && (
-                <FilePreviewDialog
-                  languageSettings={languageSettings}
-                  client={client}
-                  path={preview.path}
-                  busy={uploading}
-                  attachError={error}
-                  attached={preview.attached ?? ''}
-                  onAttach={() => void attachPath(preview.path, preview.token)}
-                  onClose={() => setPreview(null)}
-                />
-              )}
-            </main>
-          </div>
+            <ResetInstructionDialog
+              open={resetOpen}
+              pending={Boolean(delivery && isDeliveryUnresolved(delivery))}
+              busy={preparing}
+              error={resetError}
+              close={() => setResetOpen(false)}
+              reset={() => void resetInstruction()}
+            />
+            <ReplaceInstructionDialog
+              language={snapshot.language}
+              open={replaceOpen}
+              text={indexedDiscussion
+                .filter((m) => selected.includes(m.index))
+                .map((m) => m.text)
+                .join('\n\n---\n\n')}
+              close={() => setReplaceOpen(false)}
+              keep={() => {
+                setReplaceOpen(false);
+                setReviewOpen(true);
+              }}
+              replace={() => void prepareSelected(true)}
+            />
+            <SelectionDialog
+              language={snapshot.language}
+              open={selectionOpen}
+              messages={indexedDiscussion.filter((m) => selected.includes(m.index))}
+              close={() => setSelectionOpen(false)}
+              remove={toggleSelection}
+              clear={clearSelection}
+            />
+          </main>
+          {filesOpen && (
+            <FilesWindow
+              client={client}
+              languageSettings={languageSettings}
+              revealedFile={revealedFile}
+              path={preview?.path ?? null}
+              onSelect={(path) => openPreview(path)}
+              onClose={() => closeFiles()}
+              busy={uploading}
+              attachError={attachError}
+              attached={preview?.attached ?? ''}
+              onAttach={() => preview && void attachPath(preview.path, preview.token, true)}
+              geometry={preferences.filesWindow}
+              onGeometry={(next) => setPreferences((value) => ({ ...value, filesWindow: next }))}
+            />
+          )}
         </ImageSessionContext.Provider>
       </RunCommandContext.Provider>
     </FileLinkContext.Provider>

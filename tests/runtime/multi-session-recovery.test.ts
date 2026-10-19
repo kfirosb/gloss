@@ -335,7 +335,7 @@ it('migrates schema 13 prepared images and old receipts, importing legacy layout
     'ALTER TABLE deliveries DROP COLUMN transport; ALTER TABLE deliveries DROP COLUMN channel_generation;',
   );
   raw.exec(
-    'DROP TABLE session_launches; DROP TABLE session_file_counters; DROP TABLE session_files; DROP TABLE session_workspaces; DROP TABLE panel_sessions; DROP TABLE app_settings; DROP TABLE connected_folders; DROP TABLE session_seen; DROP TABLE language_spend; ALTER TABLE deliveries DROP COLUMN reference_format; DELETE FROM schema_migrations WHERE version > 13',
+    'DROP TABLE session_launches; DROP TABLE session_file_counters; DROP TABLE session_files; DROP TABLE session_workspaces; DROP TABLE panel_sessions; DROP TABLE app_settings; DROP TABLE connected_folders; DROP TABLE session_seen; DROP TABLE language_spend; DROP TABLE file_reviews; ALTER TABLE deliveries DROP COLUMN reference_format; DELETE FROM schema_migrations WHERE version > 13',
   );
   expect(raw.prepare('SELECT max(version) AS version FROM schema_migrations').get()).toMatchObject({
     version: 13,
