@@ -48,7 +48,7 @@ Status: done in 0.17.0 as a second DMG (`Gloss-<version>-x64.dmg`) rather than a
 
 ## 24. Linux build
 
-Status: implemented on 2026-10-19 (branch `linux`); verified in an Ubuntu 24.04 container only, awaiting a Linux user on real hardware. Windows is out of scope: tmux does not exist there.
+Status: shipped in 0.18.0 (2026-10-19); verified in an Ubuntu 24.04 container only, awaiting a Linux user on real hardware. Windows is out of scope: tmux does not exist there.
 
 - [x] Replace `mdfind` in `src/runtime/folder-search.ts` with a Linux backend (a bounded walk of home; no new dependency).
 - [x] Add Linux branches to Codex discovery, the Claude channel registry and setup, and `desktop/main.mjs`; `src/runtime/platform-tools.ts` owns the policy and everything else fails closed.
