@@ -119,7 +119,22 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Current builds are unsigned and not notarized; say so when delivering them. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
-## 7. Replace the installed app only when requested
+## 7. Update the Homebrew tap after publishing
+
+Users can install with `brew install --cask kfirosb/tap/gloss`; the cask lives in the separate public repository `kfirosb/homebrew-tap` (checked out at `~/project/homebrew-tap` on this Mac; clone it there if missing). Update it only after the GitHub release with the DMG and its `.sha256` asset is published, since the script reads the checksum from that release:
+
+```sh
+node scripts/homebrew-cask.mjs --tap ~/project/homebrew-tap
+cd ~/project/homebrew-tap
+brew style --cask kfirosb/tap/gloss
+brew audit --cask --strict --online kfirosb/tap/gloss
+git commit -am 'Update gloss to <version>'
+git push
+```
+
+`brew audit --online` downloads the DMG and verifies the pinned checksum. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
+
+## 8. Replace the installed app only when requested
 
 Building a DMG can happen while the user works. Replacing or restarting the installed app interrupts its backend and any Chrome windows connected to it. Announce that interruption before an authorized installation. If this chat is running inside the app, provide the installer and handoff instructions before shutdown; do not terminate the communication channel unexpectedly.
 
