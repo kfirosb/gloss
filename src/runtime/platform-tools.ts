@@ -5,9 +5,6 @@
  */
 const PROBE_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set<NodeJS.Platform>(['darwin', 'linux']);
 
-export const PS_PATH = '/bin/ps';
-export const PROBES_UNAVAILABLE = 'Process probes are unavailable on this platform';
-
 export function supportsProcessProbes(platform: NodeJS.Platform = process.platform): boolean {
   return PROBE_PLATFORMS.has(platform);
 }
@@ -15,6 +12,15 @@ export function supportsProcessProbes(platform: NodeJS.Platform = process.platfo
 /** macOS ships lsof in /usr/sbin; Linux distributions install it in /usr/bin (and often not by default). */
 export function lsofPath(platform: NodeJS.Platform = process.platform): string {
   return platform === 'darwin' ? '/usr/sbin/lsof' : '/usr/bin/lsof';
+}
+
+/** A probe that could not start because `lsof` is absent: the one Linux failure the user can fix in a minute. */
+export class LsofMissing extends Error {
+  constructor(platform: NodeJS.Platform = process.platform) {
+    super(
+      `lsof is not installed (${lsofPath(platform)}); install it with your package manager (for example apt install lsof)`,
+    );
+  }
 }
 
 /** The system URL/route opener: `open` on macOS, `xdg-open` elsewhere. */

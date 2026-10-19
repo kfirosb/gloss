@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import { collectProcess, runProcess, type ProcessRunner } from '../../runtime/process-runner.js';
-import { lsofPath, supportsProcessProbes } from '../../runtime/platform-tools.js';
+import { LsofMissing, lsofPath, supportsProcessProbes } from '../../runtime/platform-tools.js';
 import { codexHomeDir, projectIdentity, uuid } from '../shared.js';
 import { supportsCodexProtocol, type CodexAdapterOptions } from './index.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
@@ -71,6 +71,7 @@ async function ownedPaths(
       maxOutputBytes: 1024 * 1024,
     }),
   );
+  if (result.outcome.reason === 'spawn-error') throw new LsofMissing();
   if (
     result.outcome.reason !== 'exited' ||
     ![0, 1].includes(result.outcome.code ?? -1) ||
@@ -181,8 +182,12 @@ async function scanWriters(options: CodexAdapterOptions, signal: AbortSignal): P
       try {
         for (const [path, pid] of await ownedPaths(paths, options.runner ?? runProcess, signal))
           scan.owned.set(path.slice(locks.length + 1, -5), pid);
-      } catch {
-        fail('Codex writer ownership verification failed');
+      } catch (error) {
+        fail(
+          error instanceof LsofMissing
+            ? error.message
+            : 'Codex writer ownership verification failed',
+        );
       }
     }
   };

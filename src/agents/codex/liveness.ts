@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { collectProcess, type ProcessRunner } from '../../runtime/process-runner.js';
-import { lsofPath } from '../../runtime/platform-tools.js';
+import { LsofMissing, lsofPath } from '../../runtime/platform-tools.js';
 import { uuid } from '../shared.js';
 
 /**
@@ -169,6 +169,7 @@ export async function processDirectories(
       maxOutputBytes: 256 * 1024,
     }),
   );
+  if (result.outcome.reason === 'spawn-error') throw new LsofMissing();
   if (result.outcome.reason !== 'exited' || ![0, 1].includes(result.outcome.code ?? -1))
     throw new Error('Codex client directory probe failed');
   let pid = 0;

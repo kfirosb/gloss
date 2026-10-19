@@ -254,6 +254,21 @@ it('reports ownership probe failure as incomplete', async () => {
     error: expect.not.stringContaining('private diagnostic'),
   });
 });
+it('names the missing lsof and how to install it when the probe cannot start', async () => {
+  const f = await fixture();
+  await f.add(1);
+  const absent: ProcessRunner = async function* () {
+    yield {
+      type: 'exit',
+      outcome: { code: null, signal: null, reason: 'spawn-error', diagnostics: 'ENOENT' },
+    };
+  };
+  expect(await f.scan(undefined, absent)).toMatchObject({
+    complete: false,
+    candidates: [],
+    error: expect.stringMatching(/lsof is not installed .*install it with your package manager/),
+  });
+});
 it('cancels before enumeration and during writer verification without publishing late candidates', async () => {
   const f = await fixture();
   await f.add(1);
