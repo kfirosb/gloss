@@ -98,6 +98,10 @@ export function SessionTabs({
     [moveSessionId],
   );
   const launchMove = useMoveLauncher();
+  // The tab's Move icon that opened the popover, so pressing it again closes rather than reopens it.
+  const moveOpener = useRef<HTMLButtonElement | null>(null);
+  const askToMove = (key: string, sessionId: string, x: number, y: number) =>
+    launchMove(new SessionClient(sessionId), () => setMovePopover({ key, sessionId, x, y }));
   const [terminalMenu, setTerminalMenu] = useState<{
     terminal: TerminalEntry;
     x: number;
@@ -161,10 +165,10 @@ export function SessionTabs({
           {
             key: 'move',
             content: 'Move to Gloss…',
-            onChoose: () =>
-              launchMove(new SessionClient(moveSessionId), () =>
-                setMovePopover({ key, sessionId: moveSessionId, x, y }),
-              ),
+            onChoose: () => {
+              moveOpener.current = null;
+              askToMove(key, moveSessionId, x, y);
+            },
           },
         ]
       : []),
@@ -263,9 +267,13 @@ export function SessionTabs({
           const selected = !terminalShown && entry.sessionId === selectedId;
           const unselectable = !entry.sessionId || entry.availability === 'unavailable';
           const launchId = entry.launchId;
-          const endLabel = `End ${entry.sessionTitle ?? agentName(entry)}`;
+          const name = entry.sessionTitle ?? agentName(entry);
+          const endLabel = `End ${name}`;
+          const moveLabel = `Move ${name} to Gloss`;
+          const moveId = movable(entry) ? entry.sessionId : undefined;
+          const moveShown = movePopover?.key === entry.key;
           return (
-            // The X is a sibling of the tab because a button cannot contain another button.
+            // The X and the Move icon are siblings of the tab because a button cannot contain another button.
             <span key={entry.key} className="session-tab-item" role="presentation">
               <button
                 role="tab"
@@ -317,6 +325,41 @@ export function SessionTabs({
                   onClick={() => onEnd(launchId)}
                 >
                   ×
+                </button>
+              )}
+              {/* An outside Claude session has nothing to end; its tab offers Move to Gloss in the X's place. */}
+              {moveId && (
+                <button
+                  type="button"
+                  className="session-tab-close session-tab-move"
+                  tabIndex={-1}
+                  aria-label={moveLabel}
+                  title={moveLabel}
+                  aria-haspopup="dialog"
+                  aria-expanded={moveShown}
+                  onClick={(e) => {
+                    if (moveShown) return setMovePopover(null);
+                    moveOpener.current = e.currentTarget;
+                    const box = root.current?.getBoundingClientRect();
+                    const tab = tabFor(entry.key)?.getBoundingClientRect();
+                    askToMove(
+                      entry.key,
+                      moveId,
+                      (tab?.left ?? 0) - (box?.left ?? 0),
+                      (tab?.bottom ?? 0) - (box?.top ?? 0),
+                    );
+                  }}
+                >
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path
+                      d="M6 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V10M8 8l6-6M8 8h3.5M8 8V4.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               )}
             </span>
@@ -408,6 +451,7 @@ export function SessionTabs({
         <div className="session-context" style={{ left: movePopover.x, top: movePopover.y }}>
           <MovePopover
             client={moveClient}
+            opener={moveOpener}
             onClose={(returnFocus) => {
               const key = movePopover.key;
               setMovePopover(null);

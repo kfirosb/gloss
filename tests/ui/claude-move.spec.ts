@@ -183,7 +183,8 @@ test('a move whose connect dialog was closed reports its outcome as the session�
   );
 });
 
-async function tabsWithMove(context: BrowserContext, launched = 'B') {
+/** `launched` runs in a Gloss launch; `codex`, if given, is a Codex session. Every other session is Claude. */
+async function tabsWithMove(context: BrowserContext, launched = 'B', codex?: string) {
   const f = await sessionFixture(context);
   const catalog: CatalogSnapshot = {
     epoch: 'move',
@@ -192,7 +193,11 @@ async function tabsWithMove(context: BrowserContext, launched = 'B') {
     entries: f.records.map((r) => ({
       key: r.id,
       sessionId: r.id,
-      target: { agent: 'claude' as const, sessionRef: r.target.sessionRef, projectId: '/repo' },
+      target: {
+        agent: r.id === codex ? ('codex' as const) : ('claude' as const),
+        sessionRef: r.target.sessionRef,
+        projectId: '/repo',
+      },
       projectKey: '/repo/.git',
       projectName: 'repo',
       sessionTitle: `Session ${r.id}`,
@@ -247,6 +252,56 @@ test('the session tab menu opens one small Move popover only for outside Claude 
   await popover.getByRole('button', { name: 'Move', exact: true }).click();
   await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
   expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
+});
+
+const tabButton = (page: Page, name: string) =>
+  page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('button', { name, exact: true, includeHidden: true });
+
+test('an outside Claude session tab has a Move icon where a launched tab has its ×', async ({
+  page,
+  context,
+}) => {
+  const move = await tabsWithMove(context);
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session B/ }).hover();
+  await expect(tabButton(page, 'End Session B')).toBeVisible();
+  await expect(tabButton(page, 'Move Session B to Gloss')).toHaveCount(0);
+  await expect(tabButton(page, 'End Session A')).toHaveCount(0);
+  const icon = tabButton(page, 'Move Session A to Gloss');
+  await expect(icon).toBeHidden();
+  await tabs.getByRole('tab', { name: /Session A/ }).hover();
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveAttribute('title', 'Move Session A to Gloss');
+  await expect(icon).toHaveAttribute('aria-haspopup', 'dialog');
+  await icon.click();
+  const popover = page.getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  await expect(icon).toHaveAttribute('aria-expanded', 'true');
+  // Pressing the icon again closes its popover rather than reopening it.
+  await icon.click();
+  await expect(popover).toHaveCount(0);
+  expect(move.posts).toEqual([]);
+  await tabs.getByRole('tab', { name: /Session A/ }).hover();
+  await icon.click();
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  move.afterPost({ state: 'in-gloss' });
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
+});
+
+test('a Codex session tab has no Move icon', async ({ page, context }) => {
+  await tabsWithMove(context, 'none', 'A');
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('tab', { name: /Session A/ })
+    .hover();
+  await expect(tabButton(page, 'Move Session A to Gloss')).toHaveCount(0);
+  await expect(tabButton(page, 'Move Session B to Gloss')).toHaveCount(1);
 });
 
 test('a working session in the tab menu popover offers Move when it finishes', async ({
@@ -528,6 +583,23 @@ test('without asking, the tab menu waits for a working session, and an unavailab
     popover.getByText('This Claude session isn’t running in a terminal now.', { exact: true }),
   ).toBeVisible();
   expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
+});
+
+test('without asking, the tab’s Move icon moves at once with one POST and no popover', async ({
+  page,
+  context,
+}) => {
+  await withoutConfirmation(context);
+  const move = await claudeTabsWithMove(context);
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session A/ }).click();
+  move.afterPost({ state: 'moving' });
+  await tabs.getByRole('tab', { name: /Session A/ }).hover();
+  await tabButton(page, 'Move Session A to Gloss').click();
+  await expect(liveNotice(page)).toHaveText('Moving the session to Gloss…');
+  await expect(page.getByRole('dialog', { name: 'Move to Gloss' })).toHaveCount(0);
+  expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
 });
 
 test('Settings → Ask before moving a session restores the popover at once', async ({ page }) => {

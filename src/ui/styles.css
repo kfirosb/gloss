@@ -2614,7 +2614,8 @@ pre {
   background: light-dark(#d9deea, var(--dk-bg-d9deea));
   color: light-dark(#172033, var(--dk-fg-172033));
 }
-.session-tab-item:hover .session-tab-close {
+.session-tab-item:hover .session-tab-close,
+.session-tab-move[aria-expanded='true'] {
   display: flex;
 }
 .session-tab-item:hover .session-tab .activity-dot {
