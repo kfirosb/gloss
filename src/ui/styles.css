@@ -4062,6 +4062,22 @@ button.dictation-finishing .dictation-icon {
   background: light-dark(#2f5bd3, var(--dk-bg-2f5bd3));
   color: #fff;
 }
+.move-anchor {
+  position: relative;
+  flex: none;
+}
+.move-here {
+  border: 1px solid light-dark(#b7c1d4, var(--dk-bg-b7c1d4));
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  background: light-dark(#eef0f5, var(--dk-bg-eef0f5));
+  color: light-dark(#647089, var(--dk-fg-647089));
+}
+.move-anchor > .move-popover {
+  left: 0;
+  right: auto;
+}
 .live-view-dot {
   display: inline-block;
   width: 7px;

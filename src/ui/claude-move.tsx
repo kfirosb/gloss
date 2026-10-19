@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { ClaudeMoveFailure, ClaudeMoveRequest } from '../runtime/claude-move.js';
 import type { SessionClient } from './session-client.js';
 import {
@@ -62,11 +62,14 @@ export function MovePopover({
   client,
   onClose,
   inline = false,
+  opener,
 }: {
   client: MoveClient;
   onClose(returnFocus: boolean): void;
   /** Shown in place (the connect dialog) rather than floating over the page. */
   inline?: boolean;
+  /** The button that toggles the popover; pressing it is not an outside click. */
+  opener?: RefObject<HTMLElement | null>;
 }) {
   const { status, pending, error } = useMoveView(client);
   const id = useId();
@@ -76,8 +79,13 @@ export function MovePopover({
   useEffect(() => {
     root.current?.focus();
     const outside = (event: PointerEvent) => {
-      if (!(event.target instanceof Node && root.current?.contains(event.target)))
-        close.current(false);
+      const { target } = event;
+      if (
+        target instanceof Node &&
+        (root.current?.contains(target) || opener?.current?.contains(target))
+      )
+        return;
+      close.current(false);
     };
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
@@ -144,6 +152,38 @@ export function MovePopover({
       ) : null}
       {error && <p role="alert">{error}</p>}
     </section>
+  );
+}
+/**
+ * The Live Conversation view switch's control for an outside Claude session, where Split and Terminal would be:
+ * it opens the compact popover. Each rendered copy (docked and expanded toolbars) keeps its own popover.
+ */
+export function MoveSessionHere({ client }: { client: MoveClient }) {
+  const [asking, setAsking] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  return (
+    <span className="move-anchor">
+      <button
+        ref={button}
+        type="button"
+        className="move-here"
+        aria-haspopup="dialog"
+        aria-expanded={asking}
+        onClick={() => setAsking((open) => !open)}
+      >
+        Move session here
+      </button>
+      {asking && (
+        <MovePopover
+          client={client}
+          opener={button}
+          onClose={(returnFocus) => {
+            setAsking(false);
+            if (returnFocus) button.current?.focus();
+          }}
+        />
+      )}
+    </span>
   );
 }
 /** The connect dialog's Move to Gloss control: the status in place, and the compact popover to confirm. */

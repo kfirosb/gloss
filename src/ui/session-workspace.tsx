@@ -96,6 +96,7 @@ import {
 import { isHebrew } from '../core/language-style.js';
 import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
 import { useMoveNotice, useMoveShown } from './claude-move-watch.js';
+import { MoveSessionHere } from './claude-move.js';
 import {
   DIALOG_OPEN_REASON,
   isChannelAwaitingReply,
@@ -1175,13 +1176,15 @@ export function SessionWorkspace({
   const newestReply = snapshot.discussion.filter((t) => t.role === 'assistant').at(-1);
   const assistantState: 'arriving' | undefined =
     newestReply && newestReply.complete === false ? 'arriving' : undefined;
+  // Spec 5: an outside Claude session has no terminal to show, so Split and Terminal give way to Move to Gloss.
+  const offerMove = isClaude && !launchId;
   const liveSwitch = (
     <>
       <ViewRadios
         label="Live Conversation view"
         value={liveView}
         onChange={chooseLiveView}
-        options={LIVE_VIEWS.map((view) => {
+        options={LIVE_VIEWS.filter((view) => !(offerMove && showsTerminal(view))).map((view) => {
           if (view === 'activity') {
             const running = snapshot.codingState !== 'disconnected' && snapshot.activity?.running;
             return {
@@ -1204,6 +1207,7 @@ export function SessionWorkspace({
           };
         })}
       />
+      {offerMove && <MoveSessionHere client={client} />}
       {launchId && entry?.attentionNotice && (
         <small className="live-attention-notice" dir="auto">
           {entry.attentionNotice}

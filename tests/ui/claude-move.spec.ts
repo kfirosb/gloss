@@ -341,3 +341,75 @@ test('a popover whose status changes under it drops its confirmation and sends n
   await expect(popover.getByRole('button', { name: 'Move', exact: true })).toHaveCount(0);
   expect(move.posts).toEqual([]);
 });
+
+async function claudeTabsWithMove(context: BrowserContext) {
+  const move = await tabsWithMove(context);
+  for (const record of move.records) record.target.agent = 'claude';
+  await context.route('**/api/sessions/*/claude-route', (r) =>
+    r.fulfill({ json: { transport: null, reason: 'Gloss can’t reach this session yet.' } }),
+  );
+  await context.route('**/api/sessions/*/claude-channel', (r) =>
+    r.fulfill({ json: { state: 'setup-required' } }),
+  );
+  return move;
+}
+const liveViews = (page: Page) =>
+  page.locator('.pane-live > .pane-toolbar').getByRole('radiogroup', {
+    name: 'Live Conversation view',
+  });
+const moveHere = (page: Page) =>
+  page
+    .locator('.pane-live > .pane-toolbar')
+    .getByRole('button', { name: 'Move session here', exact: true });
+
+test('“Move session here” replaces Split and Terminal only for outside Claude sessions', async ({
+  page,
+  context,
+}) => {
+  const move = await claudeTabsWithMove(context);
+  await page.goto('/#capability=test');
+  const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
+  await tabs.getByRole('tab', { name: /Session B/ }).click();
+  await expect(liveViews(page).getByRole('radio', { name: 'Split' })).toBeEnabled();
+  await expect(liveViews(page).getByRole('radio', { name: 'Terminal' })).toBeEnabled();
+  await expect(moveHere(page)).toHaveCount(0);
+  await tabs.getByRole('tab', { name: /Session A/ }).click();
+  await expect(moveHere(page)).toBeVisible();
+  await expect(liveViews(page).getByRole('radio', { name: 'Translated' })).toBeVisible();
+  await expect(liveViews(page).getByRole('radio', { name: 'Split' })).toHaveCount(0);
+  await expect(liveViews(page).getByRole('radio', { name: 'Terminal' })).toHaveCount(0);
+  await moveHere(page).click();
+  const popover = page.locator('.pane-live').getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(CONFIRMATION, { exact: true })).toBeVisible();
+  await popover.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(popover).toHaveCount(0);
+  await expect(moveHere(page)).toBeFocused();
+  expect(move.posts).toEqual([]);
+  await moveHere(page).click();
+  move.afterPost({ state: 'in-gloss' });
+  await popover.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(popover.getByText('This session now runs in Gloss.', { exact: true })).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'move', ...PROCESS }]);
+});
+
+test('“Move session here” for a working session offers Move when it finishes', async ({
+  page,
+  context,
+}) => {
+  const move = await claudeTabsWithMove(context);
+  move.set({ state: 'busy', reason: WORKING, process: PROCESS });
+  await page.goto('/#capability=test');
+  await page
+    .getByRole('tablist', { name: 'Sessions in repo' })
+    .getByRole('tab', { name: /Session A/ })
+    .click();
+  await moveHere(page).click();
+  const popover = page.locator('.pane-live').getByRole('dialog', { name: 'Move to Gloss' });
+  await expect(popover.getByText(WORKING, { exact: true })).toBeVisible();
+  move.afterPost({ state: 'waiting' });
+  await popover.getByRole('button', { name: 'Move when it finishes', exact: true }).click();
+  await expect(
+    popover.getByText('Gloss will move this session when Claude finishes.', { exact: true }),
+  ).toBeVisible();
+  expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
+});
