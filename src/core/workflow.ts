@@ -197,6 +197,10 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     id: turn.id ?? `${state.id}:legacy:${index}`,
     complete: turn.complete ?? Boolean(turn.text.trim()),
   }));
+  // Saved before user messages stopped being translated: nothing would ever complete them.
+  for (const message of state.codingMessages)
+    if (message.role === 'user' && message.translationStatus === 'pending')
+      delete message.translationStatus;
   let connectionGeneration = 0;
   let eventAbort: AbortController | undefined;
   let closed = false;
@@ -305,7 +309,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     }
   };
   const translateIfNeeded = (source: AgentMessage) => {
-    if (!needsReplyTranslation(settings)) return;
+    // The user wrote their own messages in their language; translating the sent English back duplicates it.
+    if (source.role !== 'assistant' || !needsReplyTranslation(settings)) return;
     const current = state.codingMessages.find((message) => message.sourceId === source.sourceId);
     if (!source.complete || !current || current.translationStatus === 'complete') return;
     if (translating.has(source.sourceId)) return;

@@ -230,8 +230,11 @@ it('reopens two sessions, replays sources twice and reconciles without resending
       expect(
         second.app
           .sessions!.snapshot(id)
-          .snapshot.codingMessages.every((m) => m.translationStatus === 'complete'),
-      ).toBe(true),
+          .snapshot.codingMessages.map((m) => [m.role, m.translationStatus]),
+      ).toEqual([
+        ['user', undefined],
+        ['assistant', 'complete'],
+      ]),
     );
     const snapshot = second.app.sessions!.snapshot(id).snapshot;
     expect(snapshot.codingMessages.map((m) => m.sourceId)).toEqual([`${id}-1`, `${id}-2`]);
