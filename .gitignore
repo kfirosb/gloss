@@ -18,3 +18,7 @@ vendor/
 *.dmg.sha256
 .superpowers/
 docs/superpowers/
+scripts/video/out/
+scripts/video/audio/
+scripts/video/frames/
+docs/media/*.mp4

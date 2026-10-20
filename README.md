@@ -10,7 +10,7 @@ Gloss is a local desktop app for macOS and Linux that sits next to the coding-ag
 
 ## What it does
 
-- **Finds your sessions.** Open Codex sessions are discovered automatically and grouped by project and worktree. Closed sessions stay available under *Saved*. You can also start new sessions from inside the app.
+- **Finds your sessions.** Open Claude Code and Codex sessions are discovered automatically and grouped by project and worktree. Closed sessions stay available under *Saved*. You can also start new sessions from inside the app.
 - **Translates the conversation live.** Completed agent replies are translated into your language as they arrive. No separate chat, no copy-paste.
 - **You write Hebrew, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
 - **Dictation.** Press the mic button and speak Hebrew or English. Speech is transcribed on your computer, with no cloud and no extra account, and the text lands in the composer for you to review and send.
@@ -22,6 +22,15 @@ Gloss is a local desktop app for macOS and Linux that sits next to the coding-ag
 
 Translation costs a few extra tokens. You can turn it off per session, and you can pick the language.
 
+## See it in action
+
+Two short videos with narration and captions:
+
+- [**The product**](https://github.com/user-attachments/assets/aa567fa8-fcd5-45b7-bd42-795ac7e1de72): sessions appear on launch, several agents in parallel across projects and worktrees, your language in and the agent's language out in the real terminal, Split and Terminal views, Activity, notifications when an agent finishes, Files with a TL;DR or translation of a long spec, new sessions, Move to Gloss, and the Language Assistant.
+- [**Install and first use**](https://github.com/user-attachments/assets/0b630cf1-e079-458d-a25e-8fafd20463f5): Homebrew or DMG, connecting a folder, the first Codex session, the first Hebrew message, Claude Code sessions, language settings.
+
+https://github.com/user-attachments/assets/aa567fa8-fcd5-45b7-bd42-795ac7e1de72
+
 ## Status
 
 Gloss is an early open-source release. What is verified today:
@@ -29,8 +38,8 @@ Gloss is an early open-source release. What is verified today:
 | Area | Status |
 |------|--------|
 | Platform | macOS 13 or newer. Every release ships two builds: Apple Silicon (`-arm64.dmg`, tested on the maintainer's Mac) and Intel (`-x64.dmg`, verified under Rosetta only; reports from Intel Macs are welcome). Linux x64 (deb, AppImage) and arm64 (deb), so far verified only in a container |
-| Codex CLI | Fully supported. Automatic session discovery is pinned to Codex 0.154.0, 0.157.1 and 0.158.0 |
-| Claude Code | Experimental. Sessions are connected manually and delivery uses an experimental channel |
+| Codex CLI | Fully supported. Open sessions are discovered automatically; Gloss checks each session's local protocol and fails closed when it cannot read one |
+| Claude Code | Supported. Open sessions are discovered automatically. Sessions started from Gloss are ready to send to at once; a session started in your own terminal can be moved into Gloss with its history (*Move to Gloss*) |
 | Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
 
 ## Install the Mac app
@@ -65,11 +74,11 @@ Prefer the deb when you use Claude Code channels: the channel configuration Glos
 
 ### First run
 
-1. Start a Codex session in your terminal as usual.
+1. Start a Claude Code or Codex session in your terminal as usual.
 2. Open Gloss. The session appears in the sidebar within a few seconds. Select it.
-3. The agent's replies start appearing translated. Type in Hebrew in the composer, press *Send to Codex in English*, and review the English text before it goes.
+3. The agent's replies start appearing translated. Type in Hebrew in the composer, send it, and the agent receives a concise English instruction. *Discuss first* lets you review and refine it before it goes.
 
-For Claude Code, use *Connect folder* in the session picker and follow the setup and consent flow shown in the app.
+To send to a Claude Code session started in your own terminal, press *Move to Gloss* in the session's connection panel, or start new sessions from Gloss with the **+** button.
 
 ## Run from source
 
