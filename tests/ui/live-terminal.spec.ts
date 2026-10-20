@@ -104,7 +104,7 @@ const storedView = (page: Page) =>
     };
     return saved.liveViews?.['L-panel']?.view;
   });
-const feed = (page: Page) => page.getByRole('region', { name: 'Live Hebrew conversation' });
+const feed = (page: Page) => page.getByRole('region', { name: 'Live conversation' });
 /** The notice next to the docked panel's view switch (the expanded panel renders its own copy). */
 const notice = (page: Page) => page.locator('.pane-live > .pane-toolbar .live-attention-notice');
 const expand = (page: Page) =>

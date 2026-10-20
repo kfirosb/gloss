@@ -76,7 +76,7 @@ export function ResponseSummaryView({
           aria-label={languageName(assist) + ' summary'}
           dir={languageDirection(assist)}
         >
-          <strong>{assist === 'he' ? 'תקציר בעברית' : 'Summary'}</strong>
+          <strong>Summary</strong>
           <RichText language={assist} text={text} />
         </aside>
       )}

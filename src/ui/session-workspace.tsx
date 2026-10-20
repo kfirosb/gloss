@@ -92,6 +92,7 @@ import { clampLayoutSize, type SessionRecord } from '../core/session-contracts.j
 import { SessionLanguageControl } from './language-controls.js';
 import {
   languageDirection,
+  languageName,
   legacyLanguageSettings,
   needsReplyTranslation,
 } from '../core/language-settings.js';
@@ -1234,7 +1235,7 @@ export function SessionWorkspace({
     </>
   );
   const liveFeed = (
-    <section ref={feed} className="feed" aria-label="Live Hebrew conversation">
+    <section ref={feed} className="feed" aria-label="Live conversation">
       {liveHistory && snapshot.historyCursor && (
         <button
           onClick={() => {
@@ -1354,7 +1355,9 @@ export function SessionWorkspace({
     >
       <section ref={discussionFeed} className="discussion" aria-label="Language discussion">
         {snapshot.discussion.length === 0 && (
-          <p className="discussion-empty">כתבו כאן בעברית כדי לדון ולחדד את הבקשה.</p>
+          <p className="discussion-empty">
+            Write here in {languageName(languageSettings.assist)} to discuss and refine the request.
+          </p>
         )}
         {visibleDiscussion.map((m) => (
           <article
@@ -1365,7 +1368,9 @@ export function SessionWorkspace({
             }
           >
             <small>
-              {m.role === 'user' ? 'You · language assistant' : 'Language assistant · Hebrew reply'}
+              {m.role === 'user'
+                ? 'You · language assistant'
+                : `Language assistant · ${languageName(languageSettings.assist)} reply`}
             </small>
             <SummarizableResponse
               client={client}
@@ -1513,7 +1518,7 @@ export function SessionWorkspace({
           void sendComposer();
         }}
       >
-        <label htmlFor="composer">שוחח עם עוזר השפה</label>
+        <label htmlFor="composer">Chat with the language assistant</label>
         <div className="composer-input" dir={languageDirection(languageSettings.write)}>
           <textarea
             aria-autocomplete="list"
@@ -1584,7 +1589,7 @@ export function SessionWorkspace({
               }
             }}
             dir={languageDirection(languageSettings.write)}
-            placeholder={languageSettings.write === 'he' ? 'כתוב בעברית…' : 'Write in English…'}
+            placeholder={`Write in ${languageName(languageSettings.write)}…`}
           />
           <span className="dictation-control">
             <DictationButton dictation={dictation} language={dictationLanguage} />
@@ -1698,7 +1703,7 @@ export function SessionWorkspace({
           <QuotaBreakDialog provider={record.target.agent} usage={usage?.[record.target.agent]} />
           <div className="file-workspace" data-side={preferences.filesSide}>
             {preferences.filesSide === 'left' && filesColumn}
-            <main className="app" dir="rtl">
+            <main className="app" dir={languageDirection(languageSettings.write)}>
               <MovableWorkspace
                 assistantMode={assistantMode}
                 toolbar={

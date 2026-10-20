@@ -782,7 +782,6 @@ pre {
   min-height: 0;
   overflow: auto;
   padding: 6px 24px;
-  direction: ltr;
 }
 .review-body .rich-text {
   font-size: 1.1rem;
@@ -793,7 +792,6 @@ pre {
   height: 100%;
   min-height: 200px;
   max-height: none;
-  direction: ltr;
   resize: none;
   font:
     15px/1.7 ui-monospace,
@@ -849,14 +847,8 @@ pre {
 .conversation-sections > .pane-assistant {
   flex: 1 1 auto;
 }
-.review-body {
-  direction: rtl;
-}
-.review-body[dir='ltr'] {
-  direction: ltr;
-}
+/* Review bodies take the direction of the nearest dir: the conversation root or their dialog. */
 .review-body textarea {
-  direction: rtl;
   font-family: inherit;
   font-size: 1.1rem;
 }

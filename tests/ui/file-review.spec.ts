@@ -48,11 +48,14 @@ test('file review provides a cached TL;DR and translation with original availabl
   await expect(summaryChip).toHaveAttribute('data-saved', 'true');
   await expect(summaryChip).toHaveAttribute('title', 'Saved summary — shows instantly');
   await expect(translateChip).not.toHaveAttribute('data-saved', 'true');
+  await expect(translateChip).toHaveAttribute('title', 'Translate the full file into Hebrew');
   await summaryChip.click();
   await expect(dialog.getByLabel('File summary')).toContainText('תקציר התוכנית');
+  await expect(dialog.getByLabel('File summary').locator('> strong')).toHaveText('Summary');
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeHidden();
   await dialog.getByRole('button', { name: 'Translate', exact: true }).click();
   await expect(dialog.getByLabel('File translation')).toContainText('תרגום מלא של התוכנית');
+  await expect(dialog.getByLabel('File translation').locator('> strong')).toHaveText('Translation');
   await expect(translateChip).toHaveAttribute('data-saved', 'true');
   await dialog.getByRole('button', { name: 'Show original', exact: true }).click();
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
@@ -102,6 +105,10 @@ test('review errors preserve the original and let the user retry', async ({ page
     .locator('.files-window-preview');
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByRole('alert')).toHaveText('Try again');
+  await expect(dialog.getByRole('button', { name: 'TL;DR', exact: true })).toHaveAttribute(
+    'title',
+    'Brief summary in Hebrew',
+  );
   await expect(dialog.getByRole('heading', { name: 'Original plan' })).toBeVisible();
   await dialog.getByRole('button', { name: 'TL;DR', exact: true }).click();
   await expect(dialog.getByLabel('File summary')).toContainText('תקציר');

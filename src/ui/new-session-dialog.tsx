@@ -4,7 +4,6 @@ import { sessionRequest } from './session-client.js';
 import {
   LANGUAGE_FIELDS,
   SUPPORTED_LANGUAGES,
-  languageName,
   type LanguageOverride,
   type LanguageSettings,
 } from '../core/language-settings.js';
@@ -14,6 +13,7 @@ import {
   type LaunchAgent,
 } from '../core/session-contracts.js';
 import { errorMessage } from './error-message.js';
+import { languageOptionLabel } from './language-controls.js';
 
 declare global {
   interface Window {
@@ -248,7 +248,7 @@ export function NewSessionDialog({
                 >
                   {SUPPORTED_LANGUAGES.map((c) => (
                     <option key={c} value={c}>
-                      {languageName(c)}
+                      {languageOptionLabel(c)}
                     </option>
                   ))}
                 </select>

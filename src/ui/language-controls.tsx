@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import {
   LANGUAGE_FIELDS,
   SUPPORTED_LANGUAGES,
+  languageDirection,
   languageName,
   languageShortCode,
   needsReplyTranslation,
@@ -39,11 +40,16 @@ export type SessionLanguage = {
   effective: LanguageSettings;
 };
 const labels: Record<keyof LanguageSettings, [string, string]> = {
-  write: ['I write in', 'Sets the composer direction (Hebrew is right to left)'],
+  write: ['I write in', 'Sets the composer direction'],
   send: ['Send to the agent in', 'What the coding session receives'],
   reply: ['Show agent replies in', 'English shows the original text, no translation'],
   assist: ['Language Assistant speaks', 'The discussion with the assistant'],
 };
+/** Menu text for a language; right-to-left languages say so, since they change the layout. */
+export function languageOptionLabel(code: string) {
+  const name = languageName(code);
+  return languageDirection(code) === 'rtl' ? `${name} (RTL)` : name;
+}
 function Fields({
   value,
   onChange,
@@ -65,8 +71,7 @@ function Fields({
           >
             {SUPPORTED_LANGUAGES.map((code) => (
               <option key={code} value={code}>
-                {languageName(code)}
-                {code === 'he' ? ' (RTL)' : ''}
+                {languageOptionLabel(code)}
               </option>
             ))}
           </select>
