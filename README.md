@@ -47,7 +47,7 @@ The cask installs the build for your chip (Apple Silicon or Intel); later releas
 2. Open the DMG and drag the app into *Applications*.
 3. Launch it from Spotlight or the Dock.
 
-Releases are signed with the maintainer's Apple Developer ID and notarized by Apple, so macOS opens them without a security prompt. Releases before 0.18.0 were ad-hoc signed: if you still have one and macOS says it cannot verify the app, choose *Done*, then open *System Settings > Privacy & Security* and click *Open Anyway*.
+Releases are signed with the maintainer's Apple Developer ID and notarized by Apple, so macOS opens them without a security prompt. Releases before 0.19.0 were ad-hoc signed: if you still have one and macOS says it cannot verify the app, choose *Done*, then open *System Settings > Privacy & Security* and click *Open Anyway*.
 
 ## Install on Linux
 
