@@ -1,4 +1,5 @@
-import { englishProductTerms, isHebrew } from './language-style.js';
+import { englishProductTerms } from './language-style.js';
+import { resolveLanguage } from './language-settings.js';
 import { createHash } from 'node:crypto';
 import type { ConversationStore, LanguageSession, TranslationKey } from './contracts.js';
 
@@ -25,9 +26,11 @@ const literalPattern =
   /⟪LITERAL_\d+⟫|```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s)\]}>,]+|(["'])(?=(?:[A-Za-z]:\\|\\\\|\.\.?\/|\/|(?:[\w.-]+\/)+))[^"'\r\n]+\1|(?:[A-Za-z]:\\|\\\\)(?:[^\\\r\n]+?\\)*?[^\\\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:\.\.?\/|\/)(?:[^/\r\n]+?\/)*?[^/\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:[A-Za-z]:\\|\\\\)[\w@%+.,~#=\\-]+|(?:\.\.?\/|\/|(?:[\w.-]+\/)+)(?:\\ |[\w@%+.,~#=\\\-/])+/g;
 
 const protectLiterals = (text: string, language: string) => {
-  const pattern = isHebrew(language)
-    ? new RegExp(literalPattern.source + '|\\b(?:' + englishProductTerms.join('|') + ')\\b', 'g')
-    : literalPattern;
+  const code = resolveLanguage(language)?.code;
+  const pattern =
+    code && code !== 'en'
+      ? new RegExp(literalPattern.source + '|\\b(?:' + englishProductTerms.join('|') + ')\\b', 'g')
+      : literalPattern;
   const literals: string[] = [];
   return {
     text: text.replace(pattern, (literal) => {

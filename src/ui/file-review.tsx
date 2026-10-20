@@ -3,6 +3,7 @@ import type { FilePreview } from '../core/file-references.js';
 import type { SessionClient } from './session-client.js';
 import {
   languageDirection,
+  languageName,
   needsReplyTranslation,
   type LanguageSettings,
 } from '../core/language-settings.js';
@@ -92,7 +93,11 @@ export function FileReview({
       <div className="file-review-controls" aria-label="File review tools">
         <button
           type="button"
-          title={saved.summary ? 'Saved summary — shows instantly' : 'Brief Hebrew summary'}
+          title={
+            saved.summary
+              ? 'Saved summary — shows instantly'
+              : `Brief summary in ${languageName(languageSettings.assist)}`
+          }
           data-saved={saved.summary ? 'true' : undefined}
           aria-pressed={mode === 'summary'}
           disabled={!!loading}
@@ -107,7 +112,7 @@ export function FileReview({
             title={
               saved.translation
                 ? 'Saved translation — shows instantly'
-                : 'Translate the full file into Hebrew'
+                : `Translate the full file into ${languageName(languageSettings.reply)}`
             }
             data-saved={saved.translation ? 'true' : undefined}
             aria-pressed={mode === 'translation'}
@@ -148,13 +153,7 @@ export function FileReview({
           aria-label={mode === 'summary' ? 'File summary' : 'File translation'}
           dir={languageDirection(code)}
         >
-          <strong>
-            {mode === 'summary'
-              ? languageSettings.assist === 'he'
-                ? 'תקציר הקובץ'
-                : 'File summary'
-              : 'תרגום הקובץ לעברית'}
-          </strong>
+          <strong>{mode === 'summary' ? 'Summary' : 'Translation'}</strong>
           <RichText language={code} text={results[mode] ?? ''} />
         </section>
       )}

@@ -4,7 +4,7 @@ import { FileLinkContext, isLocalFileLink } from './file-links.js';
 import { RunCommandContext, runnableCommand } from './run-command.js';
 import remarkGfm from 'remark-gfm';
 import type { Root, RootContent } from 'mdast';
-import { isHebrew } from '../core/language-style.js';
+import { languageDirection, resolveLanguage } from '../core/language-settings.js';
 import { errorMessage } from './error-message.js';
 
 function highlights() {
@@ -102,17 +102,12 @@ export function RichText({ text, language = 'auto' }: { text: string; language?:
   const files = useContext(FileLinkContext);
   // Translations have a known language. First-strong-character detection is
   // incorrect when a Hebrew reply opens with a file reference or product name.
-  const direction =
-    language === 'auto'
-      ? 'auto'
-      : isHebrew(language) || /^(iw|ar|fa|ur)(-|$)/i.test(language.trim())
-        ? 'rtl'
-        : 'ltr';
+  const direction = language === 'auto' ? 'auto' : languageDirection(language);
   return (
     <div
       className="rich-text"
       dir={direction}
-      lang={language === 'auto' ? undefined : isHebrew(language) ? 'he' : language.trim()}
+      lang={language === 'auto' ? undefined : (resolveLanguage(language)?.code ?? language.trim())}
     >
       <Markdown
         urlTransform={(url) => (files && isLocalFileLink(url) ? url : defaultUrlTransform(url))}

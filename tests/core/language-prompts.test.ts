@@ -19,7 +19,8 @@ describe('language prompts', () => {
     expect(he).toContain('natural, fluent Hebrew');
     expect(en).toContain('in clear English');
     expect(en).not.toContain('Hebrew');
-    expect(summaryPrompt('text')).toContain('in clear Hebrew');
+    expect(summaryPrompt('text', 'fr')).toContain('in clear French');
+    expect(translationPrompt('x', 'Arabic')).toContain('fluent Arabic');
     expect(SUMMARY_PROMPT_VERSION).not.toBe('he-summary-v1');
   });
   it('preparation prompt does not force englishText to English when delivering in Hebrew', () => {

@@ -158,7 +158,7 @@ it('retries identification of a launch behind the capability, with 404 for unkno
 it('rejects an invalid language override without launching', async () => {
   const launcher = fakeLauncher();
   const { request } = await setup(launcher);
-  for (const bad of [{ reply: 'fr' }, 'he', [1]])
+  for (const bad of [{ reply: 'xx' }, 'he', [1]])
     expect(
       (await request('launches', 'POST', { agent: 'claude', folder: '/p', languageOverride: bad }))
         .status,

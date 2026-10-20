@@ -6,6 +6,7 @@ import {
   type Draft,
   type Delivery,
 } from '../core/contracts.js';
+import { languageDirection, languageName } from '../core/language-settings.js';
 import { RichText } from './rich-text.js';
 import { providerLabel } from './provider-label.js';
 export interface InstructionReview {
@@ -19,6 +20,7 @@ export function InstructionReviewDialog({
   blocked,
   routeReady = true,
   delivery,
+  sendLanguage,
   error,
   onChange,
   onClose,
@@ -31,6 +33,8 @@ export function InstructionReviewDialog({
   blocked: boolean;
   delivery?: Delivery;
   error: string;
+  /** The session's effective send language, named in the hint. */
+  sendLanguage: string;
   /** False while Gloss has no route to the session (Claude only). */
   routeReady?: boolean;
   onChange(text: string): void;
@@ -81,14 +85,14 @@ export function InstructionReviewDialog({
         </button>
       </div>
       <p className="review-hint">
-        Review and edit in Hebrew. Send delivers the equivalent concise English instruction to the
-        coding agent.
+        Review and edit in {languageName(review.draft.language)}. Send delivers the equivalent
+        concise {languageName(sendLanguage)} instruction to the coding agent.
       </p>
       <div className="review-body">
         {editing ? (
           <textarea
-            dir="rtl"
-            aria-label="Edit Hebrew instruction"
+            dir={languageDirection(review.draft.language)}
+            aria-label="Edit instruction"
             disabled={busy || pending}
             value={review.localizedText}
             onChange={(e) => onChange(e.target.value)}

@@ -31,6 +31,7 @@ test('changing the assistant language discards a summary in the previous languag
   const article = page.locator('[data-source-id="reply"]');
   await article.getByRole('button', { name: 'Summarize in Hebrew' }).click();
   await expect(article.getByText('תקציר ישן')).toBeVisible();
+  await expect(article.locator('.response-summary > strong')).toHaveText('Summary');
 
   f.snapshots.A.languageSettings = { write: 'he', send: 'en', reply: 'he', assist: 'en' };
   f.sequences.A = (f.sequences.A ?? 0) + 1;

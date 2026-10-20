@@ -162,6 +162,7 @@ describe('SqliteStore', () => {
     store.save(state);
     state.codingMessages[1]!.translationStatus = 'complete';
     state.codingMessages[1]!.translatedText = 'translated reply';
+    state.codingMessages[1]!.translationLanguage = 'he';
     state.codingMessages[1]!.timestamp = '2026-09-24T08:00:00Z';
     store.save(state);
     store.close();
@@ -170,8 +171,10 @@ describe('SqliteStore', () => {
       revision: 3,
       translationStatus: 'complete',
       translatedText: 'translated reply',
+      translationLanguage: 'he',
       timestamp: '2026-09-24T08:00:00Z',
     });
+    expect(reopened.load(state.id)?.codingMessages[0]).not.toHaveProperty('translationLanguage');
     reopened.close();
   });
 

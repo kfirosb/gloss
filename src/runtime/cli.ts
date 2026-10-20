@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { INITIAL_LANGUAGE_DEFAULTS } from '../core/language-settings.js';
 import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
 function isEntry() {
   return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]!).href;
@@ -19,6 +20,12 @@ export function parseArgs(args: string[]) {
     } else out[key] = 'true';
   }
   return out;
+}
+export function resolveLaunchLanguage(flags: Record<string, string>): string {
+  const language = flags.language ?? INITIAL_LANGUAGE_DEFAULTS.write;
+  if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})?$/.test(language))
+    throw new Error('Unsupported language');
+  return language;
 }
 export async function launch(args: string[]) {
   const flags = parseArgs(args);
@@ -38,9 +45,7 @@ export async function launch(args: string[]) {
     const { startClaudeChannel } = await import('../agents/claude/channel-server.js');
     return startClaudeChannel();
   }
-  const language = flags.language ?? 'he';
-  if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})?$/.test(language))
-    throw new Error('Unsupported language');
+  const language = resolveLaunchLanguage(flags);
   if (flags.agent && flags.agent !== 'claude' && flags.agent !== 'codex')
     throw new Error('Unsupported agent');
   if (flags.agent && !flags.session)

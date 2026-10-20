@@ -15,7 +15,7 @@ for (const [width, height] of [
     await page.getByLabel('Panel layout').selectOption('rows');
     await page.getByRole('button', { name: 'Minimize Assistant', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Language discussion' })).toBeHidden();
-    await expect(page.getByRole('region', { name: 'Live Hebrew conversation' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Live conversation' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Send to Terminal in English' })).toBeVisible();
     await page.reload();
     await expect(input).toHaveValue('Keep this draft');

@@ -56,7 +56,7 @@ it('reads and replaces defaults; rejects invalid codes without changing them', a
   });
   expect((await request('settings/language', 'PUT', en)).status).toBe(200);
   for (const bad of [
-    { ...en, reply: 'fr' },
+    { ...en, reply: 'xx' },
     { ...en, write: '' },
     { ...en, send: 123 },
   ])

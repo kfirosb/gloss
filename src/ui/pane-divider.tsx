@@ -30,8 +30,11 @@ export function PaneDivider({
     value: number;
     length: number;
     horizontal: boolean;
+    /** The first pane sits on the right in a right-to-left workspace, so pointer movement is mirrored. */
+    rtl: boolean;
     selection: string;
   } | null>(null);
+  const isRtl = (element: HTMLElement) => getComputedStyle(element).direction === 'rtl';
   const finish = () => {
     if (drag.current) document.documentElement.style.userSelect = drag.current.selection;
     drag.current = null;
@@ -61,6 +64,7 @@ export function PaneDivider({
           value,
           length: horizontal ? rect.width : rect.height,
           horizontal,
+          rtl: isRtl(e.currentTarget),
           selection: document.documentElement.style.userSelect,
         };
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -73,7 +77,13 @@ export function PaneDivider({
         if (d?.id === e.pointerId)
           change(
             d.value +
-              (100 * (d.horizontal ? d.startX - e.clientX : e.clientY - d.startY)) / d.length,
+              (100 *
+                (d.horizontal
+                  ? d.rtl
+                    ? d.startX - e.clientX
+                    : e.clientX - d.startX
+                  : e.clientY - d.startY)) /
+                d.length,
           );
       }}
       onPointerUp={finish}
@@ -82,7 +92,10 @@ export function PaneDivider({
       onDoubleClick={() => change(50)}
       onKeyDown={(e) => {
         const horizontal = responsive && window.matchMedia('(min-width:761px)').matches;
-        const delta = horizontal ? { ArrowLeft: 5, ArrowRight: -5 } : { ArrowDown: 5, ArrowUp: -5 };
+        const toward = isRtl(e.currentTarget) ? -1 : 1;
+        const delta = horizontal
+          ? { ArrowLeft: -5 * toward, ArrowRight: 5 * toward }
+          : { ArrowDown: 5, ArrowUp: -5 };
         if (e.key === 'Home' || e.key === 'End' || e.key in delta) {
           e.preventDefault();
           change(

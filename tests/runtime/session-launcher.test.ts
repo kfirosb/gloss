@@ -424,7 +424,7 @@ it('rejects invalid language settings before starting and retries failed applica
     },
   });
   await expect(
-    launcher.launch({ agent: 'codex', folder, languageOverride: { reply: 'fr' } }),
+    launcher.launch({ agent: 'codex', folder, languageOverride: { reply: 'xx' } }),
   ).rejects.toThrow('Invalid language');
   expect(t.live.size).toBe(0);
   await launcher.launch({ agent: 'codex', folder, languageOverride: { reply: 'en' } });

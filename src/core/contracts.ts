@@ -111,6 +111,8 @@ export interface AgentMessage {
   timestamp?: string;
   translatedText?: string;
   translationStatus?: 'pending' | 'complete' | 'error';
+  /** The reply language the translation was made in; a change of language retranslates. */
+  translationLanguage?: string;
 }
 /** Revisions belong to a source namespace. Claude channel sequences are not byte offsets. */
 export function orderAgentMessages(messages: AgentMessage[], agent?: AgentKind): AgentMessage[] {

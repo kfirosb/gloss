@@ -315,3 +315,75 @@ it('falls back and logs once when settings cannot be read; sending is never bloc
   expect(warn).toHaveBeenCalledTimes(1);
   warn.mockRestore();
 });
+const french = { write: 'fr', send: 'en', reply: 'fr', assist: 'fr' };
+it('switching the reply language retranslates replies already completed in the old language', async () => {
+  const { workflow, agent, language, set } = await setup(hebrew);
+  agent.emit(reply(1));
+  for (
+    let i = 0;
+    i < 10 && workflow.snapshot().codingMessages[0]?.translationStatus !== 'complete';
+    i++
+  )
+    await tick();
+  expect(language.translatedLanguages).toEqual(['Hebrew']);
+  set(french);
+  for (let i = 0; i < 10 && language.translatedLanguages.length < 2; i++) await tick();
+  expect(language.translatedLanguages).toEqual(['Hebrew', 'French']);
+  const message = workflow.snapshot().codingMessages[0]!;
+  expect(message.translationStatus).toBe('complete');
+  expect(message.translationLanguage).toBe('fr');
+});
+it('a manual retranslation after a reply-language change is not skipped as complete', async () => {
+  const { workflow, agent, language, set } = await setup(hebrew);
+  agent.emit(reply(1));
+  for (
+    let i = 0;
+    i < 10 && workflow.snapshot().codingMessages[0]?.translationStatus !== 'complete';
+    i++
+  )
+    await tick();
+  // Simulate a reply already translated when the language changes but not re-queued (for example beyond the recent window).
+  for (let i = 2; i <= 25; i++) agent.emit(reply(i));
+  for (let i = 0; i < 60 && language.translated.length < 25; i++) await tick();
+  set(french);
+  for (
+    let i = 0;
+    i < 80 && language.translatedLanguages.filter((l) => l === 'French').length < 20;
+    i++
+  )
+    await tick();
+  expect(language.translatedLanguages.filter((l) => l === 'French')).toHaveLength(20);
+  expect(workflow.snapshot().codingMessages[0]!.translationLanguage).toBe('he');
+  await workflow.translateMessage('m1');
+  for (
+    let i = 0;
+    i < 10 && workflow.snapshot().codingMessages[0]!.translationLanguage !== 'fr';
+    i++
+  )
+    await tick();
+  expect(workflow.snapshot().codingMessages[0]!.translationLanguage).toBe('fr');
+});
+it('a reply-language change during translation retranslates into the new language', async () => {
+  const { workflow, agent, language, set } = await setup(hebrew);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  language.translateTransform = undefined;
+  language.translationReply = 'תרגום';
+  const original = language.translate.bind(language);
+  let calls = 0;
+  language.translate = async (text: string, lang?: string) => {
+    if (++calls === 1) await gate;
+    return original(text, lang);
+  };
+  agent.emit(reply(1));
+  await tick();
+  set(french);
+  release();
+  for (let i = 0; i < 20 && language.translatedLanguages.length < 2; i++) await tick();
+  expect(language.translatedLanguages).toEqual(['Hebrew', 'French']);
+  const message = workflow.snapshot().codingMessages[0]!;
+  expect(message.translationStatus).toBe('complete');
+  expect(message.translationLanguage).toBe('fr');
+});

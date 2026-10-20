@@ -45,6 +45,7 @@ test('session chip shows codes and opens the per-session popover', async ({ page
     });
   });
   await page.goto('/#capability=test');
+  await expect(page.getByPlaceholder('Write in Hebrew…')).toHaveAttribute('dir', 'rtl');
   const chip = page.getByRole('button', { name: /Session languages HE→EN→HE/ });
   await expect(chip).toBeVisible();
   await expect(page.getByText('Translation on')).toBeVisible();

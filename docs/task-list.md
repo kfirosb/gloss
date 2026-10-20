@@ -104,18 +104,29 @@ Verification (2026-10-18):
 
 ## 27. More languages
 
-Status: captured on 2026-10-19; needs design. The user wants any language the AI can translate, not only Hebrew.
+Status: implemented on branch `multi-languages` (2026-10-20), not yet released; one item needs a manual pass. The user wants any language the AI can translate, not only Hebrew.
 
-Today the settings model already stores language codes per field (write, send, reply, assist), but `SUPPORTED_LANGUAGES` in `src/core/language-settings.ts` allows only `he` and `en`, and Hebrew is assumed in the UI text, placeholders, dictation (`he`/`en` only), right-to-left layout, and labels such as "Summarize in Hebrew".
+Decisions: a table of 19 languages in `src/core/language-settings.ts` (English, Hebrew, Arabic, Chinese (Simplified), Dutch, French, German, Hindi, Italian, Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian, Urdu; right-to-left: Hebrew, Arabic, Persian, Urdu) feeds the settings menus, validation and the dictation bridge. Strict validation accepts bare codes only; `resolveLanguage` leniently resolves names, region suffixes (`he-IL`) and the `iw` alias for display, direction, prompts and legacy records. The app's own interface stays English and names the chosen language ("Write in French...", "Summarize in Arabic"); the conversation root direction follows the "I write in" language, so the layout flips for left-to-right languages. Style guidance and product-term protection apply to every non-English language, and the Hebrew prompt text is byte-identical so cached translations stay valid. Dictation accepts every listed language; seed prompts and silence fillers exist for Hebrew, English, Arabic, French, Hindi and Chinese.
 
-- [ ] Let the user pick any language for writing, replies and the assistant; instructions sent to coding agents stay in English (shared constraint).
-- [ ] Decide how the list is offered: a fixed list of common languages, free entry of any language name or code, or both; validate codes instead of the current two-value allowlist.
-- [ ] Set text direction from the chosen language (right-to-left for Hebrew, Arabic, Persian, Urdu and others; left-to-right otherwise) instead of from a Hebrew check.
-- [ ] Replace Hebrew-specific labels and placeholders ("Summarize in Hebrew", "כתוב בעברית…") with the chosen language's name.
-- [ ] Translation prompts: name the target language instead of assuming Hebrew; check quality and placeholder handling on a few very different languages (for example Arabic, Russian, Japanese, Spanish).
-- [ ] Dictation: whisper supports many languages; pass the chosen language, and say clearly when one is not supported.
-- [ ] Decide whether the app's own interface text is translated too, or stays English with only the conversation translated.
-- [ ] Existing users keep Hebrew settings unchanged after the update.
+- [x] Let the user pick any language for writing, replies and the assistant; instructions sent to coding agents stay in English (shared constraint).
+- [x] Decide how the list is offered: a fixed table of 19 common languages, validated by bare code.
+- [x] Set text direction from the chosen language (right-to-left for Hebrew, Arabic, Persian, Urdu; left-to-right otherwise) instead of from a Hebrew check.
+- [x] Replace Hebrew-specific labels and placeholders with the chosen language's name.
+- [ ] Translation prompts name the target language and apply style guidance to every non-English language (done); still to do: check quality and placeholder handling on a few very different languages (for example Arabic, Russian, Japanese, Spanish). This needs a manual pass with a real model.
+- [x] Dictation: pass the chosen language; every listed language is accepted.
+- [x] Decide whether the app's own interface text is translated too: it stays English and names the chosen language.
+- [x] Existing users keep Hebrew settings unchanged after the update (legacy records resolve leniently; Hebrew prompt text is byte-identical).
+- [ ] Follow-up: a draft sent without preparation is tagged with the assistant language (`src/core/workflow.ts`, around the direct-send draft), so with different "I write in" and "Language Assistant speaks" settings the review dialog shows the user's text in the assistant's direction. Pre-existing; only reachable with mixed settings.
+- [x] Review on the test build (2026-10-20): switching the reply language left replies already translated in the old language, a manual Translate skipped them, and a switch during a translation was lost; each translation now records its language (`translationLanguage`) and the switch re-queues them (`src/core/workflow.ts`). Pane dividers moved against the pointer and arrow keys in left-to-right sessions; they now read the workspace direction (`src/ui/pane-divider.tsx`). Second pass: the translation language was not persisted (migration 26 adds `translation_language`), and a reply translated in another language still displayed as translated with no Translate button; the message card now shows the original and the button when the languages differ.
+- [ ] Follow-up: documentation still describes Hebrew and English only (README, docs/reference.md, the Homebrew cask copy, the Claude language skill); update it for the language list.
+- [ ] Follow-up: dictation's repetition guards split on spaces (`collapseRuns`, `isRepetitive` in `src/core/dictation-contracts.ts`), so whisper loops in Chinese or Japanese are neither collapsed nor kept out of the next prompt.
+
+Verification (2026-10-20):
+
+- `npm run typecheck`, `npm run format:check` and `git diff --check` clean.
+- Unit: `npm test`: 1778 passed, 1 skipped (151 files passed, 1 skipped), 14.6 s; after the review fixes 1782 passed, 1 skipped; after the test-build fixes 1785 passed, 1 skipped; after the second pass 1785 passed, 1 skipped, and the full browser suite 362 passed, 0 failed.
+- Browser: `PLAYWRIGHT_PORT=4291 npm run test:e2e -- --workers=1`: 357 passed, 0 skipped, 0 failed in 6.6 min; the review fixes added 3 browser cases and were run per file (26 passed across the touched specs), not as a second full run.
+- `npm run build` succeeds with Vite's existing chunk-size advisory (main chunk 955.98 kB).
 
 ## 28. Every kind of Claude installation, including desktop sessions
 

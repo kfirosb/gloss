@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   INITIAL_LANGUAGE_DEFAULTS,
+  LANGUAGES,
+  SUPPORTED_LANGUAGES,
+  isSupportedLanguage,
+  resolveLanguage,
   effectiveLanguageSettings,
   languageDirection,
   languageName,
@@ -46,7 +50,7 @@ describe('language settings', () => {
       null,
       [],
       {},
-      { write: 'fr', send: 'en', reply: 'en', assist: 'en' },
+      { write: 'xx', send: 'en', reply: 'en', assist: 'en' },
       { write: '', send: 'en', reply: 'en', assist: 'en' },
       { write: 123, send: 'en', reply: 'en', assist: 'en' },
     ])
@@ -86,5 +90,85 @@ describe('language settings', () => {
     );
     expect(languageDirection('he')).toBe('rtl');
     expect(languageDirection('en')).toBe('ltr');
+  });
+  it('the table lists 19 languages, English and Hebrew first, then alphabetical', () => {
+    expect(LANGUAGES.map((l) => l.code)).toEqual([
+      'en',
+      'he',
+      'ar',
+      'zh',
+      'nl',
+      'fr',
+      'de',
+      'hi',
+      'it',
+      'ja',
+      'ko',
+      'fa',
+      'pl',
+      'pt',
+      'ru',
+      'es',
+      'tr',
+      'uk',
+      'ur',
+    ]);
+    expect(LANGUAGES.filter((l) => l.direction === 'rtl').map((l) => l.code)).toEqual([
+      'he',
+      'ar',
+      'fa',
+      'ur',
+    ]);
+    expect(SUPPORTED_LANGUAGES).toEqual(LANGUAGES.map((l) => l.code));
+  });
+  it('resolves codes, names, regions and the iw alias; rejects the rest', () => {
+    for (const l of LANGUAGES) {
+      expect(resolveLanguage(l.code)?.code).toBe(l.code);
+      expect(resolveLanguage(l.name)?.code).toBe(l.code);
+      expect(resolveLanguage(l.name.toUpperCase())?.code).toBe(l.code);
+    }
+    expect(resolveLanguage('he-IL')?.code).toBe('he');
+    expect(resolveLanguage('zh-CN')?.code).toBe('zh');
+    expect(resolveLanguage(' Hebrew ')?.code).toBe('he');
+    expect(resolveLanguage('iw')?.code).toBe('he');
+    expect(resolveLanguage('iw-IL')?.code).toBe('he');
+    expect(resolveLanguage('xx')).toBeUndefined();
+    expect(resolveLanguage('')).toBeUndefined();
+  });
+  it('name, direction and legacy mapping follow the table', () => {
+    expect(languageName('ar')).toBe('Arabic');
+    expect(languageName('Chinese (Simplified)')).toBe('Chinese (Simplified)');
+    expect(languageName('xx')).toBe('English');
+    expect(languageDirection('ar')).toBe('rtl');
+    expect(languageDirection('fa-IR')).toBe('rtl');
+    expect(languageDirection('fr')).toBe('ltr');
+    expect(languageDirection('xx')).toBe('ltr');
+    expect(legacyLanguageSettings('fr')).toEqual({
+      write: 'fr',
+      send: 'en',
+      reply: 'fr',
+      assist: 'fr',
+    });
+    expect(legacyLanguageSettings('he-IL')).toEqual({
+      write: 'he',
+      send: 'en',
+      reply: 'he',
+      assist: 'he',
+    });
+    expect(legacyLanguageSettings('xx')).toEqual({
+      write: 'en',
+      send: 'en',
+      reply: 'en',
+      assist: 'en',
+    });
+  });
+  it('validation stays strict: bare codes only', () => {
+    expect(
+      validateLanguageSettings({ write: 'fr', send: 'en', reply: 'ar', assist: 'zh' }).assist,
+    ).toBe('zh');
+    for (const bad of ['xx', 'HE', 'he-IL', 'Hebrew'])
+      expect(() => validateLanguageOverride({ reply: bad })).toThrow('Invalid language settings');
+    expect(isSupportedLanguage('fr')).toBe(true);
+    expect(isSupportedLanguage('Hebrew')).toBe(false);
   });
 });
