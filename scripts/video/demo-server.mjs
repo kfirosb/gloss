@@ -132,6 +132,11 @@ const scripted = {
       text: 'Added `rejects a double submit from the same customer` next to the concurrent test. Both pass, and the full checkout suite is green: 31 tests.',
       translatedText:
         'הוספתי את הבדיקה `rejects a double submit from the same customer` ליד בדיקת המקביליות. שתיהן עוברות, וכל חבילת ה‑checkout ירוקה: 31 בדיקות.',
+      // The same answer in other reply languages, for the scene that switches the session's language.
+      translations: {
+        fr: "J'ai ajouté le test `rejects a double submit from the same customer` à côté du test de concurrence. Les deux passent, et toute la suite checkout est verte : 31 tests.",
+        ar: 'أضفت الاختبار `rejects a double submit from the same customer` بجانب اختبار التزامن. كلاهما ينجح، ومجموعة اختبارات checkout كاملة خضراء: 31 اختبارًا.',
+      },
     },
   },
   terraform: {
@@ -535,12 +540,28 @@ const server = http.createServer(async (req, res) => {
       }
       if (tail === 'claude-peer') return json({ state: 'accept' });
       if (tail === 'language') {
-        const override = req.method === 'PUT' ? await body() : req.method === 'DELETE' ? {} : {};
-        return json({
-          defaults: languageSettings,
-          override,
-          effective: { ...languageSettings, ...override },
-        });
+        // A per-session override reaches the snapshot like the real server's: the UI reads languageSettings from
+        // it, and a new reply language re-translates the scripted agent answers that have that language.
+        state.languageOverrides ??= {};
+        if (req.method === 'PUT') state.languageOverrides[id] = await body();
+        else if (req.method === 'DELETE') delete state.languageOverrides[id];
+        const override = state.languageOverrides[id] ?? {};
+        const effective = { ...languageSettings, ...override };
+        if (req.method !== 'GET' && snap) {
+          snap.languageSettings = effective;
+          const agentReply = (scripted[id] ?? scripted.first).agentReply;
+          const translated =
+            effective.reply === languageSettings.reply
+              ? agentReply.translatedText
+              : agentReply.translations?.[effective.reply];
+          for (const m of snap.codingMessages) {
+            if (m.role !== 'assistant' || m.text !== agentReply.text || !translated) continue;
+            m.translatedText = translated;
+            m.translationLanguage = effective.reply;
+          }
+          publishSession(id);
+        }
+        return json({ defaults: languageSettings, override, effective });
       }
       if (tail.startsWith('files/')) {
         const project = demoFiles[snap.target.projectId.split('/').pop()] ?? {

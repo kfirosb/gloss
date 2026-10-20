@@ -28,11 +28,11 @@ Two short videos with narration and captions.
 
 **The product**: sessions appear on launch, several agents in parallel across projects and worktrees, your language in and the agent's language out in the real terminal, Split and Terminal views, Activity, notifications when an agent finishes, Files with a TL;DR or translation of a long spec, new sessions, Move to Gloss, and the Language Assistant.
 
-https://github.com/user-attachments/assets/aa567fa8-fcd5-45b7-bd42-795ac7e1de72
+https://github.com/user-attachments/assets/50055943-2ce9-4590-8a20-4ecc2ed0b80c
 
 **Install and first use**: Homebrew or DMG, connecting a folder, the first Codex session, the first Hebrew message, Claude Code sessions, language settings.
 
-https://github.com/user-attachments/assets/0b630cf1-e079-458d-a25e-8fafd20463f5
+https://github.com/user-attachments/assets/835c4a96-c00b-467c-8fca-753edaa3b704
 
 ## Status
 

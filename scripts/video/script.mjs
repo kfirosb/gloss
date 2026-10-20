@@ -106,7 +106,7 @@ export const videos = {
         run: async (d, page) => {
           await d.click(page.getByRole('tab', { name: /Checkout race/ }), { settle: 900 });
           await d.hover(page.getByText('Coding agent · translated').first(), 500);
-          await d.moveTo(page.getByRole('region', { name: 'Live Hebrew conversation' }), 900);
+          await d.moveTo(page.getByRole('region', { name: 'Live conversation', exact: true }), 900);
         },
       },
       {
@@ -131,7 +131,7 @@ export const videos = {
         run: async (d, page) => {
           await d.click(view(page, 'Split'), { settle: 1200 });
           await d.hover(page.locator('.pane-live .live-terminal .xterm').first(), 1200);
-          await d.hover(page.getByRole('region', { name: 'Live Hebrew conversation' }), 800);
+          await d.hover(page.getByRole('region', { name: 'Live conversation', exact: true }), 800);
         },
       },
       {
@@ -167,11 +167,34 @@ export const videos = {
         id: 'reply',
         min: 7,
         caption:
-          'Claude answers in the terminal, and the same answer shows up in Hebrew next to it.',
+          'Claude answers in the terminal, and the same answer shows up next to it in the language that is comfortable for you.',
         run: async (d, page) => {
           await sleep(600);
           await d.hover(page.getByText('31 tests').first(), 1200);
           await d.hover(page.getByText('31 בדיקות').first(), 1200);
+        },
+      },
+      {
+        id: 'otherLanguages',
+        min: 12,
+        caption:
+          'Prefer another language? Choose it for this session, and the same answer is shown in French, or in Arabic. Every session can have its own.',
+        run: async (d, page) => {
+          await d.click(page.getByRole('button', { name: /^Session languages/ }), { settle: 700 });
+          const menu = page.getByRole('dialog', { name: 'Languages for this session' });
+          const reply = menu.getByLabel('Show agent replies in');
+          await d.hover(reply, 600);
+          await reply.selectOption('fr');
+          await sleep(1500);
+          await d.hover(page.getByText('suite checkout est verte').first(), 1500);
+          await d.hover(reply, 500);
+          await reply.selectOption('ar');
+          await sleep(1500);
+          await d.hover(page.getByText('اختبار التزامن').first(), 1500);
+          await d.hover(reply, 500);
+          await reply.selectOption('he');
+          await sleep(900);
+          await page.keyboard.press('Escape');
         },
       },
       {
@@ -318,7 +341,7 @@ export const videos = {
         id: 'assistant',
         min: 18,
         caption:
-          'And when you want to think first: the Language Assistant discusses the task with you in Hebrew, then prepares a sharper instruction that you review before it goes to the agent.',
+          'And when you want to think first: the Language Assistant discusses the task with you in your own language, then prepares a sharper instruction that you review before it goes to the agent.',
         run: async (d, page) => {
           await d.click(folderRow(page, 'login-redirect'), { settle: 1000 });
           await d.type(composer(page), 'תוסיף בדיקה למקרה ש-next ריק ותריץ שוב את הבדיקות');
@@ -509,7 +532,7 @@ export const videos = {
         id: 'write',
         min: 15,
         caption:
-          'Write in Hebrew. Discuss first and Prepare instruction turn it into a concise English instruction that you review before sending.',
+          'Write in your own language. Discuss first and Prepare instruction turn it into a concise English instruction that you review before sending.',
         run: async (d, page) => {
           await d.type(
             composer(page),
@@ -535,7 +558,8 @@ export const videos = {
       {
         id: 'sent',
         min: 10,
-        caption: 'Send to Terminal delivers it. Codex works, and the answer comes back in Hebrew.',
+        caption:
+          'Send to Terminal delivers it. Codex works, and the answer comes back in your language.',
         run: async (d, page, ctl) => {
           await d.click(
             dialog(page, 'Review instruction').getByRole('button', { name: /^Send to Terminal/ }),
