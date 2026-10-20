@@ -61,13 +61,13 @@ Status: shipped in 0.18.0 (2026-10-19); verified in an Ubuntu 24.04 container on
 
 ## 25. Public release readiness
 
-Status: high priority; small items that will otherwise become the first issues filed.
+Status: done for the first public release, Gloss 0.20.0 (2026-10-20).
 
-- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon and Intel Macs (separate DMGs since 0.17.0), Linux (since 0.18.0, container-tested only), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
-- [ ] Codex discovery is pinned to 0.154.0, 0.157.1 and 0.158.0 and fails closed on any other version; Codex ships often, so this will be the top bug report. Decide between loosening the gate and committing to fast version bumps.
-- [ ] Keep the "experimental" label on Claude Code support visible in the README and the app.
-- [ ] Add a GitHub issue template asking for macOS version, Codex or Claude Code version, and what the sidebar showed.
-- [ ] Announce only after tasks 20 and 22 are done.
+- [x] Put the requirements in the first lines of the README and every release page: Apple Silicon and Intel Macs (separate DMGs since 0.17.0), Linux (since 0.18.0, container-tested only), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
+- [x] (Resolved: the version list is informational only; any Codex version is accepted when its session passes identity and receipt checks.) Codex discovery is pinned to 0.154.0, 0.157.1 and 0.158.0 and fails closed on any other version; Codex ships often, so this will be the top bug report. Decide between loosening the gate and committing to fast version bumps.
+- [x] (Superseded: Claude Code is discovered automatically and documented as supported.) Keep the "experimental" label on Claude Code support visible in the README and the app.
+- [x] (`.github/ISSUE_TEMPLATE/bug_report.yml`) Add a GitHub issue template asking for macOS version, Codex or Claude Code version, and what the sidebar showed.
+- [x] Announce only after tasks 20 and 22 are done.
 
 ## 26. Activity view
 

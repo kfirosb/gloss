@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in Gloss does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: gloss
+    attributes:
+      label: Gloss version
+      description: Shown beside Settings at the bottom of the sidebar.
+      placeholder: '0.20.0'
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS, Apple Silicon
+        - macOS, Intel
+        - Linux (deb)
+        - Linux (AppImage)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS version
+      placeholder: macOS 15.4, Ubuntu 24.04, …
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      description: Output of `codex --version` or `claude --version`.
+      placeholder: codex-cli 0.162.1
+    validations:
+      required: true
+  - type: textarea
+    id: sidebar
+    attributes:
+      label: What the sidebar showed
+      description: For discovery problems, whether the session appeared, and any message under the project or in the error line. A screenshot helps.
+  - type: dropdown
+    id: languages
+    attributes:
+      label: Languages involved
+      description: Optional. The session's language chip shows them, for example HE→EN→HE.
+      multiple: true
+      options:
+        [
+          English,
+          Hebrew,
+          Arabic,
+          Chinese,
+          Dutch,
+          French,
+          German,
+          Hindi,
+          Italian,
+          Japanese,
+          Korean,
+          Persian,
+          Polish,
+          Portuguese,
+          Russian,
+          Spanish,
+          Turkish,
+          Ukrainian,
+          Urdu,
+          Other,
+        ]
