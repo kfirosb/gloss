@@ -1,3 +1,5 @@
+import { resolveLanguage } from './language-settings.js';
+
 export const TRANSLATION_PROMPT_VERSION = 'v2-natural-hebrew-english-terms';
 export const englishProductTerms = [
   'Live Conversation',
@@ -14,9 +16,8 @@ export const englishProductTerms = [
   'refresh',
   'Codex',
 ];
-export const isHebrew = (language: string) => /^(he(?:-[a-z0-9]+)*|hebrew)$/i.test(language.trim());
 export function languageStyle(language: string): string {
-  if (!isHebrew(language)) return '';
+  if (resolveLanguage(language)?.code !== 'he') return '';
   return [
     'Write natural, fluent Hebrew suitable for a professional software conversation. Translate meaning, not English word order.',
     'Keep professional technical terminology and product UI labels in English, exactly as they appear in the product. Do not translate or transliterate those labels.',

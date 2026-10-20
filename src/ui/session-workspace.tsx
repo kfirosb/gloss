@@ -95,7 +95,7 @@ import {
   legacyLanguageSettings,
   needsReplyTranslation,
 } from '../core/language-settings.js';
-import { isHebrew } from '../core/language-style.js';
+import type { DictationLanguage } from '../core/dictation-contracts.js';
 import { ClaudeConnection, useClaudeConnection } from './claude-connection.js';
 import { useMoveNotice, useMoveShown } from './claude-move-watch.js';
 import { MoveSessionHere } from './claude-move.js';
@@ -469,7 +469,7 @@ export function SessionWorkspace({
     );
     onComposerInserted();
   }, [composerInsert?.nonce]);
-  const dictationLanguage = isHebrew(languageSettings.write) ? 'he' : 'en';
+  const dictationLanguage = languageSettings.write as DictationLanguage; // cast removed in Task 4
   // A send pressed while recording waits for the last segment; the hook's sendNow bumps a counter so the send runs after
   // the render that holds the appended text, never with a stale composer value.
   const pendingAction = useRef<'send' | 'discuss'>('send');

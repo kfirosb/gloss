@@ -43,7 +43,7 @@ it('rejects invalid values and unknown sessions without changing storage', () =>
   const store = new SqliteStore(':memory:');
   register(store, 'A');
   expect(() =>
-    store.writeLanguageDefaults({ write: 'fr', send: 'en', reply: 'en', assist: 'en' }),
+    store.writeLanguageDefaults({ write: 'xx', send: 'en', reply: 'en', assist: 'en' }),
   ).toThrow('Invalid language settings');
   expect(store.readLanguageDefaults().write).toBe('he');
   expect(() => store.writeLanguageOverride('missing', { reply: 'en' })).toThrow('Unknown session');
