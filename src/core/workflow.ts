@@ -291,6 +291,7 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       ) {
         current.translatedText = result.text;
         current.translationStatus = result.status === 'complete' ? 'complete' : 'error';
+        current.translationLanguage = target;
         publish();
       } else if (
         !closed &&
@@ -305,6 +306,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       activeLanguageOperations.delete(abort);
       translating.delete(source.sourceId);
       translatingOne = false;
+      // The reply language changed while this ran: the result above was discarded, so queue the new language now.
+      if (
+        !closed &&
+        generation === connectionGeneration &&
+        settings.reply !== target &&
+        needsReplyTranslation(settings)
+      ) {
+        const current = state.codingMessages.find((m) => m.sourceId === source.sourceId);
+        if (current?.revision === source.revision) translateIfNeeded(current);
+      }
       if (!closed) void pumpTranslations();
     }
   };
@@ -312,7 +323,12 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     // The user wrote their own messages in their language; translating the sent English back duplicates it.
     if (source.role !== 'assistant' || !needsReplyTranslation(settings)) return;
     const current = state.codingMessages.find((message) => message.sourceId === source.sourceId);
-    if (!source.complete || !current || current.translationStatus === 'complete') return;
+    if (!source.complete || !current) return;
+    if (
+      current.translationStatus === 'complete' &&
+      (current.translationLanguage ?? settings.reply) === settings.reply
+    )
+      return;
     if (translating.has(source.sourceId)) return;
     translating.add(source.sourceId);
     current.translationStatus = 'pending';
@@ -1607,8 +1623,17 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         needsReplyTranslation(settings) &&
         (!needsReplyTranslation(previous) || previous.reply !== settings.reply)
       ) {
+        // A translation completed before this build recorded its language was made in the previous reply language.
+        for (const message of state.codingMessages)
+          if (message.translationStatus === 'complete' && message.translationLanguage === undefined)
+            message.translationLanguage = previous.reply;
         const recent = state.codingMessages
-          .filter((m) => m.role === 'assistant' && m.complete && m.translationStatus !== 'complete')
+          .filter(
+            (m) =>
+              m.role === 'assistant' &&
+              m.complete &&
+              !(m.translationStatus === 'complete' && m.translationLanguage === settings.reply),
+          )
           .slice(-20);
         for (const message of recent) translateIfNeeded(message);
       }
