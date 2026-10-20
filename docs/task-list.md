@@ -116,12 +116,14 @@ Decisions: a table of 19 languages in `src/core/language-settings.ts` (English, 
 - [x] Dictation: pass the chosen language; every listed language is accepted.
 - [x] Decide whether the app's own interface text is translated too: it stays English and names the chosen language.
 - [x] Existing users keep Hebrew settings unchanged after the update (legacy records resolve leniently; Hebrew prompt text is byte-identical).
+- [ ] Follow-up: a draft sent without preparation is tagged with the assistant language (`src/core/workflow.ts`, around the direct-send draft), so with different "I write in" and "Language Assistant speaks" settings the review dialog shows the user's text in the assistant's direction. Pre-existing; only reachable with mixed settings.
+- [ ] Follow-up: dictation's repetition guards split on spaces (`collapseRuns`, `isRepetitive` in `src/core/dictation-contracts.ts`), so whisper loops in Chinese or Japanese are neither collapsed nor kept out of the next prompt.
 
 Verification (2026-10-20):
 
 - `npm run typecheck`, `npm run format:check` and `git diff --check` clean.
-- Unit: `npm test`: 1778 passed, 1 skipped (151 files passed, 1 skipped), 14.6 s.
-- Browser: `PLAYWRIGHT_PORT=4291 npm run test:e2e -- --workers=1`: 357 passed, 0 skipped, 0 failed in 6.6 min.
+- Unit: `npm test`: 1778 passed, 1 skipped (151 files passed, 1 skipped), 14.6 s; after the review fixes 1782 passed, 1 skipped.
+- Browser: `PLAYWRIGHT_PORT=4291 npm run test:e2e -- --workers=1`: 357 passed, 0 skipped, 0 failed in 6.6 min; the review fixes added 3 browser cases and were run per file (26 passed across the touched specs), not as a second full run.
 - `npm run build` succeeds with Vite's existing chunk-size advisory (main chunk 955.98 kB).
 
 ## 28. Every kind of Claude installation, including desktop sessions
