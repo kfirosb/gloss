@@ -148,3 +148,26 @@ test('the review hint names the send language when it is not English', async ({ 
   await expect(hint).toContainText('Review and edit in French.');
   await expect(hint).toContainText('the equivalent concise French instruction');
 });
+
+test('in a left-to-right session the workspace divider follows the pointer and the arrow keys', async ({
+  page,
+}) => {
+  await open(page, { write: 'fr', send: 'en', reply: 'fr', assist: 'fr' });
+  const live = page.locator('.pane-live');
+  const divider = page.getByRole('separator', { name: 'Resize Live Conversation' });
+  const before = (await live.boundingBox())!;
+  const box = (await divider.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 70, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const after = (await live.boundingBox())!;
+  // Live Conversation is the first pane, on the left in LTR: dragging right must widen it.
+  expect(after.width - before.width).toBeGreaterThan(50);
+  const value = Number(await divider.getAttribute('aria-valuenow'));
+  await divider.focus();
+  await page.keyboard.press('ArrowRight');
+  expect(Number(await divider.getAttribute('aria-valuenow'))).toBe(value + 5);
+  await page.keyboard.press('ArrowLeft');
+  expect(Number(await divider.getAttribute('aria-valuenow'))).toBe(value);
+});
