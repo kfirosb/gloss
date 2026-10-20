@@ -129,7 +129,10 @@ function Message({
   client: SessionClient;
   onTranslate?: () => void;
 }) {
-  const status = message.translationStatus;
+  // A translation made in another reply language is stale: show the original and offer Translate.
+  const current = (message.translationLanguage ?? replyLanguage) === replyLanguage;
+  const status =
+    message.translationStatus === 'complete' && !current ? undefined : message.translationStatus;
   const body = original ? (
     <RichText language="auto" text={message.text} />
   ) : (

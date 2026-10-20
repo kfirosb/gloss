@@ -171,3 +171,38 @@ test('in a left-to-right session the workspace divider follows the pointer and t
   await page.keyboard.press('ArrowLeft');
   expect(Number(await divider.getAttribute('aria-valuenow'))).toBe(value);
 });
+
+const french = { write: 'fr', send: 'en', reply: 'fr', assist: 'fr' };
+async function showReply(page: Page, message: Record<string, unknown>) {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const snapshot = { ...basicSnapshot(), languageSettings: french, codingMessages: [message] };
+  await mockSession(page, () => snapshot);
+  await page.route('**/events', (r) => r.fulfill({ contentType: 'text/event-stream', body: '' }));
+  await page.goto('/#capability=test');
+  return page.locator('.feed article[data-source-id="r1"]');
+}
+test('a reply translated in another language shows the original with a Translate button', async ({
+  page,
+}) => {
+  const stale = await showReply(page, {
+    ...reply,
+    translatedText: 'תרגום ישן',
+    translationStatus: 'complete',
+    translationLanguage: 'he',
+  });
+  await expect(stale).toContainText('Done: the tests pass.');
+  await expect(stale).not.toContainText('תרגום ישן');
+  await expect(stale).toContainText('Coding agent · original');
+  await expect(stale.getByRole('button', { name: 'Translate' })).toBeVisible();
+});
+test('a reply translated in the current language shows the translation', async ({ page }) => {
+  const fresh = await showReply(page, {
+    ...reply,
+    translatedText: 'Terminé : les tests passent.',
+    translationStatus: 'complete',
+    translationLanguage: 'fr',
+  });
+  await expect(fresh).toContainText('Terminé : les tests passent.');
+  await expect(fresh).toContainText('Coding agent · translated');
+  await expect(fresh.getByRole('button', { name: 'Translate' })).toHaveCount(0);
+});
