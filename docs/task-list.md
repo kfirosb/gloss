@@ -161,6 +161,20 @@ A message the user writes in Hebrew is translated to English and sent to the age
 - [ ] Existing saved translations of user messages can stay; no migration.
 - [ ] Unit test: a completed `user` message from the transcript, from `ingestSourceMessage` and from the attach catch-up queues no translation; an assistant message still does.
 
+## 31. Claude's option questions as a card in Gloss
+
+Status: captured on 2026-10-20; design not started.
+
+When Claude Code asks the user to choose between options (its AskUserQuestion tool: a title such as "How do you want to try the fix and ship it?", numbered options with a description each, "Type something", "Chat about this"), the question appears only in the terminal. Gloss notices it: Claude's session record switches to `status: "waiting"` / `waitingFor`, `claudeActivity` in `src/agents/claude/coding-state.ts` maps that to `dialog-open`, the header shows "A dialog is open in the terminal", and deliveries are held (`DIALOG_OPEN_REASON`, `src/agents/claude/tmux-delivery.ts`). But Gloss never sees the question text or the options, so the user has to switch to the Terminal tab and answer there. The user likes the question itself and wants to answer it in Gloss, in a nicer form than the terminal, without the session hanging.
+
+The terminal is not hung while the question is open; Claude is blocked on keyboard input in its tmux pane, which Gloss already types into for message delivery. So the answer path is to render the question in Gloss and send the chosen answer as keystrokes to that pane, exactly as the user would have pressed them; Claude receives the answer in the normal way and `dialog-open` clears on its own.
+
+- [ ] Receive the question: Claude Code runs a `PreToolUse` hook before AskUserQuestion with the full tool input (questions, options, descriptions, recommended option, multi-select flag). Register such a hook in the Claude config Gloss already installs for its channel, and have it post the JSON to Gloss's local server for that session. Check first whether Claude 2.1.300's `waitingFor` already carries the question; if it does, prefer reading it from the session record and skip the hook.
+- [ ] Show it: a card in the Live Conversation view (and the expanded view) with the title, the options as buttons (recommended one marked), the option descriptions, a free-text field for "Type something", and a "Chat about this" action. Translate the card like any other assistant message; the user answers in Hebrew in the free-text field and Gloss translates it before sending, as with ordinary messages.
+- [ ] Answer it: a click sends the keystrokes that select that option in the terminal (navigate to the option, Enter; multi-select questions toggle each chosen option then confirm). The free-text answer goes through the "Type something" path. Verify against the actual Claude Code dialog so the keystrokes match its keybindings, and handle a question that was answered or cancelled in the terminal meanwhile (the card must close, not send stale keys).
+- [ ] Keep the header's "dialog is open" status and the delivery hold as they are; the card is in addition to them and the Terminal tab still works for answering.
+- [ ] Tests: hook payload → card model; keystroke plan per option kind; a card for a dialog that has already closed sends nothing.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
