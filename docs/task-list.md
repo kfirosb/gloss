@@ -175,6 +175,68 @@ The terminal is not hung while the question is open; Claude is blocked on keyboa
 - [ ] Keep the header's "dialog is open" status and the delivery hold as they are; the card is in addition to them and the Terminal tab still works for answering.
 - [ ] Tests: hook payload → card model; keystroke plan per option kind; a card for a dialog that has already closed sends nothing.
 
+## 32. Translate only while reading translated
+
+Status: designed in conversation on 2026-10-20; not started.
+
+Today every complete assistant reply is translated automatically whenever the session's reply language is not English (`translateIfNeeded` in `src/core/workflow.ts`, gated only by `needsReplyTranslation`). The Translated / Original / Split / Terminal / Activity tabs are a browser-side display preference (`src/ui/live-view.ts`, `src/ui/display-preferences.ts`); the workflow never sees them, so a session watched only in the Terminal tab still pays for every translation, as does the catch-up pass after attaching. The only off switch is setting the reply language to EN. The user wants to save users who mostly read in English and occasionally switch to Hebrew, without them having to change the language each time.
+
+- [ ] A new setting, "Translate only while reading translated" (name is the implementer's call), independent of the language codes; off by default so existing behavior is unchanged. It is part of the language settings: in the global language defaults dialog (`LanguageDefaultsDialog`, `src/ui/language-controls.tsx`; stored with `readLanguageDefaults` / `writeLanguageDefaults`) and in the session's language chip menu as a per-session override, like the language codes today.
+- [ ] With it on, the UI reports each session's conversation view to the workflow, and `translateIfNeeded` queues a reply automatically only while that view is Translated or Split (Split shows the translation too). Terminal, Original and Activity translate nothing. Switching to Translated or Split translates the current latest reply if it was skipped; the attach catch-up and the post-language-change re-translation obey the same rule.
+- [ ] History is never translated on its own: skipped replies appear in English in the History list with the existing per-message Translate button (`translate-one`, `translateMessage`), and only pressed ones are translated. Scrolling History does not trigger translation.
+- [ ] A message that was ever translated shows its saved translation everywhere, so nothing is translated twice; the "Translating…" placeholder must not appear for replies that were deliberately skipped.
+- [ ] With it off, every reply is translated whenever the reply language is Hebrew, exactly as today; the "Translation on" indicator should say when translation is view-dependent.
+- [ ] Tests: setting on + Terminal view queues nothing; switching to Translated queues only the latest reply; Split counts as translated; setting off keeps today's behavior; the Translate button works from any view; the per-session override wins over the global default.
+
+## 33. Empty folder view: a + in the middle, or an explanation
+
+Status: captured on 2026-10-20.
+
+When a worktree or folder is selected and it has no open sessions (a new worktree, or a folder whose sessions all ended), the main area is blank: only the tabs row says "No open sessions in this folder." next to a small + (`session-tabs-empty` in `src/ui/session-tabs.tsx`; the body below is empty). The user says it feels empty and does not tell a new user what to do next.
+
+- [ ] Fill the empty body with a centered empty state: a large + that opens the same New session dialog as the tabs-row +, and a line of explanation (what a session is, that it starts Claude Code or Codex in this folder; the implementer writes the copy).
+- [ ] Show it for a new worktree as soon as it is created and selected, and for any folder without open or pending sessions. Hide it once a session is launched or attached, including while a launch is pending.
+- [ ] When the folder has saved sessions, mention them (for example "or resume a saved session") pointing at the existing Saved sessions menu.
+- [ ] Keep the tabs-row message or drop it, whichever reads better with the new body; both must agree.
+- [ ] UI test: a folder without sessions shows the empty state; launching a session replaces it with the workspace.
+
+## 34. Attachment references inside the text
+
+Status: captured on 2026-10-20.
+
+Pasting a screenshot or dropping a file into the composer adds it as an attachment card, and the sent message ends with a "References:" block listing each one (`attachmentManifest` in `src/core/file-references.ts`, appended by `claudeMessage` in `src/agents/claude/index.ts` and its Codex counterpart). The text itself never says where an attachment belongs, so a message with several images cannot say "look at image 3 here". The user wants a reference inserted into the text line, at the cursor, when the image or file is pasted or dropped, so the sentence reads naturally and the agent knows which attachment it is.
+
+- [ ] On paste or drop in the composer (`onPaste` and the drop handler in `src/ui/session-workspace.tsx`, `addImages`), insert a short reference at the cursor, such as "image 3" or "file 2", using the same number the References block gives that attachment (`FileReference.index`). The attach-files button inserts the reference at the cursor too.
+- [ ] The reference and the References block must agree after an attachment is removed or reordered: either keep indexes stable for the message (gaps are fine) or renumber both together.
+- [ ] The inserted text follows the writing language's direction and spacing so it does not break an RTL Hebrew sentence; translation of the message to English must keep the reference intact (the translation prompt may need to be told to leave "image N" / "file N" as they are).
+- [ ] Both agents (Claude and Codex) receive the same reference wording as the References block uses, so "image 3" in the text and "Image 3:" in the block match.
+- [ ] Tests: paste inserts the reference at the cursor; the reference number matches the manifest; a Hebrew sentence with a reference survives translation with the reference unchanged.
+
+## 35. More file types in the preview, and open in Finder
+
+Status: captured on 2026-10-20.
+
+The Files panel previews text and code (with syntax colouring), Markdown and HTML (rendered) and images; everything else gets "Preview unavailable for this file type. You can still attach the file." (`src/ui/file-content-preview.tsx`; the server decides text / image / large in `src/runtime/http-server.ts`). The user wants more kinds previewed, video among them, and a way to open the file's folder on the computer from the Files panel.
+
+- [ ] Preview more kinds in place: video (mp4, mov, webm) and audio (mp3, m4a, wav) with the browser's own player, streamed from the local server rather than loaded as a data URL (the videos under `docs/media` are tens of MB); PDF in an embedded viewer; SVG as an image as well as source. Keep the per-kind size limits explicit and say which kinds are still not previewed (archives, binaries) instead of the generic message.
+- [ ] Serve media over an authenticated local URL with range requests so seeking works, scoped to the session's folder like the existing file endpoints; no new path outside the connected folder may become readable.
+- [ ] Attaching keeps working for every kind, and the attachment card shows the kind (video, audio, PDF) so the agent reference line says "File N" with a sensible name.
+- [ ] "Open in Finder" (Linux: "Open in file manager") on every file and folder in the Files tree and in the preview header: reveals the file, or opens the folder, through Electron's shell in the desktop main process (`desktop/main.mjs`, exposed via `desktop/preload.cjs` like `pick-folder`). In the browser build the action is hidden. Also "Copy path".
+- [ ] Tests: the server refuses a media path outside the folder; a range request returns 206; the Files tree menu shows the open action only in the desktop build.
+
+## 36. Language Assistant with file access and a choice of model
+
+Status: captured on 2026-10-20; needs design.
+
+Today the Language Assistant always runs on the same agent as the session: a Claude session gets a Claude assistant, a Codex session a Codex one (`options.languageBackends[record.target.agent]` in `src/runtime/application.ts`). The Claude assistant runs with every tool switched off (`--safe-mode`, `--tools ''` in `src/language/claude.ts`); the Codex one runs in a read-only sandbox (`src/language/codex.ts`). So the assistant can only answer from the conversation text it is handed and cannot open the project's files. The user wants two things, both configurable: the assistant can read the project's files, and the assistant can be a different model or agent than the session, for example a second opinion from GPT on work Claude is doing.
+
+- [ ] File access: let the assistant read files in the session's folder, read-only, so it can check what the agent says against the code. Claude: allow only read tools (Read, Grep, Glob) scoped to the folder; Codex: its read-only sandbox already allows reading, check that it is pointed at the folder. No writes, no shell, no network beyond the model itself; secrets such as `.env` stay out unless the user opts in.
+- [ ] Choice of assistant: pick the assistant's agent and model independently of the session's agent, for example Codex/GPT for a Claude session. Both backends already exist in Gloss; the change is choosing one by setting instead of by `target.agent`. Show which assistant answered on each assistant reply.
+- [ ] Configurable in both places, like task 32: a global default in Settings and a per-session override in the session's assistant controls. Separate choices for translation (cheap, fast model) and for assistant questions (second opinion), so a stronger model for opinions does not raise the cost of every translation.
+- [ ] "Second opinion" use: an action that hands the assistant the latest exchange (and, with file access, the changed files) and asks for a review; the answer appears in the Assistant pane, translated like any other reply.
+- [ ] Usage and cost: the usage indicator counts each backend's calls separately; a missing or signed-out backend (GPT chosen but Codex not installed or not logged in) shows a clear message instead of failing silently.
+- [ ] Tests: the chosen backend is used regardless of the session's agent; the Claude assistant with file access gets only read tools; a missing backend reports an error the UI shows.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
@@ -262,11 +324,13 @@ Status: complete; released in Gloss 0.6.0. See the [feature preview](previews/te
 
 ## 6. Session-to-session updates across worktrees
 
-Status: idea captured on 2026-10-16; benefits and feasibility still to be worked out.
+Status: idea captured on 2026-10-16; drag-to-reference step added 2026-10-20; benefits and feasibility still to be worked out.
 
 - [ ] Use a Gloss channel/MCP server so every session in a project tells the others what it is working on, including sessions in other worktrees.
 - [ ] Work out the concrete advantages (avoiding overlapping edits, sharing findings, coordinating merges) before designing.
 - [ ] Check whether the same can work for Codex sessions, not only Claude.
+- [ ] First concrete step (idea of 2026-10-20): drag a session tab, or a worktree from the sidebar, into the composer to insert a reference to it in the text, like the attachment reference of task 34. Example: "check with <session X> that we are not colliding". The reference carries what the agent needs to reach that session: the session's name, its worktree path and branch, and for a Claude session its peer address, so the agent can message it through Claude's own cross-session messaging (Gloss already delivers through Claude's peer inbox, `DeliveryTransport` `'peer'`). A dropped worktree means the sessions open in it; with none open, the reference is just the path and branch, for the agent to read the code there.
+- [ ] Show the reference as a chip in the composer, keep it intact through translation, and list the referenced sessions in the References block with their addresses. Decide what happens when the referenced session is a Codex session, which has no peer inbox: Gloss could relay the question itself, or the reference could be read-only (its transcript and diff).
 
 ## 7. Remove the large end-of-session popup
 
