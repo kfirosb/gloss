@@ -17,14 +17,17 @@ Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) an
 
 ## 21. In-app updates from GitHub Releases
 
-Status: high priority; depends on task 20 (electron-updater refuses to update unsigned apps on macOS).
+Status: high priority, next up; unblocked on 2026-10-20 by task 20 (electron-updater refuses to update unsigned apps on macOS, and 0.19.0 is Developer ID signed and notarized). Own branch; about a day including the extra release needed to verify it.
 
-Today every user must notice a new release and re-download the DMG by hand.
+Today nobody who installed a version finds out about the next one: they keep the old build until they visit GitHub or run `brew upgrade --cask gloss`. With several releases a day, most users are always behind.
 
-- [ ] Add electron-updater with the GitHub Releases provider; publish `latest-mac.yml` and the zip or DMG the updater expects alongside each release.
-- [ ] Check on startup and on a Settings action; show the available version and a one-click install with restart. Never install silently.
-- [ ] Preserve the running app and saved data across an update; keep the manual DMG path working.
-- [ ] Add the publish step to the release protocol and verify an actual 0.x to 0.y update on an installed build.
+Behaviour: Gloss checks GitHub Releases for a newer version at startup and again from a Settings action. When one exists it shows a small notice with the version and a button; the download runs in the background, the signature is verified, and the notice turns into "Restart to update". Nothing installs silently and nothing interrupts a running session. The DMG and Homebrew paths keep working and land users on the same version.
+
+- [ ] Build: add electron-updater with the GitHub Releases provider; electron-builder also produces the `zip` target the updater downloads and the `latest-mac.yml` manifest (version, checksum) for both architectures, uploaded with the DMGs on every release.
+- [ ] Desktop shell: check on startup and on a Settings action; show the available version and a one-click install with restart. Never install silently; never restart on its own; a failed check or download is reported in the notice and changes nothing.
+- [ ] Preserve the running app and saved data across an update (the updater swaps the bundle in place and relaunches); keep the manual DMG path working.
+- [ ] Release protocol: the manifest and zips are part of every release's assets; the Homebrew tap step is unchanged.
+- [ ] Verify with a real update: publish the next version, run the installed 0.19.0 (or later) build, and watch it find, download and install the new one; record the result in the release notes.
 
 ## 22. Homebrew tap
 
