@@ -74,7 +74,8 @@ it('seeds the first request with a plain sentence per language', () => {
 it('exposes 100 ms frames at 16 kHz and a coded failure', () => {
   expect(FRAME_SAMPLES).toBe(1600);
   expect(isDictationLanguage('he')).toBe(true);
-  expect(isDictationLanguage('fr')).toBe(false);
+  expect(isDictationLanguage('fr')).toBe(true);
+  expect(isDictationLanguage('xx')).toBe(false);
   const f = new DictationFailure('engine-failed');
   expect(f.code).toBe('engine-failed');
   expect(f.message).toBe('engine-failed');
@@ -93,5 +94,23 @@ describe('nextPrompt', () => {
   it('sends no prompt right after a repetitive segment, with or without context', () => {
     expect(nextPrompt('some context', true, 'he')).toBeUndefined();
     expect(nextPrompt('', true, 'he')).toBeUndefined();
+  });
+});
+describe('languages beyond Hebrew and English', () => {
+  it('seeds only the languages that have a seed prompt', () => {
+    expect(nextPrompt('', false, 'ja')).toBeUndefined();
+    expect(nextPrompt('', false, 'fr')).toBe(SEED_PROMPT.fr);
+  });
+  it('passes text through for a language with no filler list', () => {
+    expect(acceptTranscription('こんにちは', false, 'ja')).toBe('こんにちは');
+  });
+  it("drops fillers after stripping that language's trailing punctuation", () => {
+    expect(acceptTranscription('谢谢观看。', false, 'zh')).toBeNull();
+    expect(acceptTranscription('شكرا؟', false, 'ar')).toBeNull();
+    expect(acceptTranscription('धन्यवाद।', false, 'hi')).toBeNull();
+    expect(acceptTranscription('Merci !', false, 'fr')).toBeNull();
+  });
+  it('collapses a word run in Hindi text', () => {
+    expect(acceptTranscription('मैं मैं मैं मैं हूँ।', false, 'hi')).toBe('मैं मैं मैं हूँ।');
   });
 });

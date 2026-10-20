@@ -1,7 +1,7 @@
-export type DictationLanguage = 'he' | 'en';
-export const DICTATION_LANGUAGES: readonly DictationLanguage[] = ['he', 'en'];
-export const isDictationLanguage = (v: unknown): v is DictationLanguage =>
-  typeof v === 'string' && (DICTATION_LANGUAGES as readonly string[]).includes(v);
+import { isSupportedLanguage, type LanguageCode } from './language-settings.js';
+
+export type DictationLanguage = LanguageCode;
+export const isDictationLanguage = isSupportedLanguage;
 export const SAMPLE_RATE = 16_000;
 export const FRAME_MS = 100;
 export const FRAME_SAMPLES = (SAMPLE_RATE * FRAME_MS) / 1000; // 1600
@@ -54,14 +54,28 @@ export class DictationFailure extends Error {
   }
 }
 /** Outputs whisper produces on near-silence; compared after trimming and stripping trailing punctuation. */
-export const FILLER_OUTPUTS: Record<DictationLanguage, readonly string[]> = {
+export const FILLER_OUTPUTS: Partial<Record<DictationLanguage, readonly string[]>> = {
   he: ['תודה רבה', 'תודה', 'כתוביות', 'תרגום', 'כתוביות על ידי'],
   en: ['thank you', 'thanks for watching', 'subtitles by', 'you', 'thank you for watching', 'bye'],
+  ar: ['شكرا', 'شكرا لك', 'شكرا للمشاهدة', 'ترجمة نانسي قنقر'],
+  fr: [
+    'merci',
+    'merci à tous',
+    'merci d’avoir regardé cette vidéo',
+    'sous-titres réalisés par la communauté d’amara.org',
+    "sous-titres réalisés par la communauté d'amara.org",
+  ],
+  hi: ['धन्यवाद', 'शुक्रिया', 'देखने के लिए धन्यवाद'],
+  zh: ['字幕由amara.org社区提供', '谢谢观看', '谢谢', '感谢观看', '请订阅我的频道'],
 };
 /** Prompt for the first request of a recording, which has no transcribed context yet; plain sentences that set the language and register. */
-export const SEED_PROMPT: Record<DictationLanguage, string> = {
+export const SEED_PROMPT: Partial<Record<DictationLanguage, string>> = {
   he: 'שיחה בעברית על עבודה עם קוד: הסבר קצר, שאלה, ובקשה.',
   en: 'A conversation in English about working with code: a short explanation, a question, and a request.',
+  ar: 'محادثة بالعربية حول العمل مع الكود: شرح قصير، وسؤال، وطلب.',
+  fr: 'Une conversation en français sur le travail avec du code : une courte explication, une question et une demande.',
+  hi: 'कोड पर काम करने के बारे में हिंदी में बातचीत: एक छोटी व्याख्या, एक सवाल और एक अनुरोध।',
+  zh: '关于代码开发的中文对话：简短的说明、一个问题和一个请求。',
 };
 /** Prompt for the next transcription request: the seed when nothing has been transcribed yet, otherwise the last PROMPT_CONTEXT_CHARS of context; none right after a repetitive segment, since feeding a loop back amplifies it. */
 export function nextPrompt(
@@ -74,7 +88,7 @@ export function nextPrompt(
 }
 /** Longest run of the same word kept; whisper loops on repetitive speech. */
 export const MAX_WORD_RUN = 3;
-const TRAILING_PUNCTUATION = /[.!?,;:…׃]+$/u;
+const TRAILING_PUNCTUATION = /[.!?,;:…׃。，？！、،؟।]+$/u;
 const wordKey = (token: string) => token.replace(TRAILING_PUNCTUATION, '').toLowerCase();
 /** Collapses any run of the same word (ignoring trailing punctuation and case) longer than MAX_WORD_RUN to its first MAX_WORD_RUN tokens as written. */
 function collapseRuns(text: string): string {
@@ -115,6 +129,6 @@ export function acceptTranscription(
   const collapsed = collapseRuns(trimmed);
   if (!collapsed) return null;
   const bare = collapsed.replace(TRAILING_PUNCTUATION, '').trim().toLowerCase();
-  if (FILLER_OUTPUTS[language].some((f) => f.toLowerCase() === bare)) return null;
+  if ((FILLER_OUTPUTS[language] ?? []).some((f) => f.toLowerCase() === bare)) return null;
   return collapsed;
 }

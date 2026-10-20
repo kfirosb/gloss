@@ -118,7 +118,7 @@ describe('createDictationBridge', () => {
     await expect(opened(connect('capability=nope&session=s&language=he').ws)).rejects.toThrow(
       '401',
     );
-    await expect(opened(connect('capability=cap&session=s&language=fr').ws)).rejects.toThrow('400');
+    await expect(opened(connect('capability=cap&session=s&language=xx').ws)).rejects.toThrow('400');
     await expect(
       opened(connect('capability=cap&session=s&language=he', 'http://evil.example').ws),
     ).rejects.toThrow('403');
@@ -128,6 +128,14 @@ describe('createDictationBridge', () => {
       ),
     ).rejects.toThrow('400');
     await expect(opened(connect('capability=cap&session=&language=he').ws)).rejects.toThrow('400');
+  });
+  it('accepts any supported language and reaches recording', async () => {
+    const { connect } = await setup(fakeEngine().engine);
+    const c = connect('capability=cap&session=s&language=fr');
+    await opened(c.ws);
+    await c.until((m) => m.some((x) => x.type === 'state' && x.state === 'recording'));
+    expect(c.messages).toContainEqual({ type: 'state', state: 'recording' });
+    c.ws.close();
   });
   it('stops the engine when the bridge closes', async () => {
     const { engine } = fakeEngine();
