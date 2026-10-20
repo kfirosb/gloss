@@ -1356,7 +1356,7 @@ export function SessionWorkspace({
       <section ref={discussionFeed} className="discussion" aria-label="Language discussion">
         {snapshot.discussion.length === 0 && (
           <p className="discussion-empty">
-            Write here in {languageName(languageSettings.assist)} to discuss and refine the request.
+            Write here in {languageName(languageSettings.write)} to discuss and refine the request.
           </p>
         )}
         {visibleDiscussion.map((m) => (
@@ -1780,6 +1780,7 @@ export function SessionWorkspace({
                   }
                   {...(delivery ? { delivery } : {})}
                   error={reviewError}
+                  sendLanguage={languageSettings.send}
                   onChange={(value) => saveReview({ ...review, localizedText: value })}
                   onClose={() => setReviewOpen(false)}
                   onSend={() => void sendReview()}

@@ -20,6 +20,7 @@ export function InstructionReviewDialog({
   blocked,
   routeReady = true,
   delivery,
+  sendLanguage,
   error,
   onChange,
   onClose,
@@ -32,6 +33,8 @@ export function InstructionReviewDialog({
   blocked: boolean;
   delivery?: Delivery;
   error: string;
+  /** The session's effective send language, named in the hint. */
+  sendLanguage: string;
   /** False while Gloss has no route to the session (Claude only). */
   routeReady?: boolean;
   onChange(text: string): void;
@@ -83,7 +86,7 @@ export function InstructionReviewDialog({
       </div>
       <p className="review-hint">
         Review and edit in {languageName(review.draft.language)}. Send delivers the equivalent
-        concise English instruction to the coding agent.
+        concise {languageName(sendLanguage)} instruction to the coding agent.
       </p>
       <div className="review-body">
         {editing ? (

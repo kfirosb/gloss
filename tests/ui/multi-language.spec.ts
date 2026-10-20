@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { defaultWorkspace } from '../../src/core/session-contracts.js';
 import type { LanguageSettings } from '../../src/core/language-settings.js';
 import { mockSession, basicSnapshot, selectSession } from './session-fixture.js';
 import { sessionFixture } from './multi-session-fixture.js';
@@ -87,4 +88,63 @@ test('switching the selected session flips the root direction', async ({ page, c
   await selectSession(page, 'A');
   await expect(page.locator('main.app')).toHaveAttribute('dir', 'rtl');
   await expect(page.getByPlaceholder('Write in Hebrew…')).toBeVisible();
+});
+
+test('the empty-discussion hint names the write language, not the assistant language', async ({
+  page,
+}) => {
+  await open(page, { write: 'en', send: 'en', reply: 'fr', assist: 'fr' });
+  await expect(
+    page.getByText('Write here in English to discuss and refine the request.'),
+  ).toBeVisible();
+});
+async function openReviewHint(page: Page, settings: LanguageSettings, language: string) {
+  const snapshot = {
+    ...basicSnapshot(),
+    languageSettings: settings,
+    codingState: 'disconnected',
+    currentDraft: {
+      id: 'd',
+      revision: 1,
+      target: basicSnapshot().target,
+      sourceRevision: 0,
+      language,
+      localizedText: 'draft',
+      englishText: 'Draft',
+    },
+  };
+  await mockSession(page, () => snapshot);
+  await page.route('**/api/sessions/*/events', (r) =>
+    r.fulfill({ contentType: 'text/event-stream', body: '' }),
+  );
+  const saved = {
+    sessionId: snapshot.id,
+    revision: 1,
+    data: {
+      ...defaultWorkspace(),
+      review: { draftId: 'd', revision: 1, localizedText: 'draft' },
+    },
+  };
+  await page.route('**/api/sessions/*/workspace', (r) => r.fulfill({ json: saved }));
+  await page.goto('/#capability=test');
+  await page.getByRole('button', { name: 'Resume review', exact: true }).click();
+  return page.locator('.instruction-review[open] .review-hint').first();
+}
+test('the review hint names the English send language for a Hebrew session', async ({ page }) => {
+  const hint = await openReviewHint(
+    page,
+    { write: 'he', send: 'en', reply: 'he', assist: 'he' },
+    'he',
+  );
+  await expect(hint).toContainText('Review and edit in Hebrew.');
+  await expect(hint).toContainText('the equivalent concise English instruction');
+});
+test('the review hint names the send language when it is not English', async ({ page }) => {
+  const hint = await openReviewHint(
+    page,
+    { write: 'fr', send: 'fr', reply: 'fr', assist: 'fr' },
+    'fr',
+  );
+  await expect(hint).toContainText('Review and edit in French.');
+  await expect(hint).toContainText('the equivalent concise French instruction');
 });

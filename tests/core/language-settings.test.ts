@@ -131,6 +131,7 @@ describe('language settings', () => {
     expect(resolveLanguage('zh-CN')?.code).toBe('zh');
     expect(resolveLanguage(' Hebrew ')?.code).toBe('he');
     expect(resolveLanguage('iw')?.code).toBe('he');
+    expect(resolveLanguage('iw-IL')?.code).toBe('he');
     expect(resolveLanguage('xx')).toBeUndefined();
     expect(resolveLanguage('')).toBeUndefined();
   });

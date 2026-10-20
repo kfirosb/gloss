@@ -53,7 +53,8 @@ export const isSupportedLanguage = (value: unknown): value is LanguageCode =>
 // Lenient lookup for display and legacy values; strict validation uses isSupportedLanguage.
 export function resolveLanguage(value: string): LanguageEntry | undefined {
   const text = value.trim().toLowerCase();
-  const code = text === 'iw' ? 'he' : text.split('-')[0];
+  const base = text.split('-')[0];
+  const code = base === 'iw' ? 'he' : base;
   return LANGUAGES.find((l) => l.code === code || l.name.toLowerCase() === text);
 }
 const record = (value: unknown): Record<string, unknown> => {

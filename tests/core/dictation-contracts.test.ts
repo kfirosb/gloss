@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptTranscription,
   DictationFailure,
+  FILLER_OUTPUTS,
   FRAME_SAMPLES,
   isDictationLanguage,
   isRepetitive,
@@ -100,6 +101,12 @@ describe('languages beyond Hebrew and English', () => {
   it('seeds only the languages that have a seed prompt', () => {
     expect(nextPrompt('', false, 'ja')).toBeUndefined();
     expect(nextPrompt('', false, 'fr')).toBe(SEED_PROMPT.fr);
+  });
+  it.each(['ar', 'fr', 'hi', 'zh'] as const)('defines a seed prompt and fillers for %s', (code) => {
+    expect(SEED_PROMPT[code]).toEqual(expect.any(String));
+    expect(SEED_PROMPT[code]).not.toBe('');
+    expect(Array.isArray(FILLER_OUTPUTS[code])).toBe(true);
+    expect(FILLER_OUTPUTS[code]?.length).toBeGreaterThan(0);
   });
   it('passes text through for a language with no filler list', () => {
     expect(acceptTranscription('こんにちは', false, 'ja')).toBe('こんにちは');
