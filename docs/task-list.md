@@ -114,6 +114,28 @@ Today the settings model already stores language codes per field (write, send, r
 - [ ] Decide whether the app's own interface text is translated too, or stays English with only the conversation translated.
 - [ ] Existing users keep Hebrew settings unchanged after the update.
 
+## 28. Every kind of Claude installation, including desktop sessions
+
+Status: captured on 2026-10-20; research first. The user wants Gloss to work whichever way Claude was installed or started, including sessions from the Claude desktop app.
+
+Claude can be installed with the native installer (`~/.local/bin/claude`, auto-updating), npm (`@anthropic-ai/claude-code`, not auto-updating), or Homebrew, and it also runs inside the Claude desktop app and the VS Code / JetBrains extensions. Today Gloss finds `claude` in two different ways: launches and the channel setup check `~/.local/bin` first, then `PATH` (`findOnPath` in `src/runtime/launch-services.ts`, `createClaudeExecutable` in `src/runtime/claude-config.ts`), while the language workers run the bare name `claude` (`src/language/claude.ts`), which takes the first match on `PATH`. With two installs, sessions and translation can run different versions. Discovery keeps only records whose `entrypoint` is `"cli"` or missing (`isTerminalRecord` in `src/agents/claude/index.ts`), so desktop-app and IDE sessions never appear. On the maintainer's Mac on 2026-10-20 only the native 2.1.303 was active; all 11 session records had `entrypoint: "cli"`.
+
+Installations:
+
+- [ ] One shared lookup for the `claude` executable, used by launches, the channel setup and the language workers, so Gloss never mixes two installs.
+- [ ] Decide the order when several are found (the user's `PATH` order, the native install, or the newest version), and let the user pick one in Settings.
+- [ ] Show the chosen path and version in Settings or About, and warn when more than one install is found.
+- [ ] When the version is too old for the channel or the screen markers, say so by name ("Claude 2.1.11 from npm is too old; update it") instead of a generic setup error.
+- [ ] Test with the native installer, npm (global and under nvm), and Homebrew, alone and side by side; keep the Superset `bin` exclusion.
+
+Desktop app and IDE sessions:
+
+- [ ] Find out what these sessions write: their `entrypoint` values, whether they have session records in `~/.claude/sessions`, transcripts in `~/.claude/projects`, and a messaging socket. Record real captured values; do not guess names.
+- [ ] Decide what Gloss can offer for them: read-only (translated conversation, Activity view) is likely possible from the transcript; sending needs a channel or peer path, since there is no terminal to type into.
+- [ ] Show them in the sidebar marked by source (Desktop, VS Code), and make actions that need a terminal unavailable with a short reason.
+- [ ] Keep the language workers' own SDK sessions (`sdk-cli`) hidden, and keep rejecting invalid `entrypoint` values (task 15).
+- [ ] Update the README requirements (task 25) with the supported install methods and session sources.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
