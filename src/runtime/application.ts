@@ -312,7 +312,7 @@ export function createApplication(options: ApplicationOptions): Application {
           files,
           readFileContext,
           conversationId: record.id,
-          language: current?.language ?? options.language ?? 'he',
+          language: current?.language ?? options.language ?? INITIAL_LANGUAGE_DEFAULTS.write,
           languageModel: selectedModel,
           languageSession: session,
           projectContext: () =>
@@ -934,7 +934,7 @@ export function createApplication(options: ApplicationOptions): Application {
               codingMessages: [],
               discussion: [],
               deliveries: [],
-              language: options.language ?? 'he',
+              language: options.language ?? INITIAL_LANGUAGE_DEFAULTS.write,
               languageSessionId: '',
               languageModel: options.model ?? 'default',
               sourceRevision: 0,

@@ -12,7 +12,7 @@ import type {
 import type { SessionRecord, SessionStore, SessionEnvelope } from '../core/session-contracts.js';
 export type { SessionEnvelope } from '../core/session-contracts.js';
 import { MAX_ATTACHMENTS, ATTACHMENT_LIMIT_MESSAGE } from '../core/content-policy.js';
-import type { LanguageSettings } from '../core/language-settings.js';
+import { INITIAL_LANGUAGE_DEFAULTS, type LanguageSettings } from '../core/language-settings.js';
 import type { Workflow } from '../core/workflow.js';
 import type { FileReviewMode } from '../core/file-review-contracts.js';
 import type { Action } from './protocol.js';
@@ -288,7 +288,7 @@ export function createSessionManager(options: {
               codingMessages: [],
               discussion: [],
               deliveries: [],
-              language: 'he',
+              language: INITIAL_LANGUAGE_DEFAULTS.write,
               languageSessionId: '',
               languageModel: 'default',
               sourceRevision: 0,
