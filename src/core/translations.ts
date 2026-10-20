@@ -26,8 +26,9 @@ const literalPattern =
   /⟪LITERAL_\d+⟫|```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s)\]}>,]+|(["'])(?=(?:[A-Za-z]:\\|\\\\|\.\.?\/|\/|(?:[\w.-]+\/)+))[^"'\r\n]+\1|(?:[A-Za-z]:\\|\\\\)(?:[^\\\r\n]+?\\)*?[^\\\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:\.\.?\/|\/)(?:[^/\r\n]+?\/)*?[^/\r\n]*?\.[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16})*|(?:[A-Za-z]:\\|\\\\)[\w@%+.,~#=\\-]+|(?:\.\.?\/|\/|(?:[\w.-]+\/)+)(?:\\ |[\w@%+.,~#=\\\-/])+/g;
 
 const protectLiterals = (text: string, language: string) => {
+  const code = resolveLanguage(language)?.code;
   const pattern =
-    resolveLanguage(language)?.code === 'he'
+    code && code !== 'en'
       ? new RegExp(literalPattern.source + '|\\b(?:' + englishProductTerms.join('|') + ')\\b', 'g')
       : literalPattern;
   const literals: string[] = [];

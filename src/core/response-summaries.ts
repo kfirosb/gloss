@@ -1,5 +1,6 @@
 import { MAX_SUMMARY_CHARS, MAX_TEXT_CHARS } from './content-policy.js';
 import { createHash } from 'node:crypto';
+import { INITIAL_LANGUAGE_DEFAULTS } from './language-settings.js';
 import type { ConversationSnapshot, ConversationStore, LanguageSession } from './contracts.js';
 import {
   summaryCacheKey,
@@ -53,7 +54,7 @@ export class ResponseSummaries {
     const key: SummaryKey = {
       ...source,
       sessionId: state.id,
-      language: state.languageSettings?.assist ?? 'he',
+      language: state.languageSettings?.assist ?? INITIAL_LANGUAGE_DEFAULTS.assist,
       model: this.model,
       promptVersion: SUMMARY_PROMPT_VERSION,
     };

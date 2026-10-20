@@ -233,6 +233,46 @@ it('keeps English product terminology intact while translating surrounding prose
   expect(translated).not.toContain('WRONG');
 });
 
+it('keeps English product terminology intact for non-Hebrew languages', async () => {
+  const store = new MemoryConversationStore();
+  const session = new FakeLanguageSession();
+  session.translateTransform = (text) =>
+    text
+      .replace('Size controls for the', 'pour les commandes de taille')
+      .replace(
+        /Queue|Live Conversation|Language Assistant|Markdown|code blocks|Copy code|layout|refresh/g,
+        'WRONG',
+      );
+  const original =
+    'Size controls for the Queue: Live Conversation, Language Assistant, Markdown, code blocks, Copy code, layout, refresh.';
+  const translated = await translateMessage(
+    {
+      sourceScope: 'style-fr',
+      sourceId: 'm',
+      sourceRevision: 1,
+      text: original,
+      complete: true,
+      language: 'fr',
+      promptLanguage: 'French',
+      model: 'test',
+      promptVersion: 'style-v2',
+    },
+    { store, session },
+  );
+  expect(translated).toContain('pour les commandes de taille');
+  for (const term of [
+    'Live Conversation',
+    'Language Assistant',
+    'Markdown',
+    'code blocks',
+    'Copy code',
+    'layout',
+    'refresh',
+  ])
+    expect(translated).toContain(term);
+  expect(translated).not.toContain('WRONG');
+});
+
 describe('translation placeholders', () => {
   const request = (text: string, sourceId = 'm') => ({
     sourceScope: 'p/s',
