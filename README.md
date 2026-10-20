@@ -24,12 +24,15 @@ Translation costs a few extra tokens. You can turn it off per session, and you c
 
 ## See it in action
 
-Two short videos with narration and captions:
+Two short videos with narration and captions.
 
-- [**The product**](https://github.com/user-attachments/assets/aa567fa8-fcd5-45b7-bd42-795ac7e1de72): sessions appear on launch, several agents in parallel across projects and worktrees, your language in and the agent's language out in the real terminal, Split and Terminal views, Activity, notifications when an agent finishes, Files with a TL;DR or translation of a long spec, new sessions, Move to Gloss, and the Language Assistant.
-- [**Install and first use**](https://github.com/user-attachments/assets/0b630cf1-e079-458d-a25e-8fafd20463f5): Homebrew or DMG, connecting a folder, the first Codex session, the first Hebrew message, Claude Code sessions, language settings.
+**The product**: sessions appear on launch, several agents in parallel across projects and worktrees, your language in and the agent's language out in the real terminal, Split and Terminal views, Activity, notifications when an agent finishes, Files with a TL;DR or translation of a long spec, new sessions, Move to Gloss, and the Language Assistant.
 
 https://github.com/user-attachments/assets/aa567fa8-fcd5-45b7-bd42-795ac7e1de72
+
+**Install and first use**: Homebrew or DMG, connecting a folder, the first Codex session, the first Hebrew message, Claude Code sessions, language settings.
+
+https://github.com/user-attachments/assets/0b630cf1-e079-458d-a25e-8fafd20463f5
 
 ## Status
 
