@@ -87,3 +87,58 @@ test('latest views and per-section history preserve order without duplicate entr
   await expect(page.getByRole('button', { name: 'History Queue', exact: true })).toHaveCount(0);
   await expect(page.getByTestId('draft-card')).toHaveCount(0);
 });
+test('History opens at the newest messages with Load earlier at the top', async ({ page }) => {
+  const target = { agent: 'codex', sessionRef: 'visible-session', projectId: '/example/project' };
+  const message = (i: number) => ({
+    sourceId: `m${i}`,
+    revision: i,
+    role: 'assistant',
+    text: `Original ${i}`,
+    translatedText: `Reply ${i}\n\n${'A long paragraph. '.repeat(40)}`,
+    translationStatus: 'complete',
+    complete: true,
+  });
+  const snapshot = {
+    id: 'c',
+    target,
+    codingState: 'idle',
+    codingMessages: Array.from({ length: 30 }, (_, i) => message(i + 10)),
+    discussion: Array.from({ length: 30 }, (_, i) => ({
+      role: i % 2 ? 'assistant' : 'user',
+      text: `Turn ${i}\n\n${'A long paragraph. '.repeat(40)}`,
+    })),
+    deliveries: [],
+    language: 'he',
+    languageSessionId: 'l',
+    languageModel: 'm',
+    sourceRevision: 1,
+    historyCursor: 'older',
+  };
+  await mockSession(page, () => snapshot);
+  await page.route('**/api/sessions/*/events', (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence: 1, snapshot }) + '\n\n',
+    }),
+  );
+  await page.goto('/#capability=test');
+  const distanceFromBottom = (selector: string) =>
+    page
+      .locator(selector)
+      .evaluate((e) => Math.round(e.scrollHeight - e.scrollTop - e.clientHeight));
+  const scrolled = (selector: string) => page.locator(selector).evaluate((e) => e.scrollTop > 0);
+
+  await page.getByRole('button', { name: 'History Live Conversation', exact: true }).click();
+  await expect(page.locator('.feed [data-source-id]')).toHaveCount(30);
+  expect(await scrolled('.feed')).toBe(true);
+  expect(await distanceFromBottom('.feed')).toBeLessThanOrEqual(1);
+  await expect(page.locator('.feed > button', { hasText: 'Load earlier messages' })).toHaveCount(1);
+  expect(await page.locator('.feed').evaluate((e) => e.firstElementChild?.textContent)).toContain(
+    'Load earlier messages',
+  );
+
+  await page.getByRole('button', { name: 'History Language Assistant', exact: true }).click();
+  await expect(page.locator('.discussion .message')).toHaveCount(30);
+  expect(await scrolled('.discussion')).toBe(true);
+  expect(await distanceFromBottom('.discussion')).toBeLessThanOrEqual(1);
+});

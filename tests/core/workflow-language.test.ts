@@ -1,15 +1,21 @@
 import { expect, it, vi } from 'vitest';
 import { createWorkflow } from '../../src/core/workflow.js';
+import type { AgentMessage } from '../../src/core/contracts.js';
 import type { LanguageSettings } from '../../src/core/language-settings.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
 import { MemoryConversationStore } from '../helpers/memory-store.js';
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 5));
-async function setup(initial: LanguageSettings, capabilities: Record<string, boolean> = {}) {
+async function setup(
+  initial: LanguageSettings,
+  capabilities: Record<string, boolean> = {},
+  history: AgentMessage[] = [],
+) {
   let settings = initial;
   const agent = new FakeAgent();
   Object.assign(agent.capabilities, capabilities);
+  agent.historyMessages.set('s', history);
   const language = new FakeLanguageSession();
   const store = new MemoryConversationStore();
   language.translateTransform = (text) => 'תרגום:' + text;
@@ -67,6 +73,32 @@ it('translates replies into Hebrew under the default settings', async () => {
   await tick();
   expect(language.translatedLanguages).toEqual(['Hebrew']);
   expect(workflow.snapshot().codingMessages[0]!.translationStatus).toBe('complete');
+});
+it("does not translate the user's own messages back", async () => {
+  const sent = { revision: 1, role: 'user' as const, text: 'Run the tests', complete: true };
+  const { workflow, agent, language } = await setup(hebrew, {}, [
+    { ...sent, sourceId: 'from-history' },
+  ]);
+  agent.emit({ type: 'message', message: { ...sent, sourceId: 'from-event', revision: 2 } });
+  workflow.ingestSourceMessage({
+    sourceSessionId: 's',
+    sourceId: 'from-transcript',
+    sequence: 3,
+    role: 'user',
+    text: 'Run the tests',
+    complete: true,
+  });
+  agent.emit(reply(4));
+  await tick();
+  await tick();
+  expect(language.translated).toEqual(['Reply 4']);
+  const statuses = workflow.snapshot().codingMessages.map((m) => [m.sourceId, m.translationStatus]);
+  expect(statuses).toEqual([
+    ['from-history', undefined],
+    ['from-event', undefined],
+    ['from-transcript', undefined],
+    ['m4', 'complete'],
+  ]);
 });
 it('switching to Hebrew translates at most the 20 most recent replies', async () => {
   const { workflow, agent, language, set } = await setup(english);
@@ -182,6 +214,39 @@ it('clears a restored pending translation status when replies are English', asyn
     languageSettings: () => english,
   });
   expect(workflow.snapshot().codingMessages[0]!.translationStatus).toBeUndefined();
+});
+it("clears a restored pending translation of the user's own message", async () => {
+  const store = new MemoryConversationStore();
+  const saved = { revision: 1, text: 'x', complete: true, translationStatus: 'pending' as const };
+  store.save({
+    id: 'c',
+    codingState: 'disconnected',
+    codingMessages: [
+      { ...saved, sourceId: 'mine', role: 'user' },
+      { ...saved, sourceId: 'reply', role: 'assistant' },
+    ],
+    discussion: [],
+    deliveries: [],
+    language: 'he',
+    languageSessionId: 'l',
+    languageModel: 'm',
+    sourceRevision: 0,
+  });
+  const workflow = createWorkflow({
+    conversationId: 'c',
+    language: 'he',
+    projectContext: '',
+    languageModel: 'm',
+    languageSession: new FakeLanguageSession(),
+    agents: [new FakeAgent()],
+    store,
+    languageSettings: () => hebrew,
+  });
+  const statuses = workflow.snapshot().codingMessages.map((m) => [m.sourceId, m.translationStatus]);
+  expect(statuses).toEqual([
+    ['mine', undefined],
+    ['reply', 'pending'],
+  ]);
 });
 it('composer text is translated to the send language when write differs', async () => {
   const { workflow, language } = await setup(hebrew);

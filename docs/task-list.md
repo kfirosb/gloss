@@ -141,25 +141,25 @@ Desktop app and IDE sessions:
 
 ## 29. History opens at the latest messages
 
-Status: captured on 2026-10-20.
+Status: fixed on branch `no-user-translation` on 2026-10-20 (`useHistoryScroll` in `src/ui/history-scroll.ts`); not merged or released.
 
 Pressing History in the Live Conversation or Assistant pane (`src/ui/reading-pane.tsx`; `liveHistory` and `assistantHistory` in `src/ui/session-workspace.tsx`) switches from the latest reply to the whole conversation. The user wants it to open at the newest messages, at the bottom, and scroll up to older ones, like a chat.
 
-- [ ] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
-- [ ] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping.
-- [ ] Same in the expanded (dialog) view and in both panes; check whether Activity's History should behave the same.
+- [x] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
+- [x] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping. "Load earlier messages" moved to the top of the feed; new messages are followed only while the reader is at the bottom. The keep-place step has no automated test.
+- [x] Same in the expanded (dialog) view and in both panes. Open: whether Activity's History should behave the same.
 - [ ] Pressing Latest returns to the latest reply as today.
 
 ## 30. Do not translate the user's own messages back
 
-Status: cause found on 2026-10-20; fix not started. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money.
+Status: fixed on branch `no-user-translation` on 2026-10-20; not merged or released. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money.
 
 A message the user writes in Hebrew is translated to English and sent to the agent. It comes back into Gloss from the agent's transcript as an English `user` message, and Gloss then translates it into Hebrew. Cause: `translateIfNeeded` in `src/core/workflow.ts` has no role check, and its automatic callers (each new transcript message, `ingestSourceMessage`, and the catch-up loop after attaching a session) pass user messages too. Only the manual Translate action (`translateMessage`) and the re-translation after a language change limit themselves to `role === 'assistant'`. Present since the first public release.
 
-- [ ] Translate only assistant messages automatically: add the role check in `translateIfNeeded` itself so every caller gets it.
+- [x] Translate only assistant messages automatically: add the role check in `translateIfNeeded` itself so every caller gets it.
 - [ ] Show the user's own messages as they appear today without a translation; optionally show the original Hebrew text the user wrote when the message is matched to its Gloss delivery (no translation call).
-- [ ] Existing saved translations of user messages can stay; no migration.
-- [ ] Unit test: a completed `user` message from the transcript, from `ingestSourceMessage` and from the attach catch-up queues no translation; an assistant message still does.
+- [x] Existing saved translations of user messages can stay; no migration. A user message saved while its translation was pending is cleared on load, so it does not show "Translating…" forever.
+- [x] Unit test: a completed `user` message from the transcript, from `ingestSourceMessage` and from the attach catch-up queues no translation; an assistant message still does. Verified: both new tests fail without the fix; unit 1763 passed, 1 skipped; browser 352/352; `multi-session-recovery.test.ts` updated, since it expected the user message to be translated.
 
 ## 31. Claude's option questions as a card in Gloss
 
