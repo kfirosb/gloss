@@ -192,4 +192,8 @@ export const MIGRATIONS = [
     version: 25,
     sql: 'CREATE TABLE file_reviews (cache_key TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);',
   },
+  {
+    version: 26,
+    sql: 'ALTER TABLE source_messages ADD COLUMN translation_language TEXT;',
+  },
 ] as const;

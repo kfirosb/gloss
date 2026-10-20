@@ -688,6 +688,9 @@ export class SqliteStore
               ? { translatedText: message.translated_text }
               : {}),
             ...(translationStatus ? { translationStatus } : {}),
+            ...(typeof message.translation_language === 'string'
+              ? { translationLanguage: message.translation_language }
+              : {}),
           };
         }),
         target?.agent,
@@ -799,10 +802,10 @@ export class SqliteStore
         .get(snapshot.id) as Row;
       let nextPosition = Number(currentMaximum.position) + 1;
       const source = this.database.prepare(`
-        INSERT INTO source_messages (conversation_id, source_id, revision, role, text, complete, position, translated_text, translation_status, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO source_messages (conversation_id, source_id, revision, role, text, complete, position, translated_text, translation_status, translation_language, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(conversation_id, source_id) DO UPDATE SET
-          revision=excluded.revision, role=excluded.role, text=excluded.text, complete=excluded.complete, translated_text=excluded.translated_text, translation_status=excluded.translation_status, timestamp=excluded.timestamp
+          revision=excluded.revision, role=excluded.role, text=excluded.text, complete=excluded.complete, translated_text=excluded.translated_text, translation_status=excluded.translation_status, translation_language=excluded.translation_language, timestamp=excluded.timestamp
         WHERE excluded.revision >= source_messages.revision
       `);
       const seen = new Set<string>();
@@ -819,6 +822,7 @@ export class SqliteStore
           nextPosition++,
           message.translatedText ?? null,
           message.translationStatus ?? null,
+          message.translationLanguage ?? null,
           message.timestamp ?? null,
         );
       }
