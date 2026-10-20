@@ -63,7 +63,7 @@ Status: shipped in 0.18.0 (2026-10-19); verified in an Ubuntu 24.04 container on
 
 Status: high priority; small items that will otherwise become the first issues filed.
 
-- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon only (until task 23), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
+- [ ] Put the requirements in the first lines of the README and every release page: Apple Silicon and Intel Macs (separate DMGs since 0.17.0), Linux (since 0.18.0, container-tested only), macOS 13+, Codex or Claude Code installed and signed in, ripgrep from Homebrew.
 - [ ] Codex discovery is pinned to 0.154.0, 0.157.1 and 0.158.0 and fails closed on any other version; Codex ships often, so this will be the top bug report. Decide between loosening the gate and committing to fast version bumps.
 - [ ] Keep the "experimental" label on Claude Code support visible in the README and the app.
 - [ ] Add a GitHub issue template asking for macOS version, Codex or Claude Code version, and what the sidebar showed.
@@ -138,6 +138,28 @@ Desktop app and IDE sessions:
 - [ ] Show them in the sidebar marked by source (Desktop, VS Code), and make actions that need a terminal unavailable with a short reason.
 - [ ] Keep the language workers' own SDK sessions (`sdk-cli`) hidden, and keep rejecting invalid `entrypoint` values (task 15).
 - [ ] Update the README requirements (task 25) with the supported install methods and session sources.
+
+## 29. History opens at the latest messages
+
+Status: captured on 2026-10-20.
+
+Pressing History in the Live Conversation or Assistant pane (`src/ui/reading-pane.tsx`; `liveHistory` and `assistantHistory` in `src/ui/session-workspace.tsx`) switches from the latest reply to the whole conversation. The user wants it to open at the newest messages, at the bottom, and scroll up to older ones, like a chat.
+
+- [ ] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
+- [ ] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping.
+- [ ] Same in the expanded (dialog) view and in both panes; check whether Activity's History should behave the same.
+- [ ] Pressing Latest returns to the latest reply as today.
+
+## 30. Do not translate the user's own messages back
+
+Status: cause found on 2026-10-20; fix not started. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money.
+
+A message the user writes in Hebrew is translated to English and sent to the agent. It comes back into Gloss from the agent's transcript as an English `user` message, and Gloss then translates it into Hebrew. Cause: `translateIfNeeded` in `src/core/workflow.ts` has no role check, and its automatic callers (each new transcript message, `ingestSourceMessage`, and the catch-up loop after attaching a session) pass user messages too. Only the manual Translate action (`translateMessage`) and the re-translation after a language change limit themselves to `role === 'assistant'`. Present since the first public release.
+
+- [ ] Translate only assistant messages automatically: add the role check in `translateIfNeeded` itself so every caller gets it.
+- [ ] Show the user's own messages as they appear today without a translation; optionally show the original Hebrew text the user wrote when the message is matched to its Gloss delivery (no translation call).
+- [ ] Existing saved translations of user messages can stay; no migration.
+- [ ] Unit test: a completed `user` message from the transcript, from `ingestSourceMessage` and from the attach catch-up queues no translation; an assistant message still does.
 
 ## 19. lsof storm in Claude session liveness checks
 
