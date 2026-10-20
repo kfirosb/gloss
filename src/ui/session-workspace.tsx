@@ -56,7 +56,7 @@ import { useWorkspace } from './use-workspace.js';
 import { ActivityView } from './activity-view.js';
 import { LiveTerminal } from './live-terminal.js';
 import { ViewRadios } from './live-view-switch.js';
-import { PaneDivider, useWideLayout } from './pane-divider.js';
+import { PaneDivider } from './pane-divider.js';
 import {
   CONVERSATION_VIEWS,
   LIVE_VIEWS,
@@ -321,7 +321,6 @@ export function SessionWorkspace({
       assistantModes: { ...value.assistantModes, [record.id]: mode },
     }));
   const launchId = entry?.launchId;
-  const wideLayout = useWideLayout();
   const approval = entry?.activity === 'approval-required';
   const liveLayout = preferences.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT;
   // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
@@ -1314,11 +1313,10 @@ export function SessionWorkspace({
           <PaneDivider
             name="Resize terminal"
             responsive
-            // The divider measures the right (or, stacked, the top) pane; the terminal is left and on top.
-            value={wideLayout ? 100 - liveLayout.split : liveLayout.split}
-            change={(value) =>
-              setLiveLayout({ split: clampLayoutSize(wideLayout ? 100 - value : value) })
-            }
+            // The divider measures the terminal, the first pane: left when side by side (the Split row is
+            // always left to right), top when stacked.
+            value={liveLayout.split}
+            change={(value) => setLiveLayout({ split: clampLayoutSize(value) })}
           />
         )}
         {liveView === 'activity' && (

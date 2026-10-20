@@ -44,8 +44,9 @@ async function withLaunch(
   popup = 'auto',
   extra: Record<string, unknown>[] = [],
   entryOver: Record<string, unknown> = {},
+  snapshotOver: Record<string, unknown> = {},
 ) {
-  await mockSession(page, snapshot);
+  await mockSession(page, () => ({ ...snapshot(), ...snapshotOver }));
   const catalog = {
     epoch: 'e',
     sequence: 1,
@@ -147,6 +148,38 @@ test('Split shows terminal and conversation; dragging the divider persists after
   await page.reload();
   await expect(view(page, 'Split')).toHaveAttribute('aria-checked', 'true');
   await expect(divider).toHaveAttribute('aria-valuenow', value!);
+});
+test('in a left-to-right session the Split divider widens the terminal when dragged or moved right', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await withLaunch(
+    page,
+    'idle',
+    'auto',
+    [],
+    {},
+    {
+      languageSettings: { write: 'fr', send: 'en', reply: 'fr', assist: 'fr' },
+    },
+  );
+  await page.goto('/#capability=test');
+  await view(page, 'Split').click();
+  await expect(terminal(page).locator('.xterm')).toContainText('Allow this command?');
+  const before = (await terminal(page).boundingBox())!.width;
+  const divider = page.getByRole('separator', { name: 'Resize terminal' });
+  const box = (await divider.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const dragged = (await terminal(page).boundingBox())!.width;
+  expect(dragged).toBeGreaterThan(before + 40);
+  const value = Number(await divider.getAttribute('aria-valuenow'));
+  await divider.focus();
+  await page.keyboard.press('ArrowRight');
+  expect(Number(await divider.getAttribute('aria-valuenow'))).toBe(value + 5);
+  expect((await terminal(page).boundingBox())!.width).toBeGreaterThan(dragged);
 });
 test('switching Split → Terminal → Expand → Restore keeps one terminal connection', async ({
   page,
