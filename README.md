@@ -2,7 +2,7 @@
 
 # Gloss
 
-**Talk to Claude Code and Codex in Hebrew (or any language) without leaving your terminal sessions.**
+**Talk to Claude Code and Codex in your own language, Hebrew, French, Arabic, Chinese and more, without leaving your terminal sessions.**
 
 Gloss is a local desktop app for macOS and Linux that sits next to the coding-agent sessions already running in your terminal. It shows the agent's replies in your language as they arrive, lets you write back in your language, and turns that into a concise English instruction you review before anything is sent. Nothing is sent on its own.
 
@@ -12,15 +12,15 @@ Gloss is a local desktop app for macOS and Linux that sits next to the coding-ag
 
 - **Finds your sessions.** Open Claude Code and Codex sessions are discovered automatically and grouped by project and worktree. Closed sessions stay available under *Saved*. You can also start new sessions from inside the app.
 - **Translates the conversation live.** Completed agent replies are translated into your language as they arrive. No separate chat, no copy-paste.
-- **You write Hebrew, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
-- **Dictation.** Press the mic button and speak Hebrew or English. Speech is transcribed on your computer, with no cloud and no extra account, and the text lands in the composer for you to review and send.
+- **You write in your language, the agent gets English.** The app prepares a short English instruction from what you wrote. You see it, you can edit it, and only an explicit *Send* delivers it to the terminal.
+- **Dictation.** Press the mic button and speak in the language you write in. Speech is transcribed on your computer, with no cloud and no extra account, and the text lands in the composer for you to review and send.
 - **Files and images.** A project file sidebar with search, read-only previews, *TL;DR* and full translation of files, and image or screenshot paste straight into the conversation.
 - **Sees what the agent is doing.** An Activity view shows the Claude agents working right now, each with its last actions, background commands with their live output, and a History of what finished. Nothing in it is translated.
 - **Skills and MCP at your fingertips.** Type `/` in the composer to search the skills your agent can use, or `$` to search its MCP servers. Global, project and plugin entries are listed together, and Gloss sends your pick in the form the agent understands.
 - **Uses the accounts you already have.** Translation runs on an inexpensive model in the same ecosystem as your agent (Claude or OpenAI). No extra API key.
 - **Everything stays local.** Conversations, drafts and translations live under `~/.language-assistant` on your computer. Native approval prompts stay in the coding tool and are never answered by Gloss.
 
-Translation costs a few extra tokens. You can turn it off per session, and you can pick the language.
+Translation costs a few extra tokens. You can turn it off per session, and you can pick the language for every new session or for one session only: English, Hebrew, Arabic, Chinese (Simplified), Dutch, French, German, Hindi, Italian, Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian and Urdu. Right-to-left languages flip the conversation layout; the app's own interface stays English.
 
 ## See it in action
 
@@ -43,7 +43,7 @@ Gloss is an early open-source release. What is verified today:
 | Platform | macOS 13 or newer. Every release ships two builds: Apple Silicon (`-arm64.dmg`, tested on the maintainer's Mac) and Intel (`-x64.dmg`, verified under Rosetta only; reports from Intel Macs are welcome). Linux x64 (deb, AppImage) and arm64 (deb), so far verified only in a container |
 | Codex CLI | Fully supported. Open sessions are discovered automatically; Gloss checks each session's local protocol and fails closed when it cannot read one |
 | Claude Code | Supported. Open sessions are discovered automatically. Sessions started from Gloss are ready to send to at once; a session started in your own terminal can be moved into Gloss with its history (*Move to Gloss*) |
-| Languages | Hebrew is the default and the most tested. Any language the translation model handles can be selected |
+| Languages | 19 languages for writing, agent replies, the Language Assistant and dictation: English, Hebrew, Arabic, Chinese (Simplified), Dutch, French, German, Hindi, Italian, Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian and Urdu. Hebrew is the default and the most tested |
 
 ## Install the Mac app
 
@@ -79,7 +79,7 @@ Prefer the deb when you use Claude Code channels: the channel configuration Glos
 
 1. Start a Claude Code or Codex session in your terminal as usual.
 2. Open Gloss. The session appears in the sidebar within a few seconds. Select it.
-3. The agent's replies start appearing translated. Type in Hebrew in the composer, send it, and the agent receives a concise English instruction. *Discuss first* lets you review and refine it before it goes.
+3. The agent's replies start appearing translated. Type in your language in the composer, send it, and the agent receives a concise English instruction. *Discuss first* lets you review and refine it before it goes.
 
 To send to a Claude Code session started in your own terminal, press *Move to Gloss* in the session's connection panel, or start new sessions from Gloss with the **+** button.
 
