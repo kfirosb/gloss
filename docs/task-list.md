@@ -4,7 +4,7 @@ Captured from the user's request on 2026-09-28. These are separate workstreams, 
 
 ## 20. Sign and notarize the Mac build
 
-Status: implemented and verified on branch `signing` (2026-10-19); the next release built from it is the first signed and notarized one. Captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
+Status: complete; Gloss 0.19.0 (2026-10-20) is the first signed and notarized release, published on GitHub and in the Homebrew tap. Remaining: confirm the first launch on a Mac other than the maintainer's. Captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
 
 Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) and not notarized, so every download shows that dialog and the "Open Anyway" path got harder on macOS Sequoia. Only Developer ID signing plus notarization removes it. The Mac App Store is not an option: the app spawns tmux, reads Codex and Claude session files in the home folder, and runs a local server, which the App Sandbox forbids.
 

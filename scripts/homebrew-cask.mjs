@@ -47,11 +47,12 @@ export function renderCask({ version, sha256 }) {
       throw new Error(`Not a SHA-256 digest for ${architecture}: ${digest}`);
   }
   return `cask "gloss" do
+  arch arm: "arm64", intel: "x64"
+
   version "${version}"
   sha256 arm:   "${sha256.arm}",
          intel: "${sha256.intel}"
 
-  arch arm: "arm64", intel: "x64"
   url "https://github.com/${repository}/releases/download/v#{version}/Gloss-#{version}-#{arch}.dmg"
   name "Gloss"
   desc "Talk to Claude Code and Codex in Hebrew or any language from your terminal"
