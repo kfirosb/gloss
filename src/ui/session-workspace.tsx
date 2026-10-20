@@ -20,6 +20,7 @@ import React, {
 import type { AgentMessage, Delivery } from '../core/contracts.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
+import { useHistoryScroll } from './history-scroll.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
 import { FileBrowser, FILE_DRAG_TYPE } from './file-browser.js';
 import { FilesWindow } from './files-window.js';
@@ -892,6 +893,7 @@ export function SessionWorkspace({
       data.layout.discussionSize = value;
     });
   const feed = useRef<HTMLElement>(null);
+  const discussionFeed = useRef<HTMLElement>(null);
   const pendingInputClear = useRef(new Map<string, string>());
   const belongsHere = (value: SessionEnvelope) =>
     value.sessionId === client.sessionId && value.snapshot.id === client.sessionId;
@@ -1038,6 +1040,16 @@ export function SessionWorkspace({
   const visibleMessages = liveHistory ? ordered : latestReply ? [latestReply] : [];
   const indexedDiscussion = snapshot.discussion.map((m, index) => ({ ...m, index }));
   const visibleDiscussion = assistantHistory ? indexedDiscussion : indexedDiscussion.slice(-1);
+  const beforeEarlierMessages = useHistoryScroll(
+    feed,
+    liveHistory,
+    visibleMessages.map((m) => `${m.sourceId}:${m.revision}:${m.translationStatus ?? ''}`).join(),
+  );
+  useHistoryScroll(
+    discussionFeed,
+    assistantHistory,
+    `${visibleDiscussion.length}:${snapshot.discussion.at(-1)?.text.length ?? 0}`,
+  );
   const prepareSelected = async (replaceConfirmed = false) => {
     if (!selected.length || preparing) return;
     if ((review || draft) && !replaceConfirmed) {
@@ -1224,6 +1236,16 @@ export function SessionWorkspace({
   );
   const liveFeed = (
     <section ref={feed} className="feed" aria-label="Live Hebrew conversation">
+      {liveHistory && snapshot.historyCursor && (
+        <button
+          onClick={() => {
+            beforeEarlierMessages();
+            void run({ type: 'older-history' });
+          }}
+        >
+          Load earlier messages
+        </button>
+      )}
       {visibleMessages.length === 0 && (
         <p className="discussion-empty">Waiting for the next assistant response.</p>
       )}
@@ -1245,9 +1267,6 @@ export function SessionWorkspace({
           }
         />
       ))}
-      {liveHistory && snapshot.historyCursor && (
-        <button onClick={() => void run({ type: 'older-history' })}>Load earlier messages</button>
-      )}
     </section>
   );
   const terminalShown = launchId !== undefined && showsTerminal(liveView);
@@ -1334,7 +1353,7 @@ export function SessionWorkspace({
       history={assistantHistory}
       onHistory={() => setAssistantHistory((value) => !value)}
     >
-      <section className="discussion" aria-label="Language discussion">
+      <section ref={discussionFeed} className="discussion" aria-label="Language discussion">
         {snapshot.discussion.length === 0 && (
           <p className="discussion-empty">כתבו כאן בעברית כדי לדון ולחדד את הבקשה.</p>
         )}

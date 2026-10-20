@@ -141,13 +141,13 @@ Desktop app and IDE sessions:
 
 ## 29. History opens at the latest messages
 
-Status: captured on 2026-10-20.
+Status: fixed on branch `no-user-translation` on 2026-10-20 (`useHistoryScroll` in `src/ui/history-scroll.ts`); not merged or released.
 
 Pressing History in the Live Conversation or Assistant pane (`src/ui/reading-pane.tsx`; `liveHistory` and `assistantHistory` in `src/ui/session-workspace.tsx`) switches from the latest reply to the whole conversation. The user wants it to open at the newest messages, at the bottom, and scroll up to older ones, like a chat.
 
-- [ ] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
-- [ ] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping.
-- [ ] Same in the expanded (dialog) view and in both panes; check whether Activity's History should behave the same.
+- [x] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
+- [x] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping. "Load earlier messages" moved to the top of the feed; new messages are followed only while the reader is at the bottom. The keep-place step has no automated test.
+- [x] Same in the expanded (dialog) view and in both panes. Open: whether Activity's History should behave the same.
 - [ ] Pressing Latest returns to the latest reply as today.
 
 ## 30. Do not translate the user's own messages back
