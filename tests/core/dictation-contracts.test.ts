@@ -121,3 +121,44 @@ describe('languages beyond Hebrew and English', () => {
     expect(acceptTranscription('मैं मैं मैं मैं हूँ।', false, 'hi')).toBe('मैं मैं मैं हूँ।');
   });
 });
+describe('scripts written without word spaces', () => {
+  const thanksJa = 'ご視聴ありがとうございました';
+  const ordinary = [
+    '谢谢',
+    '谢谢谢谢',
+    '我们常常看看这个代码。',
+    '研究研究这个问题',
+    'ここはどこですか',
+    'いろいろありがとうございました。',
+    '我想检查一下这段代码是否正确。',
+    '𠀀𠀀𠀀𠀀',
+  ];
+  it('collapses a doubled-character word looping, keeping three copies of the word', () => {
+    expect(acceptTranscription('谢谢谢谢谢谢谢谢', false, 'zh')).toBe('谢谢谢谢谢谢');
+    expect(acceptTranscription('我说谢谢谢谢谢谢谢谢谢谢谢谢。', false, 'zh')).toBe(
+      '我说谢谢谢谢谢谢。',
+    );
+  });
+  it('collapses a looping phrase to three copies, with or without punctuation', () => {
+    expect(acceptTranscription(thanksJa.repeat(5), false, 'ja')).toBe(thanksJa.repeat(3));
+    expect(acceptTranscription('谢谢，'.repeat(5) + '再见', false, 'zh')).toBe(
+      '谢谢，谢谢，谢谢，再见',
+    );
+  });
+  it('keeps ordinary sentences and short legitimate repeats', () => {
+    for (const text of [...ordinary, thanksJa.repeat(3)])
+      expect(acceptTranscription(text, false, 'ja')).toBe(text);
+  });
+  it('flags a collapsed loop as repetitive', () => {
+    expect(isRepetitive('谢谢谢谢谢谢')).toBe(true);
+    expect(isRepetitive(thanksJa.repeat(3))).toBe(true);
+    expect(isRepetitive('谢谢，谢谢，谢谢，再见')).toBe(true);
+  });
+  it('does not flag ordinary text or short repeats', () => {
+    for (const text of [...ordinary, thanksJa.repeat(2)]) expect(isRepetitive(text)).toBe(false);
+  });
+  it('leaves letter runs in space-separated scripts alone', () => {
+    expect(acceptTranscription('aaaaaaaa hmmmmmmm', false, 'en')).toBe('aaaaaaaa hmmmmmmm');
+    expect(isRepetitive('aaaaaaaa hmmmmmmm')).toBe(false);
+  });
+});

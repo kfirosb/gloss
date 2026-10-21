@@ -90,12 +90,65 @@ export function nextPrompt(
 export const MAX_WORD_RUN = 3;
 const TRAILING_PUNCTUATION = /[.!?,;:…׃。，？！、،؟।]+$/u;
 const wordKey = (token: string) => token.replace(TRAILING_PUNCTUATION, '').toLowerCase();
-/** Collapses any run of the same word (ignoring trailing punctuation and case) longer than MAX_WORD_RUN to its first MAX_WORD_RUN tokens as written. */
+/** Scripts written without spaces between words (Chinese, Japanese): a whisper loop there stays inside one space-free token, so it is found as a repeating run of characters rather than of words. */
+const UNSPACED_SCRIPT = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]/u;
+/** Longest repeating unit looked for, in characters; covers a looped sentence such as "ご視聴ありがとうございました" (14). */
+const MAX_LOOP_UNIT_CHARS = 32;
+/** Copies of a one-character unit kept: a word may be one doubled character (谢谢, ここ), so six characters are three such words. Longer units keep MAX_WORD_RUN copies, like words. */
+const MAX_CHAR_RUN = MAX_WORD_RUN * 2;
+const maxCopies = (unitLength: number) => (unitLength === 1 ? MAX_CHAR_RUN : MAX_WORD_RUN);
+function copiesAt(chars: readonly string[], start: number, length: number): number {
+  let copies = 1;
+  for (let next = start + length; next + length <= chars.length; next += length) {
+    for (let k = 0; k < length; k++) if (chars[next + k] !== chars[start + k]) return copies;
+    copies++;
+  }
+  return copies;
+}
+/** The shortest unit starting at `start` that contains an unspaced-script character and repeats at least `minCopies(length)` times back to back. */
+function loopAt(
+  chars: readonly string[],
+  start: number,
+  minCopies: (unitLength: number) => number,
+): { length: number; copies: number } | undefined {
+  for (let length = 1; length <= MAX_LOOP_UNIT_CHARS; length++) {
+    if (start + length * minCopies(length) > chars.length) continue;
+    const unit = chars.slice(start, start + length);
+    if (!unit.some((c) => UNSPACED_SCRIPT.test(c))) continue;
+    const copies = copiesAt(chars, start, length);
+    if (copies >= minCopies(length)) return { length, copies };
+  }
+  return undefined;
+}
+/** Collapses a character-level loop inside one space-free token to its first maxCopies units; tokens without unspaced-script characters are returned unchanged. */
+function collapseUnspacedLoops(token: string): string {
+  if (!UNSPACED_SCRIPT.test(token)) return token;
+  const chars = Array.from(token);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length;) {
+    const loop = loopAt(chars, i, (length) => maxCopies(length) + 1);
+    if (!loop) {
+      out.push(chars[i] ?? '');
+      i++;
+      continue;
+    }
+    out.push(...chars.slice(i, i + loop.length * maxCopies(loop.length)));
+    i += loop.length * loop.copies;
+  }
+  return out.join('');
+}
+function hasUnspacedLoop(token: string): boolean {
+  if (!UNSPACED_SCRIPT.test(token)) return false;
+  const chars = Array.from(token);
+  return chars.some((_, i) => loopAt(chars, i, maxCopies) !== undefined);
+}
+/** Collapses any run of the same word (ignoring trailing punctuation and case) longer than MAX_WORD_RUN to its first MAX_WORD_RUN tokens as written, and any character-level loop inside an unspaced-script token the same way. */
 function collapseRuns(text: string): string {
   const out: string[] = [];
   let previous = '';
   let run = 0;
-  for (const token of text.split(' ')) {
+  for (const written of text.split(' ')) {
+    const token = collapseUnspacedLoops(written);
     const key = wordKey(token);
     run = key && key === previous ? run + 1 : 1;
     previous = key;
@@ -103,9 +156,11 @@ function collapseRuns(text: string): string {
   }
   return out.join(' ');
 }
-/** True when a transcription looks like a whisper loop: three identical consecutive words, or one word making up at least 60 % of three or more words. */
+/** True when a transcription looks like a whisper loop: three identical consecutive words, one word making up at least 60 % of three or more words, or, in an unspaced-script token, a unit repeated as often as collapseRuns keeps it. */
 export function isRepetitive(text: string): boolean {
-  const words = text.split(/\s+/).map(wordKey).filter(Boolean);
+  const tokens = text.split(/\s+/);
+  if (tokens.some(hasUnspacedLoop)) return true;
+  const words = tokens.map(wordKey).filter(Boolean);
   if (words.length < 3) return false;
   for (let i = 2; i < words.length; i++)
     if (words[i] === words[i - 1] && words[i] === words[i - 2]) return true;
