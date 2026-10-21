@@ -248,6 +248,20 @@ Today the Language Assistant always runs on the same agent as the session: a Cla
 - [ ] Usage and cost: the usage indicator counts each backend's calls separately; a missing or signed-out backend (GPT chosen but Codex not installed or not logged in) shows a clear message instead of failing silently.
 - [ ] Tests: the chosen backend is used regardless of the session's agent; the Claude assistant with file access gets only read tools; a missing backend reports an error the UI shows.
 
+## 37. Reply banner over other apps, with quick reply
+
+Status: captured on 2026-10-21; needs design.
+
+Today, when the Gloss window is not in front, Gloss only bounces the Dock icon, plays the alert sound and updates the Dock count (`createAlertHandler` in `desktop/main.mjs`); the "New reply" banner is drawn inside the Gloss window, so it appears only once Gloss is opened. Gloss sends no macOS notifications; the system notification the user sees comes from another app (likely Claude Code itself). The user wants Gloss to reach them while they work elsewhere.
+
+- [ ] When a session that is not in view gets a new reply or asks for approval and the Gloss window is not in front, a banner slides down from the top centre of the screen, over other apps: session name, project/worktree, and the start of the reply in the session's reply language (translated when translation is on).
+- [ ] Quick reply in the banner: a text field that sends to that exact session through the existing send path (same destination checks, review/translation rules and "Not sent" handling as the composer). Never send without the user's click or Enter; an approval prompt is not answered from the banner.
+- [ ] "Open in Gloss" button: brings the Gloss window to the front with that session selected and scrolled to the reply.
+- [ ] Behaviour: one banner at a time (newer replies update it or queue), dismiss with Esc or a close button, auto-hide after a few seconds unless the user is typing in it; never steals keyboard focus from the app the user is in until they click the banner.
+- [ ] Settings > Notifications: turn the banner on or off, separately from the sound and the Dock bounce. Respect macOS Focus / Do Not Disturb.
+- [ ] Implementation idea: a small frameless, always-on-top Electron window owned by the desktop shell, fed by the same attention events as the Dock bounce. Alternative or complement: a real macOS notification (possible since 0.19.0 is Developer ID signed) with a reply action; it looks native but gives less control over layout and placement. Linux: the same window where the desktop allows it.
+- [ ] Tests: the banner appears only when the window is not focused and the session is not the one in view; a quick reply reaches the right session or reports "Not sent"; Open in Gloss selects the session.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
