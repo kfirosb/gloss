@@ -1180,3 +1180,20 @@ it('a session event during a scan pass publishes without waiting for the pass', 
     release();
   }
 });
+it('a scan reads the session list once', async () => {
+  const f = setup();
+  const ids = Array.from({ length: 20 }, (_, i) => 'O' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 20 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  const list = vi.spyOn(f.manager, 'list');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  expect(list.mock.calls.length).toBeLessThanOrEqual(2);
+});

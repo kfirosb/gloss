@@ -347,7 +347,8 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.activity = 'disconnected';
     }
   };
-  const processRow = async (row: CatalogEntry) => {
+  // `records` is the session list read once for the whole pass; a session registered here is used directly.
+  const processRow = async (row: CatalogEntry, records: readonly SessionRecord[]) => {
     try {
       await refreshMetadata(row);
       if (closed) return;
@@ -360,14 +361,14 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       } else if (row.target.agent === 'claude' && row.sessionId && !candidate) {
         // Metadata refresh can recover a quiet manual connection without any
         // workflow event. Reproject its snapshot; never reconnect it here.
-        const record = sessions.list().find((record) => record.id === row.sessionId);
+        const record = records.find((record) => record.id === row.sessionId);
         if (record) updateActivity(record, () => {});
       } else if (!row.open && metadata.get(row.target.projectId)?.value.available === true) {
         // Saved availability describes access to its project, not a departed native connection.
         row.availability = 'available';
         delete row.reason;
       } else if (row.open && metadata.get(row.target.projectId)?.value.available !== false) {
-        const existing = sessions.list().find((record) => nativeKey(record.target) === row.key);
+        const existing = records.find((record) => nativeKey(record.target) === row.key);
         if (!existing || sessions.snapshot(existing.id).snapshot.codingState === 'disconnected') {
           row.activity = 'connecting';
           publish();
@@ -461,10 +462,11 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     publish();
     const queue = [...rows.values()];
+    const records = sessions.list();
     try {
       await Promise.all(
         Array.from({ length: Math.min(4, queue.length) }, async () => {
-          while (!closed && queue.length) await processRow(queue.shift()!);
+          while (!closed && queue.length) await processRow(queue.shift()!, records);
         }),
       );
     } finally {
