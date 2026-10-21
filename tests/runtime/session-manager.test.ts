@@ -523,3 +523,28 @@ it('does not persist a registration canceled during asynchronous project resolut
   await expect(pending).rejects.toThrow();
   expect(manager.list().some((record) => record.target.sessionRef === 'canceled')).toBe(false);
 });
+describe('snapshot cost', () => {
+  it('a live session snapshot does not reload its saved conversation', async () => {
+    const { manager, store } = setup();
+    await manager.ensure('A');
+    const load = vi.spyOn(store, 'load');
+    expect(manager.snapshot('A').snapshot.codingState).not.toBe('disconnected');
+    expect(load).not.toHaveBeenCalled();
+  });
+  it('a snapshot reads its own session record, not the whole session list', () => {
+    const { manager, store } = setup();
+    const list = vi.spyOn(store, 'listSessions');
+    expect(manager.snapshot('B').snapshot.target).toEqual({
+      agent: 'claude',
+      sessionRef: 'B',
+      projectId: process.cwd(),
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
+  it('a snapshot of an unknown session still fails as unknown', () => {
+    const { manager } = setup();
+    expect(() => manager.snapshot('missing')).toThrow(
+      expect.objectContaining({ code: 'unknown-session' }),
+    );
+  });
+});

@@ -370,6 +370,12 @@ export class SqliteStore
     return rows.map((row) => this.sessionFromRow(row));
   }
 
+  readSession(id: string): SessionRecord | undefined {
+    const row = this.database.prepare('SELECT * FROM panel_sessions WHERE id = ?').get(id) as
+      Row | undefined;
+    return row ? this.sessionFromRow(row) : undefined;
+  }
+
   updateSessionTitle(id: string, title: string): void {
     this.database
       .prepare('UPDATE panel_sessions SET session_title = ? WHERE id = ?')

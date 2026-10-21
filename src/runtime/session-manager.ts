@@ -82,7 +82,7 @@ export function createSessionManager(options: {
     if (closed) throw Object.assign(new Error('Application is closed'), { code: 'closed' });
   };
   const recordFor = (id: string) => {
-    const record = store.listSessions().find((record) => record.id === id);
+    const record = store.readSession(id);
     if (!record) throw Object.assign(new Error('Unknown session'), { code: 'unknown-session' });
     return record;
   };
@@ -275,8 +275,9 @@ export function createSessionManager(options: {
     },
     snapshot(id) {
       const record = recordFor(id);
-      const saved = store.load(id);
       const live = workflows.get(id)?.snapshot();
+      // A live workflow holds the whole conversation; reading the saved copy is needed only without one.
+      const saved = live ? undefined : store.load(id);
       const base: ConversationSnapshot =
         live ??
         (saved
