@@ -1061,3 +1061,65 @@ it('publishes live terminals separately from sessions, with project metadata, an
   for (const l of launchListeners) l(launches);
   await settle(() => f.catalog.snapshot().terminals?.length === 0);
 });
+
+it('reads each seen marker from the store at most once across scans', async () => {
+  const f = setup();
+  const reads = vi.spyOn(f.store, 'seenSequence');
+  f.setScan({ candidates: [candidate('A'), candidate('B'), candidate('C')], complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 3 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(2000);
+  const ids = f.catalog.snapshot().entries.map((entry) => entry.sessionId!);
+  for (const id of ids)
+    expect(reads.mock.calls.filter(([sessionId]) => sessionId === id).length).toBeLessThanOrEqual(
+      1,
+    );
+});
+it('never-seen baseline still written once', async () => {
+  const f = setup();
+  const writes = vi.spyOn(f.store, 'markSeen');
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(2000);
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenCalledWith(id, 0);
+  expect(f.store.seenSequence(id)).toBe(0);
+});
+it('cache keeps the higher of stored and written', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  f.agent.emit(reply('m3', 3));
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.markSeen(id, 3)).toBe('updated');
+  expect(f.catalog.markSeen(id, 1)).toBe('unchanged');
+  f.agent.emit(reply('m3', 3));
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(f.store.seenSequence(id)).toBe(3);
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  f.agent.emit(reply('m4', 4));
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+});
+it('forget clears the cached marker', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  const reads = vi.spyOn(f.store, 'seenSequence');
+  f.catalog.forget(id);
+  f.store.markSeen(id, 2);
+  reads.mockClear();
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries[0]?.sessionId === id);
+  expect(reads.mock.calls.some(([sessionId]) => sessionId === id)).toBe(true);
+  expect(reads.mock.results.at(-1)?.value).toBe(2);
+});
