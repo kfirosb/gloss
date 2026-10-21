@@ -18,6 +18,10 @@ it('renders a cask that picks the DMG and checksum for the running architecture'
   expect(cask).not.toContain('depends_on arch');
   expect(cask).toContain('depends_on macos: :ventura');
   expect(cask).toContain('app "Gloss.app"');
+  expect(cask).toContain(
+    'desc "Translate Claude Code and Codex conversations into your language"\n',
+  );
+  expect(cask).not.toMatch(/Hebrew/);
   expect(cask.endsWith('end\n')).toBe(true);
 });
 
