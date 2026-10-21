@@ -57,6 +57,7 @@ export interface WorkspaceRecord {
 export interface SessionStore {
   updateSessionTitle(id: string, title: string): void;
   listSessions(): SessionRecord[];
+  readSession(id: string): SessionRecord | undefined;
   /** Removes a session's saved history from this app only. */
   deleteSession?(id: string): void;
   registerSession(record: SessionRecord): SessionRecord;
