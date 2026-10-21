@@ -5,7 +5,7 @@ import {
   classifyError,
   LanguageError,
   LanguageWorkers,
-  requireSubscription,
+  SubscriptionCheck,
   type BackendOptions,
   type ResponseParser,
   type SessionOptions,
@@ -48,7 +48,9 @@ function parser(): ResponseParser {
 }
 export class ClaudeLanguageBackend implements LanguageBackend {
   private readonly workers: LanguageWorkers;
+  private readonly subscription: SubscriptionCheck;
   constructor(private readonly options: BackendOptions = {}) {
+    this.subscription = new SubscriptionCheck('claude', options);
     this.workers = new LanguageWorkers(
       {
         provider: 'claude',
@@ -105,7 +107,7 @@ export class ClaudeLanguageBackend implements LanguageBackend {
     _resumeId?: string,
     sessionOptions?: SessionOptions,
   ): Promise<LanguageSession> {
-    await requireSubscription('claude', this.options);
+    await this.subscription.require();
     return this.workers.session(model, sessionOptions);
   }
   /** A one-word call on the cheapest model: the CLI answers it with the account's current rate-limit windows. */
