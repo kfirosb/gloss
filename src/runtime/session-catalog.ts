@@ -73,6 +73,20 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     return codes.get(sessionId);
   };
+  // The catalog is the only writer of seen markers, so each is read from the store once and then served from memory.
+  const seenCache = new Map<string, number | undefined>();
+  const seenOf = (sessionId: string) => {
+    if (!options.seen) return undefined;
+    if (!seenCache.has(sessionId)) seenCache.set(sessionId, options.seen.seenSequence(sessionId));
+    return seenCache.get(sessionId);
+  };
+  // The store keeps the higher of the stored and written sequence; the cache follows the same rule.
+  const writeSeen = (sessionId: string, sequence: number) => {
+    if (!options.seen) return;
+    const previous = seenOf(sessionId);
+    options.seen.markSeen(sessionId, sequence);
+    seenCache.set(sessionId, Math.max(previous ?? -1, sequence));
+  };
   const agentLabel = (launch: LaunchRecord) => (launch.agent === 'claude' ? 'Claude' : 'Codex');
   // Launch rows use cached project metadata; a missing entry is read once and republished.
   const launchProject = (folder: string) => {
@@ -217,10 +231,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         entry.folderMissing = true;
     }
     for (const entry of entries) {
-      const attention = attentionFor(
-        entry,
-        entry.sessionId && options.seen ? options.seen.seenSequence(entry.sessionId) : undefined,
-      );
+      const attention = attentionFor(entry, entry.sessionId ? seenOf(entry.sessionId) : undefined);
       if (attention === 'none') delete entry.attention;
       else entry.attention = attention;
     }
@@ -244,7 +255,8 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };
-  const updateActivity = (record: SessionRecord) => {
+  // A session's own event publishes at once; a scan's row pass passes a no-op and publishes once after the pass.
+  const updateActivity = (record: SessionRecord, publishChange: () => void = publish) => {
     const row = rows.get(nativeKey(record.target));
     if (!row || closed || candidates.get(row.key)?.support === 'unsupported') return;
     const live = sessions.snapshot(record.id).snapshot; // `current` is the published catalog snapshot
@@ -253,12 +265,8 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     if (latest === undefined) delete row.latestResponseSequence;
     else row.latestResponseSequence = latest;
     // A session never seen before starts seen at whatever history was present when Gloss first connected it (0 when none), so only responses arriving after that count.
-    if (
-      options.seen &&
-      state !== 'disconnected' &&
-      options.seen.seenSequence(record.id) === undefined
-    )
-      options.seen.markSeen(record.id, latest ?? 0);
+    if (options.seen && state !== 'disconnected' && seenOf(record.id) === undefined)
+      writeSeen(record.id, latest ?? 0);
     // A manually connected Claude row has no discovery result; its connection is the liveness signal.
     if (record.target.agent === 'claude' && !candidates.has(row.key))
       row.open = state !== 'disconnected';
@@ -266,7 +274,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.activity = 'disconnected';
       row.availability = 'unavailable';
       row.reason = 'Project directory is unavailable';
-      publish();
+      publishChange();
       return;
     }
     row.activity = record.target.agent === 'codex' && !row.open ? 'disconnected' : state;
@@ -281,7 +289,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.availability = 'available';
       delete row.reason;
     }
-    publish();
+    publishChange();
   };
   const addRecord = (record: SessionRecord) => {
     const key = nativeKey(record.target);
@@ -339,7 +347,8 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.activity = 'disconnected';
     }
   };
-  const processRow = async (row: CatalogEntry) => {
+  // `records` is the session list read once for the whole pass; a session registered here is used directly.
+  const processRow = async (row: CatalogEntry, records: readonly SessionRecord[]) => {
     try {
       await refreshMetadata(row);
       if (closed) return;
@@ -349,17 +358,24 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         row.availability = 'unavailable';
         row.activity = candidate.activity ?? 'unknown';
         row.reason = candidate.reason ?? 'Unsupported session';
-      } else if (row.target.agent === 'claude' && row.sessionId && !candidate) {
+      } else if (
+        row.target.agent === 'claude' &&
+        row.sessionId &&
+        !candidate &&
+        sessions.hasWorkflow(row.sessionId)
+      ) {
         // Metadata refresh can recover a quiet manual connection without any
-        // workflow event. Reproject its snapshot; never reconnect it here.
-        const record = sessions.list().find((record) => record.id === row.sessionId);
-        if (record) updateActivity(record);
+        // workflow event. Reproject its snapshot; never reconnect it here. A saved
+        // session without a workflow takes the saved-row branch below instead of
+        // reloading its whole conversation every scan.
+        const record = records.find((record) => record.id === row.sessionId);
+        if (record) updateActivity(record, () => {});
       } else if (!row.open && metadata.get(row.target.projectId)?.value.available === true) {
         // Saved availability describes access to its project, not a departed native connection.
         row.availability = 'available';
         delete row.reason;
       } else if (row.open && metadata.get(row.target.projectId)?.value.available !== false) {
-        const existing = sessions.list().find((record) => nativeKey(record.target) === row.key);
+        const existing = records.find((record) => nativeKey(record.target) === row.key);
         if (!existing || sessions.snapshot(existing.id).snapshot.codingState === 'disconnected') {
           row.activity = 'connecting';
           publish();
@@ -389,7 +405,6 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         row.reason = errorText(error);
       }
     }
-    publish();
   };
   const scan = async () => {
     const adapters = options.agents.filter((agent) => agent.discoverOpen);
@@ -409,12 +424,16 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         // A newly seen native session may be the one a waiting launch started; it retries once per discovery event, not per scan.
         const appeared = [...found.keys()].some((key) => !candidates.has(key));
         if (result.complete) {
+          // Saved rows are re-checked on every complete discovery; one synchronous list read serves them all.
+          let records: readonly SessionRecord[] | undefined;
           for (const [key, row] of rows)
             if (row.target.agent === adapter.kind && !found.has(key)) {
               row.open = false;
               row.activity = 'disconnected';
               candidates.delete(key);
-              const saved = sessions.list().find((record) => nativeKey(record.target) === key);
+              const saved = (records ??= sessions.list()).find(
+                (record) => nativeKey(record.target) === key,
+              );
               if (saved) row.sessionId = saved.id;
               else rows.delete(key);
             }
@@ -454,11 +473,16 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     publish();
     const queue = [...rows.values()];
-    await Promise.all(
-      Array.from({ length: Math.min(4, queue.length) }, async () => {
-        while (!closed && queue.length) await processRow(queue.shift()!);
-      }),
-    );
+    const records = sessions.list();
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          while (!closed && queue.length) await processRow(queue.shift()!, records);
+        }),
+      );
+    } finally {
+      publish();
+    }
   };
   const tick = () => {
     if (closed || pending) return;
@@ -492,6 +516,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       subscriptions.get(sessionId)?.();
       subscriptions.delete(sessionId);
       codes.delete(sessionId);
+      seenCache.delete(sessionId);
       for (const [key, row] of rows)
         if (row.sessionId === sessionId) {
           rows.delete(key);
@@ -505,11 +530,11 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     markSeen(sessionId, sequence) {
       if (!options.seen || !current.entries.some((entry) => entry.sessionId === sessionId))
         return 'unknown';
-      const before = options.seen.seenSequence(sessionId);
+      const before = seenOf(sessionId);
       // A buggy client must not be able to suppress future badges by reporting a sequence beyond anything received.
       const entry = current.entries.find((e) => e.sessionId === sessionId);
-      options.seen.markSeen(sessionId, Math.min(sequence, entry?.latestResponseSequence ?? 0));
-      if (options.seen.seenSequence(sessionId) === before) return 'unchanged';
+      writeSeen(sessionId, Math.min(sequence, entry?.latestResponseSequence ?? 0));
+      if (seenOf(sessionId) === before) return 'unchanged';
       publish();
       return 'updated';
     },

@@ -1061,3 +1061,199 @@ it('publishes live terminals separately from sessions, with project metadata, an
   for (const l of launchListeners) l(launches);
   await settle(() => f.catalog.snapshot().terminals?.length === 0);
 });
+
+it('reads each seen marker from the store at most once across scans', async () => {
+  const f = setup();
+  const reads = vi.spyOn(f.store, 'seenSequence');
+  f.setScan({ candidates: [candidate('A'), candidate('B'), candidate('C')], complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 3 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(2000);
+  const ids = f.catalog.snapshot().entries.map((entry) => entry.sessionId!);
+  for (const id of ids)
+    expect(reads.mock.calls.filter(([sessionId]) => sessionId === id).length).toBeLessThanOrEqual(
+      1,
+    );
+});
+it('never-seen baseline still written once', async () => {
+  const f = setup();
+  const writes = vi.spyOn(f.store, 'markSeen');
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(2000);
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenCalledWith(id, 0);
+  expect(f.store.seenSequence(id)).toBe(0);
+});
+it('cache keeps the higher of stored and written', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  f.agent.emit(reply('m3', 3));
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+  expect(f.catalog.markSeen(id, 3)).toBe('updated');
+  expect(f.catalog.markSeen(id, 1)).toBe('unchanged');
+  f.agent.emit(reply('m3', 3));
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(f.store.seenSequence(id)).toBe(3);
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+  f.agent.emit(reply('m4', 4));
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === 'response');
+});
+it('forget clears the cached marker', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  const id = f.catalog.snapshot().entries[0]!.sessionId!;
+  const reads = vi.spyOn(f.store, 'seenSequence');
+  f.catalog.forget(id);
+  f.store.markSeen(id, 2);
+  reads.mockClear();
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries[0]?.sessionId === id);
+  expect(reads.mock.calls.some(([sessionId]) => sessionId === id)).toBe(true);
+  expect(reads.mock.results.at(-1)?.value).toBe(2);
+});
+it('a scan over many saved rows publishes a bounded number of times', async () => {
+  const list = vi.fn((): LaunchRecord[] => []);
+  const f = setup('codex', { launcher: { list, subscribe: () => () => {} } });
+  const ids = Array.from({ length: 50 }, (_, i) => 'S' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 50 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries.every((entry) => !entry.open));
+  list.mockClear();
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 3 && list.mock.calls.length > 0);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  expect(list.mock.calls.length).toBeLessThanOrEqual(4);
+});
+it('a throwing metadata read still publishes after the pass', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.metadata.mockRejectedValueOnce(new Error('metadata exploded'));
+  await vi.advanceTimersByTimeAsync(30000);
+  await settle(() => f.catalog.snapshot().entries[0]?.availability === 'unavailable');
+  expect(f.catalog.snapshot().entries[0]!.reason).toBe('metadata exploded');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries[0]?.availability === 'available');
+});
+it('a session event during a scan pass publishes without waiting for the pass', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  let release!: () => void;
+  const value = await f.metadata();
+  f.metadata.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(value);
+      }),
+  );
+  await vi.advanceTimersByTimeAsync(30000);
+  await settle(() => release !== undefined);
+  try {
+    f.agent.emit(reply('m1', 1));
+    for (let i = 0; i < 100 && f.catalog.snapshot().entries[0]?.attention !== 'response'; i++)
+      await delay(5);
+    expect(f.catalog.snapshot().entries[0]?.attention).toBe('response');
+  } finally {
+    release();
+  }
+});
+it('a scan reads the session list once', async () => {
+  const f = setup();
+  const ids = Array.from({ length: 20 }, (_, i) => 'O' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 20 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  const list = vi.spyOn(f.manager, 'list');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  expect(list.mock.calls.length).toBeLessThanOrEqual(2);
+});
+it('a scan with many saved rows reads the session list once', async () => {
+  const f = setup();
+  const ids = Array.from({ length: 20 }, (_, i) => 'S' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 20 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries.every((entry) => !entry.open));
+  const list = vi.spyOn(f.manager, 'list');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 3);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  // One read for the closed rows, one for the row pass.
+  expect(list.mock.calls.length).toBeLessThanOrEqual(2);
+  expect(f.catalog.snapshot().entries.every((entry) => entry.sessionId)).toBe(true);
+});
+it('a scan does not snapshot saved Claude sessions and leaves their rows as they were', async () => {
+  const f = setup('claude');
+  // Sessions saved before a restart: registered, never connected, no workflow loaded.
+  for (const id of ['C0', 'C1', 'C2'])
+    f.store.registerSession({
+      id,
+      target: { agent: 'claude', sessionRef: id, projectId: process.cwd() },
+      canonicalRoot: process.cwd(),
+      projectName: 'Project',
+      enabled: true,
+    });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 3 &&
+      f.catalog.snapshot().entries.every((entry) => entry.branch === 'main'),
+  );
+  await delay(50);
+  const before = f.catalog.snapshot().entries;
+  expect(before.every((entry) => !entry.open && entry.availability === 'available')).toBe(true);
+  const snapshots = vi.spyOn(f.manager, 'snapshot');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  await delay(50);
+  expect(snapshots).not.toHaveBeenCalled();
+  expect(f.catalog.snapshot().entries).toEqual(before);
+});
+it('a Claude row dropped by discovery while its workflow stays connected is still shown open', async () => {
+  const f = setup('claude');
+  f.setScan({ candidates: [claudeCandidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  await delay(50);
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({ open: true, activity: 'idle' });
+});
