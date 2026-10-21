@@ -1123,3 +1123,60 @@ it('forget clears the cached marker', async () => {
   expect(reads.mock.calls.some(([sessionId]) => sessionId === id)).toBe(true);
   expect(reads.mock.results.at(-1)?.value).toBe(2);
 });
+it('a scan over many saved rows publishes a bounded number of times', async () => {
+  const list = vi.fn((): LaunchRecord[] => []);
+  const f = setup('codex', { launcher: { list, subscribe: () => () => {} } });
+  const ids = Array.from({ length: 50 }, (_, i) => 'S' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 50 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries.every((entry) => !entry.open));
+  list.mockClear();
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 3 && list.mock.calls.length > 0);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  expect(list.mock.calls.length).toBeLessThanOrEqual(4);
+});
+it('a throwing metadata read still publishes after the pass', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.metadata.mockRejectedValueOnce(new Error('metadata exploded'));
+  await vi.advanceTimersByTimeAsync(30000);
+  await settle(() => f.catalog.snapshot().entries[0]?.availability === 'unavailable');
+  expect(f.catalog.snapshot().entries[0]!.reason).toBe('metadata exploded');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries[0]?.availability === 'available');
+});
+it('a session event during a scan pass publishes without waiting for the pass', async () => {
+  const f = setup();
+  f.setScan({ candidates: [candidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  let release!: () => void;
+  const value = await f.metadata();
+  f.metadata.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(value);
+      }),
+  );
+  await vi.advanceTimersByTimeAsync(30000);
+  await settle(() => release !== undefined);
+  try {
+    f.agent.emit(reply('m1', 1));
+    for (let i = 0; i < 100 && f.catalog.snapshot().entries[0]?.attention !== 'response'; i++)
+      await delay(5);
+    expect(f.catalog.snapshot().entries[0]?.attention).toBe('response');
+  } finally {
+    release();
+  }
+});

@@ -255,7 +255,8 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     for (const listener of listeners) listener(structuredClone(current));
   };
   let health: CatalogSnapshot['discovery'] = { state: 'healthy' };
-  const updateActivity = (record: SessionRecord) => {
+  // A session's own event publishes at once; a scan's row pass passes a no-op and publishes once after the pass.
+  const updateActivity = (record: SessionRecord, publishChange: () => void = publish) => {
     const row = rows.get(nativeKey(record.target));
     if (!row || closed || candidates.get(row.key)?.support === 'unsupported') return;
     const live = sessions.snapshot(record.id).snapshot; // `current` is the published catalog snapshot
@@ -273,7 +274,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.activity = 'disconnected';
       row.availability = 'unavailable';
       row.reason = 'Project directory is unavailable';
-      publish();
+      publishChange();
       return;
     }
     row.activity = record.target.agent === 'codex' && !row.open ? 'disconnected' : state;
@@ -288,7 +289,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       row.availability = 'available';
       delete row.reason;
     }
-    publish();
+    publishChange();
   };
   const addRecord = (record: SessionRecord) => {
     const key = nativeKey(record.target);
@@ -360,7 +361,7 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         // Metadata refresh can recover a quiet manual connection without any
         // workflow event. Reproject its snapshot; never reconnect it here.
         const record = sessions.list().find((record) => record.id === row.sessionId);
-        if (record) updateActivity(record);
+        if (record) updateActivity(record, () => {});
       } else if (!row.open && metadata.get(row.target.projectId)?.value.available === true) {
         // Saved availability describes access to its project, not a departed native connection.
         row.availability = 'available';
@@ -396,7 +397,6 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         row.reason = errorText(error);
       }
     }
-    publish();
   };
   const scan = async () => {
     const adapters = options.agents.filter((agent) => agent.discoverOpen);
@@ -461,11 +461,15 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
     }
     publish();
     const queue = [...rows.values()];
-    await Promise.all(
-      Array.from({ length: Math.min(4, queue.length) }, async () => {
-        while (!closed && queue.length) await processRow(queue.shift()!);
-      }),
-    );
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          while (!closed && queue.length) await processRow(queue.shift()!);
+        }),
+      );
+    } finally {
+      publish();
+    }
   };
   const tick = () => {
     if (closed || pending) return;
