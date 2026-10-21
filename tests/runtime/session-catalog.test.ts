@@ -1197,3 +1197,25 @@ it('a scan reads the session list once', async () => {
   await delay(50);
   expect(list.mock.calls.length).toBeLessThanOrEqual(2);
 });
+it('a scan with many saved rows reads the session list once', async () => {
+  const f = setup();
+  const ids = Array.from({ length: 20 }, (_, i) => 'S' + i);
+  f.setScan({ candidates: ids.map(candidate), complete: true });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 20 &&
+      f.catalog.snapshot().entries.every((entry) => entry.activity === 'idle'),
+  );
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.catalog.snapshot().entries.every((entry) => !entry.open));
+  const list = vi.spyOn(f.manager, 'list');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 3);
+  // Let the row pass finish (rows read cached metadata, so it needs only a few real ticks).
+  await delay(50);
+  // One read for the closed rows, one for the row pass.
+  expect(list.mock.calls.length).toBeLessThanOrEqual(2);
+  expect(f.catalog.snapshot().entries.every((entry) => entry.sessionId)).toBe(true);
+});

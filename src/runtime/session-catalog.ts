@@ -417,12 +417,16 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         // A newly seen native session may be the one a waiting launch started; it retries once per discovery event, not per scan.
         const appeared = [...found.keys()].some((key) => !candidates.has(key));
         if (result.complete) {
+          // Saved rows are re-checked on every complete discovery; one synchronous list read serves them all.
+          let records: readonly SessionRecord[] | undefined;
           for (const [key, row] of rows)
             if (row.target.agent === adapter.kind && !found.has(key)) {
               row.open = false;
               row.activity = 'disconnected';
               candidates.delete(key);
-              const saved = sessions.list().find((record) => nativeKey(record.target) === key);
+              const saved = (records ??= sessions.list()).find(
+                (record) => nativeKey(record.target) === key,
+              );
               if (saved) row.sessionId = saved.id;
               else rows.delete(key);
             }
