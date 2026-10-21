@@ -1118,7 +1118,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
             revision: 1,
             target,
             sourceRevision: state.sourceRevision,
-            language: state.language,
+            // The user's own text, unlike prepared drafts written in the assistant language.
+            language: settings.write,
             localizedText: text,
             englishText,
             ...(attachments.length ? { attachments: copy(attachments) } : {}),

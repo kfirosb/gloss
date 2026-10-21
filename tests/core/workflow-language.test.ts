@@ -253,6 +253,22 @@ it('composer text is translated to the send language when write differs', async 
   await workflow.sendComposer('r1', 'תעשה רפקטור');
   expect(language.translatedLanguages).toEqual(['English']);
 });
+it.each([
+  { write: 'he', assist: 'en' },
+  { write: 'en', assist: 'he' },
+])(
+  'a direct-send draft holds the user text, so it carries the writing language ($write, assistant $assist)',
+  async ({ write, assist }) => {
+    const { workflow } = await setup({ write, send: 'en', reply: write, assist });
+    const tagged: string[] = [];
+    workflow.subscribe((snapshot) => {
+      if (snapshot.composerDraft) tagged.push(snapshot.composerDraft.language);
+    });
+    await workflow.sendComposer('r1', 'text');
+    expect(tagged.length).toBeGreaterThan(0);
+    expect(new Set(tagged)).toEqual(new Set([write]));
+  },
+);
 it('preparation uses assist for review text and send for delivery', async () => {
   const { workflow, language } = await setup({
     write: 'he',
