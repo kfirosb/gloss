@@ -114,7 +114,9 @@ async function open(page: Page, options: OpenOptions = {}) {
   });
   await page.route('**/activity/tasks/*/output', (route) => {
     streams.push(route.request().url().split('/').at(-2) ?? '');
-    return route.fulfill(sse([{ kind: 'chunk', text: 'Running 279 tests\n', start: 8, end: 26 }]));
+    // Raw colour codes, as a server log writes them; the page shows the plain text.
+    const text = '\u001b[1mRunning\u001b[22m 279 tests\n';
+    return route.fulfill(sse([{ kind: 'chunk', text, start: 8, end: 26 }]));
   });
   await page.route('**/activity/tasks/*/output?end=*', (route) => {
     const url = new URL(route.request().url());
@@ -124,7 +126,7 @@ async function open(page: Page, options: OpenOptions = {}) {
       json:
         end === 8
           ? { text: 'earlier\n', start: 0, end: 8, size: 100 }
-          : { text: 'All 12 passed\n', start: 8, end: 22, size: 22 },
+          : { text: '\u001b[32mAll 12 passed\u001b[0m\n', start: 8, end: 22, size: 22 },
     });
   });
   await page.goto('/#capability=test');

@@ -106,3 +106,39 @@ export function isHighlighted(
 ): boolean {
   return arrival?.id === call.id && now - arrival.at < ACTIVITY_NEW_ROW_MS;
 }
+
+/**
+ * Terminal escapes a background command writes: CSI (colours, cursor moves, erase), OSC ended by
+ * BEL or ST (titles, links), DCS/SOS/PM/APC strings ended by ST, and short escapes such as
+ * `ESC ( B`. An unfinished CSI, OSC or string is never read as a short escape: inside the text
+ * (an OSC that meets a newline) only its `ESC` goes, in the control pass; at the end it all goes.
+ */
+const TERMINAL_ESCAPE =
+  /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b\n]*(?:\u0007|\u001b\\)|[PX^_][^\u001b\n]*\u001b\\|(?![[\]PX^_])[ -/]*[0-~])/g;
+/** The start of an escape the text ends inside, as when a live chunk stops mid-sequence. */
+const UNFINISHED_ESCAPE =
+  /\u001b(?:\[[0-?]*[ -/]*|\][^\u0007\u001b\n]*\u001b?|[PX^_][^\u001b\n]*\u001b?|[ -/]*)$/;
+/** C0 controls except tab and newline (carriage returns are resolved first), DEL and C1 controls. */
+const CONTROLS = '\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f';
+const CONTROL = new RegExp(`[${CONTROLS}]`, 'g');
+const HAS_CONTROL = new RegExp(`[${CONTROLS}]`);
+
+/** A line as a terminal leaves it after `\r` overwrites: the text after the last carriage return. */
+function overwritten(line: string): string {
+  const text = line.replace(/\r+$/, '');
+  return text.slice(text.lastIndexOf('\r') + 1);
+}
+
+/**
+ * Background output as plain text: escape sequences removed, carriage-return progress reduced to
+ * its latest text, and other control characters dropped. The caller passes the joined raw text,
+ * so a sequence split across chunks or pages reads whole once both parts are present.
+ */
+export function readableOutput(text: string): string {
+  if (!HAS_CONTROL.test(text)) return text;
+  const stripped = text.replace(TERMINAL_ESCAPE, '').replace(UNFINISHED_ESCAPE, '');
+  const lines = stripped.includes('\r')
+    ? stripped.split('\n').map(overwritten).join('\n')
+    : stripped;
+  return lines.replace(CONTROL, '');
+}
