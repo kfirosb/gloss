@@ -13,6 +13,7 @@ import {
   lastActions,
   mainStatus,
   newestArrival,
+  readableOutput,
   sinceLastAction,
 } from './activity-page.js';
 import { RichText } from './rich-text.js';
@@ -438,7 +439,8 @@ function StripRow({
   const [open, setOpen] = useState(false);
   const readable = !disconnected && task.outputAvailable === true;
   const tail = useOutputTail(client, task.id, readable, open ? 1 : 3);
-  const line = tail.paused ? '' : lastLine(tail.lines);
+  const text = useMemo(() => readableOutput(tail.lines), [tail.lines]);
+  const line = tail.paused ? '' : lastLine(text);
   return (
     <>
       <div
@@ -462,7 +464,7 @@ function StripRow({
           </button>
         )}
       </div>
-      {open && readable && <OutputPanel output={{ ...tail, text: tail.lines }} />}
+      {open && readable && <OutputPanel output={{ ...tail, text }} />}
     </>
   );
 }
@@ -499,6 +501,7 @@ function FinishedCommandRow({
   const [open, setOpen] = useState(false);
   const readable = !disconnected && task.outputAvailable === true;
   const output = useOutputWindow(client, task.id, open && readable);
+  const text = useMemo(() => readableOutput(output.text), [output.text]);
   return (
     <>
       <div className="activity-strip-row" data-task={task.id} data-status={task.status}>
@@ -517,7 +520,7 @@ function FinishedCommandRow({
           </button>
         )}
       </div>
-      {open && readable && <OutputPanel output={output} />}
+      {open && readable && <OutputPanel output={{ ...output, text }} />}
     </>
   );
 }

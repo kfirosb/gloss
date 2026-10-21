@@ -8,6 +8,7 @@ import {
   lastActions,
   mainStatus,
   newestArrival,
+  readableOutput,
   sinceLastAction,
 } from '../../src/ui/activity-page.js';
 
@@ -111,5 +112,47 @@ describe('newestArrival', () => {
     expect(isHighlighted(arrival, first, 3000)).toBe(false);
     expect(isHighlighted(arrival, second, 1500)).toBe(false);
     expect(isHighlighted(undefined, first, 1500)).toBe(false);
+  });
+});
+
+describe('readableOutput', () => {
+  const ESC = '\u001b';
+  it('removes colour and other CSI sequences', () => {
+    expect(readableOutput(`${ESC}[32mok${ESC}[0m ${ESC}[1;31mfail${ESC}[39m\n`)).toBe('ok fail\n');
+    expect(readableOutput(`a${ESC}[2K${ESC}[1A${ESC}[?25lb${ESC}[?25h\n`)).toBe('ab\n');
+  });
+  it('removes OSC titles and links, ended by BEL or ST', () => {
+    expect(readableOutput(`${ESC}]0;my title\u0007ready\n`)).toBe('ready\n');
+    expect(readableOutput(`${ESC}]8;;https://x.test${ESC}\\link${ESC}]8;;${ESC}\\\n`)).toBe(
+      'link\n',
+    );
+  });
+  it('removes short escapes such as charset selection and cursor save', () => {
+    expect(readableOutput(`${ESC}(B${ESC}7x${ESC}8${ESC}=\n`)).toBe('x\n');
+  });
+  it('keeps the last overwrite of a carriage-return progress line', () => {
+    expect(readableOutput('10%\r50%\r100%\ndone\n')).toBe('100%\ndone\n');
+    expect(readableOutput('line one\r\nline two\r\n')).toBe('line one\nline two\n');
+    // A progress line still being written keeps its latest text, not an empty line.
+    expect(readableOutput('a\n10%\r20%\r')).toBe('a\n20%');
+  });
+  it('drops other control characters but keeps tabs and newlines', () => {
+    expect(readableOutput('a\u0007b\u0008\tc\u007f\u009b\n')).toBe('ab\tc\n');
+  });
+  it('drops a sequence cut off at the end of the text instead of showing a fragment', () => {
+    expect(readableOutput(`ok\n${ESC}`)).toBe('ok\n');
+    expect(readableOutput(`ok\n${ESC}[3`)).toBe('ok\n');
+    expect(readableOutput(`ok\n${ESC}]0;half a ti`)).toBe('ok\n');
+    expect(readableOutput(`ok\n${ESC}(`)).toBe('ok\n');
+  });
+  it('reads a sequence split across two chunks once they are joined', () => {
+    const first = `one ${ESC}[3`;
+    const second = `2mtwo${ESC}[0m\n`;
+    expect(readableOutput(first)).toBe('one ');
+    expect(readableOutput(first + second)).toBe('one two\n');
+  });
+  it('leaves plain text unchanged', () => {
+    const text = 'Running 279 tests\n  ✓ שלום [32m] 5m\n';
+    expect(readableOutput(text)).toBe(text);
   });
 });
