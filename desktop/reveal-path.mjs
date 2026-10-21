@@ -2,10 +2,14 @@
 // Trust boundary: the page is not trusted and never names an absolute path. It sends a session id and a path relative
 // to that session's folder; `locate` asks the local server, which resolves it with the same containment checks as
 // every other Files endpoint (relative only, no `..` or symlink escape, must exist). A file is only revealed
-// (showItemInFolder) and never opened, because opening a file would launch it; only a folder is opened.
-import { isAbsolute } from 'node:path';
+// (showItemInFolder) and never opened, because opening a file would launch it; only a plain folder is opened.
+import { basename, isAbsolute } from 'node:path';
 
 const MAX_PATH_CHARS = 4096;
+// On macOS an app, bundle, framework or package (`Foo.app`, `.pkg`, `.xcodeproj`) is a directory, and opening it
+// launches it. Any folder whose name has an extension is therefore revealed instead, on every platform; a folder
+// such as `v1.2` is revealed too, which is the accepted cost of the simple rule. Dot-folders (`.github`) open.
+const isPackageLike = (path) => /.\.[^./]+$/.test(basename(path));
 
 export function createRevealHandler({ locate, showItemInFolder, openPath, isDirectory }) {
   return {
@@ -27,7 +31,10 @@ export function createRevealHandler({ locate, showItemInFolder, openPath, isDire
       }
       if (!location || typeof location.path !== 'string' || !isAbsolute(location.path))
         return { error: 'File unavailable' };
-      if (location.kind === 'file') {
+      if (
+        location.kind === 'file' ||
+        (location.kind === 'directory' && isPackageLike(location.path))
+      ) {
         showItemInFolder(location.path);
         return { ok: true };
       }

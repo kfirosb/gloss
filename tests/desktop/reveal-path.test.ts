@@ -34,6 +34,22 @@ it('reveals a file without opening it, and opens a folder', async () => {
   expect(folder.calls).toEqual(['locate s src', 'open /work/src']);
 });
 
+it('reveals app bundles and other package-like folders instead of opening (launching) them', async () => {
+  for (const name of ['Foo.app', 'Tool.bundle', 'Kit.framework', 'App.xcodeproj', 'v1.2']) {
+    const bundle = harness({ path: `/work/${name}`, kind: 'directory' });
+    expect(await bundle.handler.handle({ sessionId: 's', relativePath: name })).toEqual({
+      ok: true,
+    });
+    expect(bundle.calls).toEqual([`locate s ${name}`, `reveal /work/${name}`]);
+  }
+  const plain = harness({ path: '/work/src', kind: 'directory' });
+  await plain.handler.handle({ sessionId: 's', relativePath: 'src' });
+  expect(plain.calls).toEqual(['locate s src', 'open /work/src']);
+  const dotFolder = harness({ path: '/work/.github', kind: 'directory' });
+  await dotFolder.handler.handle({ sessionId: 's', relativePath: '.github' });
+  expect(dotFolder.calls).toEqual(['locate s .github', 'open /work/.github']);
+});
+
 it('refuses paths the server rejects, relative answers and junk payloads', async () => {
   const outside = harness(new Error('File is outside the selected worktree'));
   expect(await outside.handler.handle({ sessionId: 's', relativePath: '../etc' })).toEqual({
