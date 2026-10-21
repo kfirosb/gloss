@@ -55,7 +55,7 @@ export function renderCask({ version, sha256 }) {
 
   url "https://github.com/${repository}/releases/download/v#{version}/Gloss-#{version}-#{arch}.dmg"
   name "Gloss"
-  desc "Talk to Claude Code and Codex in Hebrew or any language from your terminal"
+  desc "Translate Claude Code and Codex conversations into your language"
   homepage "https://github.com/${repository}"
 
   livecheck do
