@@ -11,6 +11,7 @@ import path from 'node:path';
 import type {
   BrowserPage,
   BrowserSearch,
+  FileLocation,
   FilePreview,
   FileReference,
 } from '../core/file-references.js';
@@ -101,6 +102,13 @@ export function createFileBrowser(
   }
   return {
     preview,
+    /** Resolves an entry for "Open in Finder" and "Copy path"; only regular files and folders inside the root. */
+    async locate(id: string, relativePath: string, signal: AbortSignal): Promise<FileLocation> {
+      const { canonical, info } = await lookup(id, relativePath, signal);
+      if (info.isDirectory()) return { path: canonical, kind: 'directory' };
+      if (info.isFile()) return { path: canonical, kind: 'file' };
+      throw new Error('Only files and folders can be located');
+    },
     async reviewText(id: string, relativePath: string, signal: AbortSignal) {
       const { canonicalRoot, canonical, info } = await lookup(id, relativePath, signal);
       if (!info.isFile()) throw new Error('Select a readable text file');

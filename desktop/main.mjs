@@ -2,9 +2,10 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
+import { createRevealHandler } from './reveal-path.mjs';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -13,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = () => join(app.getPath('userData'), 'desktop.json');
 let server;
+let serverCapability;
 let panelUrl;
 let mainWindow;
 let quitting = false;
@@ -111,6 +113,7 @@ async function boot() {
   config.capability ??= randomUUID();
   config.port ??= await freePort();
   writeConfig(config);
+  serverCapability = config.capability;
   const path = loginShellPath();
   // Keep the same port so browser-side recovery for this origin survives restarts; move only if it is taken.
   try {
@@ -192,6 +195,31 @@ function createWindow() {
   ipcMain.on('attention-alert', (event, payload) => {
     if (fromMainWindow(event)) alerts.handle(payload);
   });
+  // The server resolves the page's relative path inside the session folder; see reveal-path.mjs for the boundary.
+  const reveal = createRevealHandler({
+    locate: async (sessionId, relativePath) => {
+      const response = await fetch(
+        `${origin}/api/sessions/${encodeURIComponent(sessionId)}/files/locate?path=${encodeURIComponent(relativePath)}`,
+        { headers: { authorization: 'Bearer ' + serverCapability } },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error ?? 'File unavailable');
+      return body;
+    },
+    showItemInFolder: (path) => shell.showItemInFolder(path),
+    openPath: (path) => shell.openPath(path),
+    isDirectory: (path) => {
+      try {
+        return lstatSync(path).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+  });
+  ipcMain.removeHandler('reveal-path');
+  ipcMain.handle('reveal-path', (event, payload) =>
+    fromMainWindow(event) ? reveal.handle(payload) : { error: 'Not allowed' },
+  );
   mainWindow.on('focus', () => badge.refresh());
   mainWindow.on('blur', () => badge.refresh());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

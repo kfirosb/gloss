@@ -4,7 +4,7 @@ import { startServer } from '../../src/runtime/http-server.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
 import { FakeLanguageSession } from '../helpers/fake-language.js';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '../../src/core/contracts.js';
@@ -504,6 +504,20 @@ it('streams preview media only for an authenticated registered session without a
   expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(100);
   expect((await request('sessions/A/files/media?path=README.md')).status).toBe(400);
   expect(app.readWorkspace!('A').data.attachmentIds).toEqual([]);
+});
+it('locates an entry for Open in Finder only inside the session folder, with the capability', async () => {
+  const { request } = await setup();
+  const route = 'sessions/A/files/locate?path=package.json';
+  expect((await request(route, 'GET', undefined, false)).status).toBe(401);
+  expect(await (await request(route)).json()).toEqual({
+    path: join(await realpath(process.cwd()), 'package.json'),
+    kind: 'file',
+  });
+  expect(await (await request('sessions/A/files/locate?path=src')).json()).toMatchObject({
+    kind: 'directory',
+  });
+  expect((await request('sessions/A/files/locate?path=..')).status).toBe(400);
+  expect((await request('sessions/A/files/locate?path=%2Fetc')).status).toBe(400);
 });
 
 it('reviews the complete file, authenticates requests and rejects stale previews', async () => {

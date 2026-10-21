@@ -4,6 +4,7 @@ import type { FileReviewMode } from '../core/file-review-contracts.js';
 import type {
   BrowserPage,
   BrowserSearch,
+  FileLocation,
   FilePreview,
   FileReference,
 } from '../core/file-references.js';
@@ -210,6 +211,11 @@ export class SessionClient {
         '&version=' +
         encodeURIComponent(version),
       { signal },
+    );
+  }
+  locateFile(relativePath: string) {
+    return sessionRequest<FileLocation>(
+      this.base + '/files/locate?path=' + encodeURIComponent(relativePath),
     );
   }
   previewFile(relativePath: string, signal: AbortSignal) {

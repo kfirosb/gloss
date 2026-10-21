@@ -39,6 +39,11 @@ export interface FilePreview {
   dataUrl?: string;
   truncated?: boolean;
 }
+/** The absolute, symlink-resolved location of an entry inside a session's folder. */
+export interface FileLocation {
+  path: string;
+  kind: 'file' | 'directory';
+}
 export interface BrowserSearch {
   entries: { name: string; relativePath: string }[];
   limited: boolean;
@@ -58,6 +63,7 @@ export interface FileRegistry {
     signal: AbortSignal,
   ): Promise<BrowserPage>;
   preview(sessionId: string, relativePath: string, signal: AbortSignal): Promise<FilePreview>;
+  locate(sessionId: string, relativePath: string, signal: AbortSignal): Promise<FileLocation>;
   find(
     sessionId: string,
     query: string,

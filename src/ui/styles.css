@@ -1924,11 +1924,28 @@ pre {
   max-width: 100%;
   height: auto;
 }
+.file-preview-pane .preview-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+}
 .file-preview-pane .preview-path {
   margin: 0;
-  flex: none;
+  flex: 1;
+  min-width: 0;
   max-height: 3em;
   overflow: auto;
+}
+.file-location-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 0.75rem;
 }
 @media (max-width: 900px), (max-height: 540px) {
   .file-preview-pane {
