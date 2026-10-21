@@ -32,6 +32,7 @@ import {
   orderFolderTabs,
   chooseSessionForFolder,
   activityLabel,
+  folderHasLiveSessions,
 } from '../../src/ui/session-navigation.js';
 const at = (
   id: string,
@@ -96,6 +97,44 @@ it('chooses the last selected open session, else the first open, else none', () 
   expect(chooseSessionForFolder(folder, 'S')).toBe('S');
   expect(chooseSessionForFolder(folder, 'gone')).toBe('A');
   expect(chooseSessionForFolder({ ...folder, open: [] })).toBeUndefined();
+});
+it('a folder is live with a usable open session, a pending launch or a terminal', () => {
+  const repo = '/r/.git';
+  const folder = {
+    key: '/f',
+    name: 'f',
+    path: '/f',
+    main: true,
+    git: true,
+    missing: false,
+    terminals: [],
+    open: [],
+    saved: [at('S', repo, '/f', false)],
+  };
+  expect(folderHasLiveSessions(folder)).toBe(false);
+  expect(folderHasLiveSessions({ ...folder, open: [at('A', repo, '/f')] })).toBe(true);
+  const unavailable = { ...at('U', repo, '/f'), availability: 'unavailable' as const };
+  expect(folderHasLiveSessions({ ...folder, open: [unavailable] })).toBe(false);
+  const { sessionId: _omit, ...pending } = at('L', repo, '/f');
+  expect(
+    folderHasLiveSessions({ ...folder, open: [{ ...pending, launchState: 'starting' }] }),
+  ).toBe(true);
+  expect(
+    folderHasLiveSessions({ ...folder, open: [{ ...pending, launchState: 'unidentified' }] }),
+  ).toBe(true);
+  expect(folderHasLiveSessions({ ...folder, open: [{ ...pending, launchState: 'ended' }] })).toBe(
+    false,
+  );
+  const terminal = {
+    key: 't',
+    launchId: 'T1',
+    title: 'Terminal',
+    busy: false,
+    folder: '/f',
+    projectKey: repo,
+    projectName: 'r',
+  };
+  expect(folderHasLiveSessions({ ...folder, terminals: [terminal] })).toBe(true);
 });
 it('activity labels', () => {
   expect(activityLabel(at('A', '/r/.git', '/f', true, 'approval-required'))).toBe(

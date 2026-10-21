@@ -4500,3 +4500,52 @@ button.activity-agent-head {
 .live-terminal-line button {
   padding: 6px 12px;
 }
+/* The body of a folder with nothing open (task 33): centered, scrolls rather than clips in a short window. */
+.folder-empty {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: 6px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.folder-empty-new {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  border: 1.5px dashed light-dark(#b7c1d4, var(--dk-bg-b7c1d4));
+  border-radius: 12px;
+  color: light-dark(#2f5bd3, var(--dk-fg-2f5bd3));
+  font-size: 36px;
+  font-weight: 300;
+  line-height: 1;
+  padding: 0;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+.folder-empty-new:hover {
+  border-style: solid;
+  border-color: light-dark(#2f5bd3, var(--dk-bg-2f5bd3));
+}
+.folder-empty-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.folder-empty-text {
+  margin: 0;
+  max-width: 34ch;
+  color: light-dark(#647089, var(--dk-fg-647089));
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .folder-empty-new {
+    transition: none;
+  }
+}

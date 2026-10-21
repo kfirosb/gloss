@@ -38,6 +38,7 @@ import {
 } from './launch-controls.js';
 import { TerminalWorkspace } from './terminal-workspace.js';
 
+import { FolderEmptyState } from './folder-empty-state.js';
 import { SessionTabs } from './session-tabs.js';
 import { NewSessionDialog } from './new-session-dialog.js';
 import { useProjects } from './use-projects.js';
@@ -57,6 +58,7 @@ import {
   applySidebarSettings,
   removableSessions,
   chooseSessionForFolder,
+  folderHasLiveSessions,
   folderKeyFor,
   folderInside,
   reorderVisible,
@@ -145,12 +147,15 @@ function App() {
     } else setRemoval(null);
   };
   const [newOpen, setNewOpen] = useState(false);
+  const openNewSession = () => setNewOpen(true);
   const [launchTerminal, setLaunchTerminal] = useState<{
     launchId: string;
     title: string;
     terminal?: boolean;
   } | null>(null);
   const [waitingLaunchId, setWaitingLaunchId] = useState<string | undefined>();
+  // A launch the catalog does not list yet: the folder already counts as busy, so its empty state stays hidden.
+  const [unlistedLaunchId, setUnlistedLaunchId] = useState<string | undefined>();
   useKeystrokeTracker();
   const popupMode = usePopupMode();
   const [dismissedToasts, setDismissedToasts] = useState<string[]>([]);
@@ -169,6 +174,10 @@ function App() {
   const tree = buildProjectTree(allEntries, displayPrefs.tabOrder, projects.sources, terminals);
   const folders = tree.flatMap((project) => project.folders);
   const selectedEntry = allEntries.find((e) => e.sessionId === selected);
+  useEffect(() => {
+    if (unlistedLaunchId && allEntries.some((e) => e.launchId === unlistedLaunchId))
+      setUnlistedLaunchId(undefined);
+  }, [catalog?.sequence, unlistedLaunchId]);
   const selectedTarget = records.find((r) => r.id === selected)?.target;
   // Folder of the selection, also when the catalog lists its target under no (or another) session id.
   const selectedFolderEntry =
@@ -755,7 +764,7 @@ function App() {
           folder={activeFolder}
           selectedId={selected}
           onSelect={chooseSession}
-          onNewSession={() => setNewOpen(true)}
+          onNewSession={openNewSession}
           onEnd={endSession}
           onShowTerminal={(launchId, title) => setLaunchTerminal({ launchId, title })}
           selectedTerminalId={selectedTerminal || undefined}
@@ -886,6 +895,7 @@ function App() {
               return;
             }
             setWaitingLaunchId(launchId);
+            setUnlistedLaunchId(launchId);
             if (id) chooseSession(id);
           }}
         />
@@ -967,6 +977,13 @@ function App() {
           />
         ) : selected && !error ? (
           <p role="status">Loading workspace…</p>
+        ) : activeFolder && !error && !unlistedLaunchId && !folderHasLiveSessions(activeFolder) ? (
+          <FolderEmptyState
+            key={activeFolder.key}
+            folderName={activeFolder.name}
+            hasSaved={activeFolder.saved.length > 0}
+            onNewSession={openNewSession}
+          />
         ) : null}
       </div>
     </>

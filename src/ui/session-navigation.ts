@@ -245,6 +245,13 @@ export const removableSessions = (folder: FolderNode) =>
   folder.saved.filter(
     (e) => e.sessionId && !e.open && (!e.launchState || e.launchState === 'ended'),
   );
+// A launch still waiting for its panel has no session to select yet.
+export const launchPending = (entry: CatalogEntry) =>
+  !entry.sessionId && (entry.launchState === 'starting' || entry.launchState === 'unidentified');
+/** Whether the folder has anything running to show: a usable open session, a pending launch or a terminal. */
+export const folderHasLiveSessions = (folder: FolderNode) =>
+  folder.terminals.length > 0 ||
+  folder.open.some((e) => (e.sessionId && e.availability !== 'unavailable') || launchPending(e));
 export function chooseSessionForFolder(folder: FolderNode, lastSelected?: string) {
   const all = [...folder.open, ...folder.saved];
   if (lastSelected && all.some((e) => e.sessionId === lastSelected)) return lastSelected;

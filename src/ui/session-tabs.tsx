@@ -7,14 +7,13 @@ import type { TerminalEntry, TerminalView } from '../core/session-contracts.js';
 import {
   activityLabel,
   agentName,
+  folderHasLiveSessions,
+  launchPending,
   sessionIdentity,
   sessionTitle,
   type FolderNode,
 } from './session-navigation.js';
 
-// A launch still waiting for its panel has no session to select yet.
-const launchPending = (entry: CatalogEntry) =>
-  !entry.sessionId && (entry.launchState === 'starting' || entry.launchState === 'unidentified');
 const tabTitle = (entry: CatalogEntry) =>
   launchPending(entry)
     ? entry.launchState === 'starting'
@@ -534,8 +533,9 @@ export function SessionTabs({
           />
         </div>
       )}
-      {!open.some((e) => (e.sessionId && e.availability !== 'unavailable') || launchPending(e)) &&
-        !terminals.length && <p className="session-tabs-empty">No open sessions in this folder.</p>}
+      {!folderHasLiveSessions(folder) && (
+        <p className="session-tabs-empty">No open sessions in this folder.</p>
+      )}
       {saved.length > 0 && (
         <PopupMenu
           className="session-saved"
