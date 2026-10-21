@@ -358,9 +358,16 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
         row.availability = 'unavailable';
         row.activity = candidate.activity ?? 'unknown';
         row.reason = candidate.reason ?? 'Unsupported session';
-      } else if (row.target.agent === 'claude' && row.sessionId && !candidate) {
+      } else if (
+        row.target.agent === 'claude' &&
+        row.sessionId &&
+        !candidate &&
+        sessions.hasWorkflow(row.sessionId)
+      ) {
         // Metadata refresh can recover a quiet manual connection without any
-        // workflow event. Reproject its snapshot; never reconnect it here.
+        // workflow event. Reproject its snapshot; never reconnect it here. A saved
+        // session without a workflow takes the saved-row branch below instead of
+        // reloading its whole conversation every scan.
         const record = records.find((record) => record.id === row.sessionId);
         if (record) updateActivity(record, () => {});
       } else if (!row.open && metadata.get(row.target.projectId)?.value.available === true) {

@@ -1219,3 +1219,41 @@ it('a scan with many saved rows reads the session list once', async () => {
   expect(list.mock.calls.length).toBeLessThanOrEqual(2);
   expect(f.catalog.snapshot().entries.every((entry) => entry.sessionId)).toBe(true);
 });
+it('a scan does not snapshot saved Claude sessions and leaves their rows as they were', async () => {
+  const f = setup('claude');
+  // Sessions saved before a restart: registered, never connected, no workflow loaded.
+  for (const id of ['C0', 'C1', 'C2'])
+    f.store.registerSession({
+      id,
+      target: { agent: 'claude', sessionRef: id, projectId: process.cwd() },
+      canonicalRoot: process.cwd(),
+      projectName: 'Project',
+      enabled: true,
+    });
+  f.catalog.start();
+  await settle(
+    () =>
+      f.catalog.snapshot().entries.length === 3 &&
+      f.catalog.snapshot().entries.every((entry) => entry.branch === 'main'),
+  );
+  await delay(50);
+  const before = f.catalog.snapshot().entries;
+  expect(before.every((entry) => !entry.open && entry.availability === 'available')).toBe(true);
+  const snapshots = vi.spyOn(f.manager, 'snapshot');
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  await delay(50);
+  expect(snapshots).not.toHaveBeenCalled();
+  expect(f.catalog.snapshot().entries).toEqual(before);
+});
+it('a Claude row dropped by discovery while its workflow stays connected is still shown open', async () => {
+  const f = setup('claude');
+  f.setScan({ candidates: [claudeCandidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.setScan({ candidates: [], complete: true });
+  await vi.advanceTimersByTimeAsync(2000);
+  await settle(() => f.discoverOpen.mock.calls.length >= 2);
+  await delay(50);
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({ open: true, activity: 'idle' });
+});

@@ -51,6 +51,8 @@ export interface SessionManager {
   register(target: Target, conversationId?: string, signal?: AbortSignal): Promise<SessionRecord>;
   ensure(sessionId: string): Promise<Workflow>;
   snapshot(sessionId: string): SessionEnvelope;
+  /** Whether a workflow is loaded for the session (connected or cached disconnected); without one its state is the saved copy. */
+  hasWorkflow(sessionId: string): boolean;
   action(sessionId: string, action: Action): Promise<SessionEnvelope>;
   ingest(agent: AgentKind, message: SourceMessage): Promise<SessionEnvelope>;
   subscribe(sessionId: string, listener: (event: SessionEnvelope) => void): () => void;
@@ -272,6 +274,9 @@ export function createSessionManager(options: {
         .finally(() => opening.delete(id));
       opening.set(id, job);
       return job;
+    },
+    hasWorkflow(id) {
+      return workflows.has(id);
     },
     snapshot(id) {
       const record = recordFor(id);
