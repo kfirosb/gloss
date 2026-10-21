@@ -7,6 +7,7 @@ import type { LanguageSettings } from '../core/language-settings.js';
 import type { SessionClient } from './session-client.js';
 import type { FilesSide } from './display-preferences.js';
 import { errorMessage } from './error-message.js';
+import { FileLocationButtons } from './file-actions.js';
 export const FILE_DRAG_TYPE = 'application/x-session-file';
 /** The docked column's header controls. */
 interface FileColumnControls {
@@ -71,7 +72,7 @@ export function FileBrowser({
               relativePath: revealedFile,
               kind: 'file',
             }}
-            sessionId={client.sessionId}
+            client={client}
             selected
             onActivate={() => onPreview(revealedFile)}
           />
@@ -109,7 +110,7 @@ export function FileBrowser({
               <div key={entry.relativePath}>
                 <FileRow
                   entry={entry}
-                  sessionId={client.sessionId}
+                  client={client}
                   selected={selected === entry.relativePath}
                   onActivate={() => {
                     setSelected(entry.relativePath);
@@ -189,7 +190,10 @@ export function FilePreviewPane({
   return (
     <section className="file-preview-pane" aria-label="File contents" dir="ltr">
       {/* The popup's title bar names the file; the full path stays here. */}
-      <p className="preview-path">{path}</p>
+      <div className="preview-header">
+        <p className="preview-path">{path}</p>
+        <FileLocationButtons client={client} relativePath={path} />
+      </div>
       {error ? (
         <div className="preview-content">
           <p role="alert">Preview unavailable: {error}</p>

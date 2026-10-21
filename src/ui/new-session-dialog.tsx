@@ -21,6 +21,10 @@ declare global {
       pickFolder(): Promise<string | null>;
       setAttentionCount?(count: number): void;
       alert?(payload: { sound?: string; bounce: boolean }): void;
+      revealPath?(
+        sessionId: string,
+        relativePath: string,
+      ): Promise<{ ok: true } | { error: string }>;
     };
   }
 }

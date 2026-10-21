@@ -354,7 +354,10 @@ async function sessionRoute(
       }
       return true;
     }
-    if (['files/browse', 'files/preview', 'files/find'].includes(route) && req.method === 'GET') {
+    if (
+      ['files/browse', 'files/preview', 'files/find', 'files/locate'].includes(route) &&
+      req.method === 'GET'
+    ) {
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error('Client cancelled file browsing'));
       res.once('close', cancel);
@@ -370,12 +373,14 @@ async function sessionRoute(
               )
             : route === 'files/preview'
               ? await app.files.preview(id, relativePath, controller.signal)
-              : await app.files.find(
-                  id,
-                  url.searchParams.get('q') ?? '',
-                  (url.searchParams.get('mode') ?? 'name') as 'name' | 'content',
-                  controller.signal,
-                );
+              : route === 'files/locate'
+                ? await app.files.locate(id, relativePath, controller.signal)
+                : await app.files.find(
+                    id,
+                    url.searchParams.get('q') ?? '',
+                    (url.searchParams.get('mode') ?? 'name') as 'name' | 'content',
+                    controller.signal,
+                  );
         res.setHeader('cache-control', 'no-store');
         respond(res, 200, result);
       } finally {

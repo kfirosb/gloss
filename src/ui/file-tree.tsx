@@ -3,10 +3,11 @@ import type { BrowserEntry } from '../core/file-references.js';
 import type { SessionClient } from './session-client.js';
 import './file-tree.css';
 import { errorMessage } from './error-message.js';
+import { useFileEntryMenu } from './file-actions.js';
 
 export function FileRow({
   entry,
-  sessionId,
+  client,
   onActivate,
   selected = false,
   depth = 0,
@@ -14,7 +15,7 @@ export function FileRow({
   onKeyDown,
 }: {
   entry: BrowserEntry;
-  sessionId: string;
+  client: SessionClient;
   onActivate(): void;
   selected?: boolean;
   depth?: number;
@@ -22,46 +23,56 @@ export function FileRow({
   onKeyDown?(event: KeyboardEvent<HTMLButtonElement>): void;
 }) {
   const directory = entry.kind === 'directory';
+  const { row, triggers, menu } = useFileEntryMenu(client, entry.relativePath, entry.name);
   return (
-    <button
-      type="button"
-      className="file-tree-row"
-      style={depth ? { marginLeft: depth * 14, width: `calc(100% - ${depth * 14}px)` } : undefined}
-      title={entry.relativePath}
-      aria-label={`${directory ? 'Open folder' : 'Preview'} ${entry.name}`}
-      aria-expanded={directory ? Boolean(expanded) : undefined}
-      aria-current={selected ? 'true' : undefined}
-      draggable={!directory}
-      onDragStart={(event) => {
-        if (directory) return;
-        event.dataTransfer.setData(
-          'application/x-session-file',
-          JSON.stringify({ sessionId, relativePath: entry.relativePath }),
-        );
-        event.dataTransfer.effectAllowed = 'copy';
-      }}
-      onClick={onActivate}
-      onKeyDown={onKeyDown}
-    >
-      <svg className="file-tree-chevron" aria-hidden="true" viewBox="0 0 16 16">
-        {directory && <path d={expanded ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'} />}
-      </svg>
-      <svg
-        className={`file-tree-icon ${directory ? 'folder-icon' : 'document-icon'}`}
-        aria-hidden="true"
-        viewBox="0 0 16 16"
+    <>
+      <button
+        ref={row}
+        type="button"
+        className="file-tree-row"
+        style={
+          depth ? { marginLeft: depth * 14, width: `calc(100% - ${depth * 14}px)` } : undefined
+        }
+        title={entry.relativePath}
+        aria-label={`${directory ? 'Open folder' : 'Preview'} ${entry.name}`}
+        aria-expanded={directory ? Boolean(expanded) : undefined}
+        aria-current={selected ? 'true' : undefined}
+        draggable={!directory}
+        onDragStart={(event) => {
+          if (directory) return;
+          event.dataTransfer.setData(
+            'application/x-session-file',
+            JSON.stringify({ sessionId: client.sessionId, relativePath: entry.relativePath }),
+          );
+          event.dataTransfer.effectAllowed = 'copy';
+        }}
+        onClick={onActivate}
+        onContextMenu={triggers.onContextMenu}
+        onKeyDown={(event) => {
+          if (!triggers.onMenuKey(event)) onKeyDown?.(event);
+        }}
       >
-        {directory ? (
-          <path d={expanded ? 'M2 5V3h5l2 2h5v2M1 7h14l-2 6H2z' : 'M2 3h5l2 2h5v8H2z'} />
-        ) : (
-          <>
-            <path d="M4 2h5l3 3v9H4zM9 2v4h3" />
-            <path d="M6 9h4M6 11h3" />
-          </>
-        )}
-      </svg>
-      <span className="file-tree-name">{entry.name}</span>
-    </button>
+        <svg className="file-tree-chevron" aria-hidden="true" viewBox="0 0 16 16">
+          {directory && <path d={expanded ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'} />}
+        </svg>
+        <svg
+          className={`file-tree-icon ${directory ? 'folder-icon' : 'document-icon'}`}
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+        >
+          {directory ? (
+            <path d={expanded ? 'M2 5V3h5l2 2h5v2M1 7h14l-2 6H2z' : 'M2 3h5l2 2h5v8H2z'} />
+          ) : (
+            <>
+              <path d="M4 2h5l3 3v9H4zM9 2v4h3" />
+              <path d="M6 9h4M6 11h3" />
+            </>
+          )}
+        </svg>
+        <span className="file-tree-name">{entry.name}</span>
+      </button>
+      {menu}
+    </>
   );
 }
 interface FolderState {
@@ -184,7 +195,7 @@ function SessionFileTree({
           <li key={entry.relativePath}>
             <FileRow
               entry={entry}
-              sessionId={client.sessionId}
+              client={client}
               selected={selected === entry.relativePath}
               expanded={Boolean(folders[entry.relativePath]?.expanded)}
               onActivate={() => {

@@ -104,3 +104,8 @@
 .file-tree .file-tree-action:hover {
   background: light-dark(#f0f3f7, var(--dk-bg-f0f3f7));
 }
+.file-entries .file-row-note {
+  display: block;
+  padding: 0 5px 2px 24px;
+  font-size: 11px;
+}
