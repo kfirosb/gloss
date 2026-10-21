@@ -187,6 +187,41 @@ export async function requireSubscription(
   }
 }
 
+/** How long a confirmed subscription login is trusted before the CLI's status command runs again. */
+export const SUBSCRIPTION_SUCCESS_TTL_MS = 5_000;
+/**
+ * How long a failed subscription check is reused. Every session open asks for the check, and
+ * the catalog retries disconnected sessions every few seconds, so without this back-off a
+ * logged-out account runs the status command once per open; a new login is seen after it.
+ */
+export const SUBSCRIPTION_FAILURE_TTL_MS = 3_000;
+
+/** One backend's subscription check: shared while in flight, then reused for a short TTL. */
+export class SubscriptionCheck {
+  private pending: Promise<void> | undefined;
+  private expiresAt = 0;
+  constructor(
+    private readonly provider: 'claude' | 'codex',
+    private readonly options: BackendOptions,
+  ) {}
+  require(): Promise<void> {
+    const now = this.options.now ?? Date.now;
+    if (this.pending && now() < this.expiresAt) return this.pending;
+    const check = requireSubscription(this.provider, this.options);
+    this.pending = check;
+    // An in-flight check never expires; its TTL starts once it settles.
+    this.expiresAt = Infinity;
+    const settle = (ttlMs: number) => {
+      if (this.pending === check) this.expiresAt = now() + ttlMs;
+    };
+    check.then(
+      () => settle(SUBSCRIPTION_SUCCESS_TTL_MS),
+      () => settle(SUBSCRIPTION_FAILURE_TTL_MS),
+    );
+    return check;
+  }
+}
+
 /** One shared bound per backend, including all its logical language sessions. */
 export class LanguageWorkers {
   private active = 0;

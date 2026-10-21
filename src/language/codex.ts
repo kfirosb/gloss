@@ -6,7 +6,7 @@ import {
   classifyError,
   LanguageError,
   LanguageWorkers,
-  requireSubscription,
+  SubscriptionCheck,
   type BackendOptions,
   type ResponseParser,
   type SessionOptions,
@@ -58,9 +58,11 @@ function parser(): ResponseParser {
 }
 export class CodexLanguageBackend implements LanguageBackend {
   private readonly workers: LanguageWorkers;
+  private readonly subscription: SubscriptionCheck;
   private readonly cachePath: string;
   constructor(private readonly options: BackendOptions = {}) {
     this.cachePath = options.cachePath ?? join(codexHomeDir(), 'models_cache.json');
+    this.subscription = new SubscriptionCheck('codex', options);
     this.workers = new LanguageWorkers(
       {
         provider: 'codex',
@@ -137,7 +139,7 @@ export class CodexLanguageBackend implements LanguageBackend {
     _resumeId?: string,
     sessionOptions?: SessionOptions,
   ): Promise<LanguageSession> {
-    await requireSubscription('codex', this.options);
+    await this.subscription.require();
     return this.workers.session(model, sessionOptions);
   }
 }
