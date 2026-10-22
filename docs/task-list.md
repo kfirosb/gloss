@@ -17,7 +17,7 @@ Current builds are ad-hoc signed (`scripts/adhoc-sign.mjs`, `identity: null`) an
 
 ## 21. In-app updates from GitHub Releases
 
-Status: high priority, next up; unblocked on 2026-10-20 by task 20 (electron-updater refuses to update unsigned apps on macOS, and 0.19.0 is Developer ID signed and notarized). Own branch; about a day including the extra release needed to verify it.
+Status: implemented on branch feat/gloss-rename, not released. Earlier status: high priority, next up; unblocked on 2026-10-20 by task 20 (electron-updater refuses to update unsigned apps on macOS, and 0.19.0 is Developer ID signed and notarized). Own branch; about a day including the extra release needed to verify it.
 
 Today nobody who installed a version finds out about the next one: they keep the old build until they visit GitHub or run `brew upgrade --cask gloss`. With several releases a day, most users are always behind.
 

@@ -93,7 +93,7 @@ Notes from building on this Mac:
 - **Native builds.** This Mac has Command Line Tools only. `build:whisper` already sets its own flags; the node-pty rebuild inside `desktop:dmg` needs `CXXFLAGS="-nostdinc++ -isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"` (it rebuilds once per architecture).
 - **Bundled tmux and whisper.** `build:tmux` downloads and compiles tmux 3.5a. Copying `vendor/tmux/<arch>` and `vendor/whisper/<arch>` from an earlier release worktree is acceptable when `tmux -V` reports 3.5a, `file` reports the expected architecture, `otool -L` lists only `/usr/lib` and `/System` libraries and the whisper build recipe has not changed; say so in the release notes. An x64 binary runs on this Mac through Rosetta (`arch -x86_64 <binary>`).
 
-The expected outputs are `release/Gloss-<version>-arm64.dmg` and `release/Gloss-<version>-x64.dmg`. Verify each one's integrity and create a checksum beside it:
+The expected outputs are `release/Gloss-<version>-arm64.dmg` and `release/Gloss-<version>-x64.dmg`. The same command also writes the update assets the in-app updater downloads: `release/Gloss-<version>-arm64.zip`, `release/Gloss-<version>-x64.zip`, their `.blockmap` files and ONE `release/latest-mac.yml` listing both zips. Rebuilding a single architecture alone (as happened in 0.21.0 when Apple's timestamp service failed for arm64) rewrites `latest-mac.yml` with only that architecture, which would leave the other architecture's users without an update. After such a rebuild, rebuild both, or restore the combined file: keep a copy of `latest-mac.yml` before rebuilding, and verify the final one lists both zips with `sha512` values matching the files (`openssl dgst -sha512 -binary <zip> | base64`). Verify each one's integrity and create a checksum beside it:
 
 ```sh
 hdiutil verify 'release/Gloss-<version>-arm64.dmg'
@@ -115,7 +115,9 @@ xcrun stapler validate '<app>'                                                  
 spctl -a -vv -t exec '<app>'                                                         # "accepted" with "source=Notarized Developer ID"
 ```
 
-The bundled `Contents/Resources/bin/tmux` and `whisper-server` must show the same Developer ID authority (`codesign -dv` on each). A build whose `spctl` line says `Unnotarized Developer ID` was signed but not notarized: check the `APPLE_API_*` variables and rebuild rather than shipping it.
+The bundled `Contents/Resources/bin/tmux` and `whisper-server` must show the same Developer ID authority (`codesign -dv` on each). Run the same checks on the app inside each zip, since that is what the updater installs: unzip each zip into its own temporary directory outside the repository (`ditto -x -k` or `unzip`), run the `codesign`, `stapler` and `spctl` commands above on the extracted `Gloss.app`, and confirm `Contents/Resources/app-update.yml` exists in each packaged app (without it the app cannot check for updates).
+
+A build whose `spctl` line says `Unnotarized Developer ID` was signed but not notarized: check the `APPLE_API_*` variables and rebuild rather than shipping it.
 
 ## 5. Verify the packaged app
 
@@ -143,6 +145,8 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 4. Provide clickable local links to both DMGs and, when useful, their checksums and release notes. If the user asks for the release to be delivered, move the DMGs, their `.sha256` files and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
 5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
+GitHub release (only on the maintainer's explicit request). Create it as a DRAFT with every asset: both DMGs and their `.sha256` files, both zips and their `.blockmap` files, `latest-mac.yml`, and the Linux deb and AppImage with their `.sha256` files (see [linux-build.md](linux-build.md)). Check the uploaded asset list against that expected set (`gh release view v<version> --json assets`), then publish in one step with `gh release edit v<version> --draft=false`. Never publish a release with assets missing: a published release reaches every 0.22+ user within a week, because Gloss checks for updates at most every 7 days.
+
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Builds are Developer ID signed and notarized; say which `spctl` result each DMG's app gave, and if a build is only signed or only ad-hoc signed say so and do not deliver it as a release. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
 ## 7. Update the Homebrew tap after publishing
@@ -158,7 +162,7 @@ git commit -am 'Update gloss to <version>'
 git push
 ```
 
-`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
+`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. The cask declares `auto_updates true`, because the app updates itself. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
 
 ## 8. Replace the installed app only when requested
 

@@ -63,6 +63,7 @@ export function renderCask({ version, sha256 }) {
     strategy :github_latest
   end
 
+  auto_updates true
   depends_on macos: :ventura
 
   app "Gloss.app"
