@@ -4,6 +4,8 @@ import {
   IMAGE_LIMIT_MESSAGE,
   MAX_ATTACHMENTS,
   MAX_IMAGES,
+  type StreamedPreviewKind,
+  type UnpreviewedKind,
 } from './content-policy.js';
 
 export interface FileReference {
@@ -34,7 +36,12 @@ export interface FilePreview {
   relativePath: string;
   size: number;
   version?: string;
-  state: 'text' | 'image' | 'binary' | 'large';
+  state: 'text' | 'image' | 'binary' | 'large' | 'stream';
+  /**
+   * For 'stream' and 'large', the kind to show; for 'binary', why it is not previewed;
+   * 'svg' on a 'text' preview means the source can also be shown as an image.
+   */
+  kind?: StreamedPreviewKind | UnpreviewedKind | 'image';
   text?: string;
   dataUrl?: string;
   truncated?: boolean;
@@ -49,6 +56,11 @@ export interface BrowserSearch {
   limited: boolean;
   guidance: string;
 }
+export interface StreamableFile {
+  file: FileReference;
+  kind: StreamedPreviewKind;
+  identity: string;
+}
 export interface FileRegistry {
   reviewText(
     sessionId: string,
@@ -56,6 +68,12 @@ export interface FileRegistry {
     signal: AbortSignal,
   ): Promise<{ text: string; version: string }>;
   media(sessionId: string, relativePath: string, signal: AbortSignal): Promise<FileReference>;
+  /**
+   * Resolves a video, audio, PDF or SVG file inside the session's folder for a streamed preview,
+   * enforcing that kind's size limit. `identity` names the file (device and inode) so a later
+   * request can confirm it still reaches the same file.
+   */
+  streamable(sessionId: string, relativePath: string, signal: AbortSignal): Promise<StreamableFile>;
   browse(
     sessionId: string,
     relativePath: string,
