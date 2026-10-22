@@ -793,6 +793,23 @@ it('tracks a terminal as busy from the pane command and notifies subscribers whe
   expect(launcher.list()[0]!.busy).toBe(false);
   expect(seen).toEqual([false, true, false]);
 });
+it('keeps a launch running under the pre-rename la- tmux name through reconcile, and ends it there', async () => {
+  const { launcher, folder, t } = await setup();
+  const record = await launcher.launch({ agent: 'shell', folder });
+  const entry = t.live.get('gloss-' + record.id)!;
+  t.live.delete('gloss-' + record.id);
+  t.live.set('la-' + record.id, entry); // started by a version before the rename
+  await launcher.reconcile();
+  expect(launcher.list()[0]).toMatchObject({ state: 'running' });
+  t.tmux.sendKeys = async (n, k) => {
+    t.keys.push([n, k]);
+  };
+  const kill = vi.spyOn(t.tmux, 'killSession');
+  await launcher.end(record.id);
+  expect(t.keys).toEqual([['la-' + record.id, ['C-c']]]);
+  expect(kill).toHaveBeenCalledWith('la-' + record.id);
+  expect(t.live.has('gloss-' + record.id)).toBe(false);
+});
 it('ends a terminal with one Ctrl+C and an immediate kill, and deletes it on the next reconcile', async () => {
   const { launcher, folder, t, store } = await setup();
   const record = await launcher.launch({ agent: 'shell', folder });

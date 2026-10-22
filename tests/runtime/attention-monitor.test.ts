@@ -108,7 +108,7 @@ it('monitor reports needs-user, clears, and flags unknown versions without guess
   let screen = 'Working…';
   const timers: (() => void)[] = [];
   const monitor = createAttentionMonitor({
-    tmux: async () => ({ capturePane: async () => screen }) as any,
+    tmux: async () => ({ hasSession: async () => true, capturePane: async () => screen }) as any,
     launches: () => [
       { id: 'L1', agent: 'codex', folder: '/p', panePid: 2, state: 'running', createdAt: 0 },
       { id: 'L2', agent: 'claude', folder: '/p', panePid: 3, state: 'running', createdAt: 0 },
@@ -157,7 +157,7 @@ it('drops ended launches and notifies subscribers of changes', async () => {
     },
   ];
   const monitor = createAttentionMonitor({
-    tmux: async () => ({ capturePane: async () => '' }) as any,
+    tmux: async () => ({ hasSession: async () => true, capturePane: async () => '' }) as any,
     launches: () => launches,
     agentVersion: async () => '0.162.1',
     setTimer: ((fn: () => void) => {
@@ -188,7 +188,7 @@ it('never captures the pane of a launch whose agent version is unknown', async (
   const capturePane = vi.fn(async () => '');
   const timers: (() => void)[] = [];
   const monitor = createAttentionMonitor({
-    tmux: async () => ({ capturePane }) as any,
+    tmux: async () => ({ hasSession: async () => true, capturePane }) as any,
     launches: () => [
       { id: 'L1', agent: 'claude', folder: '/p', panePid: 2, state: 'running', createdAt: 0 },
     ],
@@ -211,7 +211,7 @@ it('retries a failed version probe after a backoff but caches a known version', 
   const results: (string | undefined)[] = [undefined, '0.162.1'];
   const agentVersion = vi.fn(async () => results.shift());
   const monitor = createAttentionMonitor({
-    tmux: async () => ({ capturePane: async () => '' }) as any,
+    tmux: async () => ({ hasSession: async () => true, capturePane: async () => '' }) as any,
     launches: () => [
       { id: 'L1', agent: 'codex', folder: '/p', panePid: 2, state: 'running', createdAt: 0 },
     ],
@@ -254,7 +254,7 @@ it('backs off capturing a pane that cannot be read instead of probing it every p
     throw new Error('no such session');
   });
   const monitor = createAttentionMonitor({
-    tmux: async () => ({ capturePane }) as any,
+    tmux: async () => ({ hasSession: async () => true, capturePane }) as any,
     launches: () => [
       { id: 'L1', agent: 'codex', folder: '/p', panePid: 2, state: 'unidentified', createdAt: 0 },
     ],

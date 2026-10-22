@@ -1,7 +1,7 @@
 import type { AgentKind } from '../core/contracts.js';
 import { classifyScreen, markersFor, type MarkerTable } from './attention-markers.js';
 import type { LaunchRecord } from './session-launcher.js';
-import { sessionNameFor, type Tmux } from './tmux.js';
+import { sessionNameOf, type Tmux } from './tmux.js';
 
 export type Attention = {
   launchId: string;
@@ -63,7 +63,7 @@ export function createAttentionMonitor(options: {
       return state.get(launch.id) ?? { launchId: launch.id, state: 'clear' };
     const screen = await options
       .tmux()
-      .then((t) => t.capturePane(sessionNameFor(launch.id)))
+      .then(async (t) => t.capturePane(await sessionNameOf(t, launch.id)))
       .then(
         (text) => {
           captureFailedAt.delete(launch.id);

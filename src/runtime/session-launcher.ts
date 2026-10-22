@@ -6,7 +6,13 @@ import type { AgentKind, Target } from '../core/contracts.js';
 import { validateLanguageOverride, type LanguageOverride } from '../core/language-settings.js';
 import { UNSAFE_COMMAND_CHARACTER, MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
 import type { SessionManager } from './session-manager.js';
-import { sessionNameFor, type Tmux } from './tmux.js';
+import {
+  hasLaunchSession,
+  liveSessionName,
+  sessionNameFor,
+  sessionNameOf,
+  type Tmux,
+} from './tmux.js';
 import type { LaunchSettings } from '../core/launch-settings.js';
 import { uuid } from '../agents/shared.js';
 import {
@@ -414,7 +420,7 @@ export function createSessionLauncher(options: {
     let busyChanged = false;
     for (const record of options.store.listLaunches()) {
       if (ending.has(record.id) || startedSince.has(record.id)) continue;
-      const pane = live.get(sessionNameFor(record.id));
+      const pane = live.get(liveSessionName(live, record.id));
       const panePid = pane?.panePid;
       if (record.state === 'ended') {
         // A launch marked missing while its tmux session lives on (a listing gap around a restart) is adopted back;
@@ -544,7 +550,7 @@ export function createSessionLauncher(options: {
       sessionRef,
       options.store.listLaunches(),
       options.panels(),
-      (launchId) => tmux.hasSession(sessionNameFor(launchId)),
+      (launchId) => hasLaunchSession(tmux, launchId),
     );
     if (glossOwnsSession({ owners })) throw new Error(MOVE_IN_GLOSS_REASON);
   }
@@ -641,11 +647,11 @@ export function createSessionLauncher(options: {
       const titleNumber = (r: LaunchRecord) => Number(TITLE.exec(r.title ?? 'Terminal')?.[1] ?? 1);
       const panes = new Map((await tmux.listSessions()).map((s) => [s.name, s.currentCommand]));
       const idle = liveShells(cwd)
-        .filter((r) => panes.get(sessionNameFor(r.id)) === shellName)
+        .filter((r) => panes.get(liveSessionName(panes, r.id)) === shellName)
         .sort((a, b) => titleNumber(a) - titleNumber(b))[0];
       if (idle) {
         busy.set(idle.id, true);
-        await tmux.typeText(sessionNameFor(idle.id), text);
+        await tmux.typeText(liveSessionName(panes, idle.id), text);
         if (origin && get(idle.id).originSessionId !== origin)
           put({ ...get(idle.id), originSessionId: origin });
         else notify();
@@ -729,7 +735,7 @@ export function createSessionLauncher(options: {
       cancel(launchId);
       const task = (async () => {
         const tmux = await options.tmux();
-        const name = sessionNameFor(launchId);
+        const name = await sessionNameOf(tmux, launchId);
         if (record.agent === 'shell') {
           await tmux.sendKeys(name, ['C-c']).catch(() => undefined);
           await tmux.killSession(name);

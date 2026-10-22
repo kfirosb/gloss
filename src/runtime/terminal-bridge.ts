@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import { isLoopbackOrigin, rejectUpgrade } from './loopback.js';
 import type { LaunchRecord } from './session-launcher.js';
 import { isTerminalWheel } from '../core/terminal-wheel.js';
-import { sessionNameFor, tmuxEnvironment, type Tmux } from './tmux.js';
+import { sessionNameOf, tmuxEnvironment, type Tmux } from './tmux.js';
 
 export interface PtyProcess {
   onData(cb: (d: Buffer) => void): void;
@@ -145,9 +145,10 @@ export function createTerminalBridge(options: {
           else ws.terminate();
         };
         let tmux: Tmux;
-        const name = sessionNameFor(launchId);
+        let name: string;
         try {
           tmux = await options.tmux();
+          name = await sessionNameOf(tmux, launchId);
           if (closed) return;
           proc = (options.spawnPty ?? nodePty)(tmux.attachArgv(name));
         } catch {

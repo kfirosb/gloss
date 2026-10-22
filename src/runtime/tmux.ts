@@ -20,16 +20,37 @@ export class TmuxUnavailable extends Error {
     );
   }
 }
+/** The name a NEW launch's tmux session gets. */
 export const sessionNameFor = (launchId: string) => 'gloss-' + launchId;
+/** The name sessions had before the rename; a launch started by an older version may still run under it. */
+const legacySessionNameFor = (launchId: string) => 'la-' + launchId;
+/** The name of an existing launch's session within a live listing: the pre-rename name only when that is what runs. */
+export const liveSessionName = (live: { has(name: string): boolean }, launchId: string): string =>
+  !live.has(sessionNameFor(launchId)) && live.has(legacySessionNameFor(launchId))
+    ? legacySessionNameFor(launchId)
+    : sessionNameFor(launchId);
+/** The one owner of resolving an existing launch to its tmux session (current or pre-rename name). */
+export async function sessionNameOf(
+  tmux: Pick<Tmux, 'hasSession'>,
+  launchId: string,
+): Promise<string> {
+  if (await tmux.hasSession(sessionNameFor(launchId))) return sessionNameFor(launchId);
+  if (await tmux.hasSession(legacySessionNameFor(launchId))) return legacySessionNameFor(launchId);
+  return sessionNameFor(launchId);
+}
+/** True while the launch's tmux session runs under either name. */
+export const hasLaunchSession = async (tmux: Pick<Tmux, 'hasSession'>, launchId: string) =>
+  (await tmux.hasSession(sessionNameFor(launchId))) ||
+  (await tmux.hasSession(legacySessionNameFor(launchId)));
 /** On macOS Homebrew first, then the app's bundled tmux; on Linux the bundled, tested tmux first and the
- * distribution's as fallback. The desktop shell passes the bundled path in LANGUAGE_ASSISTANT_TMUX because
+ * distribution's as fallback. The desktop shell passes the bundled path in GLOSS_TMUX because
  * process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */
 export function tmuxCandidates(
   env: NodeJS.ProcessEnv = process.env,
   resourcesPath = (process as { resourcesPath?: string }).resourcesPath,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  const bundled = env.LANGUAGE_ASSISTANT_TMUX;
+  const bundled = env.GLOSS_TMUX;
   const app = [
     ...(bundled && isAbsolute(bundled) ? [bundled] : []),
     ...(resourcesPath ? [join(resourcesPath, 'bin', 'tmux')] : []),

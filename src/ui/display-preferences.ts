@@ -46,8 +46,12 @@ export function readMigratedKey(storage: Storage, key: string, legacyKey: string
   const current = storage.getItem(key);
   const legacy = storage.getItem(legacyKey);
   if (legacy === null) return current;
-  if (current === null) storage.setItem(key, legacy);
-  storage.removeItem(legacyKey);
+  try {
+    if (current === null) storage.setItem(key, legacy);
+    storage.removeItem(legacyKey);
+  } catch {
+    /* Full or blocked storage: the readable value is still used, and the move is retried next time. */
+  }
   return current ?? legacy;
 }
 const defaults = (): DisplayPreferences => ({

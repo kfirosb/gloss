@@ -363,3 +363,18 @@ describe('readMigratedKey', () => {
     ).toBeNull();
   });
 });
+
+it('still reads a legacy value when the storage refuses to copy or remove it', () => {
+  const storage = {
+    getItem: (k: string) => (k === 'language-assistant:display:v1' ? '{"a":1}' : null),
+    setItem: () => {
+      throw new Error('quota');
+    },
+    removeItem: () => {
+      throw new Error('blocked');
+    },
+  } as unknown as Storage;
+  expect(readMigratedKey(storage, 'gloss:display:v1', 'language-assistant:display:v1')).toBe(
+    '{"a":1}',
+  );
+});

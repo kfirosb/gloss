@@ -17,10 +17,13 @@ import { fileURLToPath } from 'node:url';
 import {
   createTmux,
   ensureSocketDirectory,
+  hasLaunchSession,
   isGlossSessionName,
+  liveSessionName,
   locateTmux,
   MAX_PANE_ROW,
   sessionNameFor,
+  sessionNameOf,
   tmuxCandidates,
   TmuxUnavailable,
 } from '../../src/runtime/tmux.js';
@@ -91,17 +94,14 @@ it('falls back to the bundled tmux in resourcesPath when the Homebrew paths are 
 });
 it('checks the desktop-provided bundled tmux after Homebrew and before resourcesPath', () => {
   expect(
-    tmuxCandidates(
-      { LANGUAGE_ASSISTANT_TMUX: '/App/Contents/Resources/bin/tmux' },
-      '/Other/Resources',
-    ),
+    tmuxCandidates({ GLOSS_TMUX: '/App/Contents/Resources/bin/tmux' }, '/Other/Resources'),
   ).toEqual([
     '/opt/homebrew/bin/tmux',
     '/usr/local/bin/tmux',
     '/App/Contents/Resources/bin/tmux',
     '/Other/Resources/bin/tmux',
   ]);
-  expect(tmuxCandidates({ LANGUAGE_ASSISTANT_TMUX: 'relative/tmux' }, undefined)).toEqual([
+  expect(tmuxCandidates({ GLOSS_TMUX: 'relative/tmux' }, undefined)).toEqual([
     '/opt/homebrew/bin/tmux',
     '/usr/local/bin/tmux',
   ]);
@@ -201,9 +201,22 @@ it('accepts both prefixes in commands and lists both as Gloss sessions', async (
     },
   });
   expect((await tmux.listSessions()).map((s) => s.name)).toEqual(['la-old', 'gloss-new']);
-  await expect(tmux.hasSession('la-abc')).resolves.toBeDefined();
-  await expect(tmux.hasSession('gloss-abc')).resolves.toBeDefined();
+  calls.length = 0;
+  await tmux.hasSession('la-abc');
+  await tmux.hasSession('gloss-abc');
+  expect(calls.map((args) => args.slice(-1)[0])).toEqual(['=la-abc', '=gloss-abc']);
   await expect(tmux.hasSession('x-abc')).rejects.toThrow('Invalid tmux session name');
+});
+it('resolves an existing launch to whichever session name is running', async () => {
+  const has = (...names: string[]) => ({ hasSession: async (n: string) => names.includes(n) });
+  expect(await sessionNameOf(has('gloss-1', 'la-1'), '1')).toBe('gloss-1');
+  expect(await sessionNameOf(has('la-1'), '1')).toBe('la-1');
+  expect(await sessionNameOf(has(), '1')).toBe('gloss-1');
+  expect(await hasLaunchSession(has('la-1'), '1')).toBe(true);
+  expect(await hasLaunchSession(has('la-2'), '1')).toBe(false);
+  expect(liveSessionName(new Set(['la-1']), '1')).toBe('la-1');
+  expect(liveSessionName(new Set(['la-1', 'gloss-1']), '1')).toBe('gloss-1');
+  expect(liveSessionName(new Set<string>(), '1')).toBe('gloss-1');
 });
 describe.skipIf(!available)('with real tmux on a private socket', () => {
   it('creates, captures, resizes and kills a session in a path with spaces and Hebrew', async () => {
@@ -674,7 +687,7 @@ describe('scroll', () => {
 });
 
 it('prefers the bundled tmux on Linux and falls back to the distribution one', () => {
-  expect(tmuxCandidates({ LANGUAGE_ASSISTANT_TMUX: '/r/bin/tmux' }, '/res', 'linux')).toEqual([
+  expect(tmuxCandidates({ GLOSS_TMUX: '/r/bin/tmux' }, '/res', 'linux')).toEqual([
     '/r/bin/tmux',
     '/res/bin/tmux',
     '/usr/bin/tmux',

@@ -79,8 +79,8 @@ function startServer(port, capability, path) {
           LANGUAGE_PANEL_CAPABILITY: capability,
           ...(app.isPackaged
             ? {
-                LANGUAGE_ASSISTANT_TMUX: join(process.resourcesPath, 'bin', 'tmux'),
-                LANGUAGE_ASSISTANT_WHISPER: join(process.resourcesPath, 'bin', 'whisper-server'),
+                GLOSS_TMUX: join(process.resourcesPath, 'bin', 'tmux'),
+                GLOSS_WHISPER: join(process.resourcesPath, 'bin', 'whisper-server'),
               }
             : {}),
         },

@@ -66,6 +66,7 @@ async function setup(
       overrides.tmux ??
       (async () =>
         ({
+          hasSession: async (n: string) => n.startsWith('gloss-'),
           attachArgv: (n: string) => ['tmux', 'attach', n],
           resizeWindow: async (_n: string, c: number, r: number) => {
             resizes.push([c, r]);
@@ -136,6 +137,7 @@ it('routes wheel scrolling to tmux and leaves history browsing before forwarding
   const { bridge, connect, pty } = await setup(0, {
     tmux: async () =>
       ({
+        hasSession: async (n: string) => n.startsWith('gloss-'),
         attachArgv: (n: string) => ['tmux', 'attach', n],
         scroll: async (n: string, w: { lines: number; col: number; row: number }) => {
           events.push(`scroll ${n} ${w.lines} ${w.col},${w.row}`);
@@ -162,6 +164,18 @@ it('routes wheel scrolling to tmux and leaves history browsing before forwarding
   await new Promise((r) => setTimeout(r, 50));
   expect(events).toEqual(['scroll gloss-L1 -3 4,2', 'exit gloss-L1', 'scroll gloss-L1 2 1,1']);
   expect(pty.writes).toEqual(['a', 'b']);
+});
+it('attaches to a launch that still runs under the pre-rename la- session name', async () => {
+  const { bridge, connect, spawned } = await setup(0, {
+    tmux: async () =>
+      ({
+        hasSession: async (n: string) => n === 'la-L1',
+        attachArgv: (n: string) => ['tmux', 'attach', n],
+      }) as any,
+  });
+  const ws = connect(`/api/launches/L1/terminal?ticket=${bridge.issueTicket('L1').ticket}`);
+  await opened(ws);
+  expect(spawned[0]).toEqual(['tmux', 'attach', 'la-L1']);
 });
 it('rejects reused, expired, wrong-launch and missing tickets without spawning', async () => {
   const { bridge, connect, spawned, advance } = await setup();

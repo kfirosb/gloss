@@ -92,7 +92,7 @@ export function whisperCandidates(
   resourcesPath = (process as { resourcesPath?: string }).resourcesPath,
   start = dirname(fileURLToPath(import.meta.url)),
 ): string[] {
-  const explicit = env.LANGUAGE_ASSISTANT_WHISPER;
+  const explicit = env.GLOSS_WHISPER;
   const root = packageRoot(start);
   return [
     ...new Set([

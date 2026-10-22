@@ -19,7 +19,7 @@ import {
 import type { SessionManager } from './session-manager.js';
 import { createTerminalBridge } from './terminal-bridge.js';
 import { createClaudeMove } from './claude-move.js';
-import { createTmux, sessionNameFor, type Tmux } from './tmux.js';
+import { createTmux, hasLaunchSession, sessionNameFor, sessionNameOf, type Tmux } from './tmux.js';
 import { insideFolderReal } from './worktrees.js';
 import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
 
@@ -153,8 +153,9 @@ export function claudeLaunchFor(
 export function glossTerminalFor(
   tmux: Tmux,
   launch: Pick<LaunchRecord, 'id' | 'panePid'>,
+  /** The launch's resolved tmux session; new launches use the default. */
+  name = sessionNameFor(launch.id),
 ): GlossTerminal {
-  const name = sessionNameFor(launch.id);
   return {
     launchId: launch.id,
     panePid: launch.panePid,
@@ -329,15 +330,14 @@ export function createLaunchServices(options: {
     const launch = claudeLaunchFor(sessionRef, launcher.list(), options.store.listSessions());
     if (!launch) return undefined;
     const current = await tmux();
-    return (await current.hasSession(sessionNameFor(launch.id)))
-      ? glossTerminalFor(current, launch)
-      : undefined;
+    const name = await sessionNameOf(current, launch.id);
+    return (await current.hasSession(name)) ? glossTerminalFor(current, launch, name) : undefined;
   };
   /** Move to Gloss (spec 5): the service decides from Gloss's own launches and panels what an outside session is. */
   const claudeMove = createClaudeMove({
     launcher,
     panels: () => options.store.listSessions(),
-    paneAlive: async (launchId) => (await tmux()).hasSession(sessionNameFor(launchId)),
+    paneAlive: async (launchId) => hasLaunchSession(await tmux(), launchId),
   });
   return {
     launcher,

@@ -79,16 +79,11 @@ afterEach(() => vi.useRealTimers());
 
 describe('whisperCandidates', () => {
   it('prefers the explicit env path, then resources, then the repo vendor dir', () => {
-    const c = whisperCandidates(
-      { LANGUAGE_ASSISTANT_WHISPER: '/bundle/bin/whisper-server' },
-      '/App/Resources',
-    );
+    const c = whisperCandidates({ GLOSS_WHISPER: '/bundle/bin/whisper-server' }, '/App/Resources');
     expect(c[0]).toBe('/bundle/bin/whisper-server');
     expect(c[1]).toBe('/App/Resources/bin/whisper-server');
     expect(c[2]).toMatch(new RegExp(`vendor/whisper/${process.arch}/bin/whisper-server$`));
-    expect(
-      whisperCandidates({ LANGUAGE_ASSISTANT_WHISPER: 'relative/path' }, undefined),
-    ).toHaveLength(1);
+    expect(whisperCandidates({ GLOSS_WHISPER: 'relative/path' }, undefined)).toHaveLength(1);
   });
   it('resolves the vendor binary at the repository root from source and from the build', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
