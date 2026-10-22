@@ -29,19 +29,21 @@ export const liveSessionName = (live: { has(name: string): boolean }, launchId: 
   !live.has(sessionNameFor(launchId)) && live.has(legacySessionNameFor(launchId))
     ? legacySessionNameFor(launchId)
     : sessionNameFor(launchId);
-/** The one owner of resolving an existing launch to its tmux session (current or pre-rename name). */
-export async function sessionNameOf(
+/** The name an existing launch's session runs under (current or pre-rename), or undefined when neither runs. */
+export async function existingSessionName(
   tmux: Pick<Tmux, 'hasSession'>,
   launchId: string,
-): Promise<string> {
+): Promise<string | undefined> {
   if (await tmux.hasSession(sessionNameFor(launchId))) return sessionNameFor(launchId);
   if (await tmux.hasSession(legacySessionNameFor(launchId))) return legacySessionNameFor(launchId);
-  return sessionNameFor(launchId);
+  return undefined;
 }
+/** The one owner of resolving an existing launch to its tmux session; the current name when neither runs. */
+export const sessionNameOf = async (tmux: Pick<Tmux, 'hasSession'>, launchId: string) =>
+  (await existingSessionName(tmux, launchId)) ?? sessionNameFor(launchId);
 /** True while the launch's tmux session runs under either name. */
 export const hasLaunchSession = async (tmux: Pick<Tmux, 'hasSession'>, launchId: string) =>
-  (await tmux.hasSession(sessionNameFor(launchId))) ||
-  (await tmux.hasSession(legacySessionNameFor(launchId)));
+  (await existingSessionName(tmux, launchId)) !== undefined;
 /** On macOS Homebrew first, then the app's bundled tmux; on Linux the bundled, tested tmux first and the
  * distribution's as fallback. The desktop shell passes the bundled path in GLOSS_TMUX because
  * process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */

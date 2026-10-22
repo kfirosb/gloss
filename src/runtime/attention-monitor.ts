@@ -40,6 +40,17 @@ export function createAttentionMonitor(options: {
   // Known versions are cached for the monitor's life; failed or empty probes are retried after a backoff.
   const versions = new Map<AgentKind, { at: number; value: Promise<string | undefined> }>();
   const captureFailedAt = new Map<string, number>();
+  // A launch's tmux name is resolved once; polling then costs one capture per launch. A failed capture drops the
+  // name so the next attempt resolves it again.
+  const sessionNames = new Map<string, string>();
+  const capture = async (t: Tmux, launchId: string) => {
+    let name = sessionNames.get(launchId);
+    if (name === undefined) {
+      name = await sessionNameOf(t, launchId);
+      sessionNames.set(launchId, name);
+    }
+    return t.capturePane(name);
+  };
   const version = async (a: AgentKind) => {
     const cached = versions.get(a);
     if (cached && ((await cached.value) !== undefined || now() - cached.at < VERSION_RETRY_MS))
@@ -63,7 +74,7 @@ export function createAttentionMonitor(options: {
       return state.get(launch.id) ?? { launchId: launch.id, state: 'clear' };
     const screen = await options
       .tmux()
-      .then(async (t) => t.capturePane(await sessionNameOf(t, launch.id)))
+      .then((t) => capture(t, launch.id))
       .then(
         (text) => {
           captureFailedAt.delete(launch.id);
@@ -71,6 +82,7 @@ export function createAttentionMonitor(options: {
         },
         () => {
           captureFailedAt.set(launch.id, now());
+          sessionNames.delete(launch.id);
           return '';
         },
       );
@@ -106,6 +118,7 @@ export function createAttentionMonitor(options: {
           changed = true;
         }
       for (const id of [...captureFailedAt.keys()]) if (!seen.has(id)) captureFailedAt.delete(id);
+      for (const id of [...sessionNames.keys()]) if (!seen.has(id)) sessionNames.delete(id);
       if (changed)
         for (const l of listeners) {
           try {

@@ -592,3 +592,94 @@ it('finds the one live Claude launch of a session, directly or through its panel
     claudeLaunchFor('ref-a', [launch('a', { sessionRef: 'ref-a', agent: 'codex' })], []),
   ).toBeUndefined();
 });
+
+it('reaches a launch that still runs under its pre-rename tmux name', async () => {
+  const REF_E = '0b6a8f6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
+  const launches: LaunchRecord[] = [
+    {
+      id: 'A',
+      agent: 'claude',
+      folder: '/f',
+      panePid: 1,
+      state: 'running',
+      createdAt: 1,
+      sessionRef: 'ref-a',
+    },
+    {
+      id: 'E',
+      agent: 'claude',
+      folder: '/f',
+      panePid: 2,
+      state: 'ended',
+      createdAt: 2,
+      sessionRef: REF_E,
+    },
+  ];
+  const alive = new Set(['la-A', 'la-E']);
+  const has: string[] = [];
+  const styled: string[] = [];
+  const tmux = {
+    executable: '/t',
+    socket: '/s',
+    async listSessions() {
+      return [...alive].map((name) => ({ name, panePid: 1 }));
+    },
+    async hasSession(name: string) {
+      has.push(name);
+      return alive.has(name);
+    },
+    async capturePane() {
+      return '';
+    },
+    async capturePaneStyled(name: string) {
+      styled.push(name);
+      return '';
+    },
+    async sendKeys() {},
+    async resizeWindow() {},
+    async killSession() {},
+    async newSession() {
+      throw new Error('never launches');
+    },
+    attachArgv: () => [],
+  };
+  const services = createLaunchServices({
+    store: {
+      listSessions: () => [],
+      listLaunches: () => structuredClone(launches),
+      putLaunch() {},
+      readLaunchSettings: () => ({
+        extraArgs: { claude: [], codex: [] },
+        popup: 'auto',
+        terminalView: 'popup',
+      }),
+      writeLaunchSettings() {},
+      deleteLaunch() {},
+    } as any,
+    codex: { discoverOpen: async () => ({ candidates: [], complete: true }) } as any,
+    application: () => ({}),
+    tmux: async () => tmux as any,
+    runner: ps({}),
+  });
+  try {
+    const terminal = await services.glossTerminal('ref-a');
+    expect(has).toEqual(['gloss-A', 'la-A']);
+    await terminal!.capture();
+    expect(styled).toEqual(['la-A']);
+    alive.delete('la-A');
+    has.length = 0;
+    expect(await services.glossTerminal('ref-a')).toBeUndefined();
+    expect(has).toEqual(['gloss-A', 'la-A']);
+    // The ended launch's pane still runs as la-E, so the session is in Gloss (paneAlive).
+    has.length = 0;
+    expect(
+      await services.claudeMove.status({ agent: 'claude', sessionRef: REF_E, projectId: '/f' }),
+    ).toEqual({ state: 'in-gloss' });
+    expect(has).toEqual(['gloss-E', 'la-E']);
+  } finally {
+    services.launcher.close();
+    services.attention.close();
+    services.terminals.close();
+    services.claudeMove.close();
+  }
+});

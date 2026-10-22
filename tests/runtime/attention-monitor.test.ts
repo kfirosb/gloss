@@ -7,7 +7,7 @@ import {
   compareVersions,
   markersFor,
 } from '../../src/runtime/attention-markers.js';
-import { createAttentionMonitor } from '../../src/runtime/attention-monitor.js';
+import { CAPTURE_RETRY_MS, createAttentionMonitor } from '../../src/runtime/attention-monitor.js';
 
 const dir = 'tests/fixtures/screens';
 // Every verified Claude version has its own captured fixtures: two consent screens, the permission prompt, and idle/working negatives.
@@ -278,4 +278,97 @@ it('backs off capturing a pane that cannot be read instead of probing it every p
   timers.shift()!();
   await vi.waitFor(() => expect(capturePane).toHaveBeenCalledTimes(2));
   monitor.close();
+});
+describe('tmux session names of polled launches', () => {
+  const running = (id: string) =>
+    ({ id, agent: 'codex', folder: '/p', panePid: 2, state: 'running', createdAt: 0 }) as const;
+  const fakeTmux = (alive: Set<string>, calls: string[]) => ({
+    hasSession: async (name: string) => {
+      calls.push('has ' + name);
+      return alive.has(name);
+    },
+    capturePane: async (name: string) => {
+      calls.push('capture ' + name);
+      if (!alive.has(name)) throw new Error("can't find session: " + name);
+      return '';
+    },
+  });
+  const monitorOf = (
+    alive: Set<string>,
+    calls: string[],
+    launches: () => any[],
+    clock = () => 0,
+  ) => {
+    const timers: (() => void)[] = [];
+    const monitor = createAttentionMonitor({
+      tmux: async () => fakeTmux(alive, calls) as any,
+      launches,
+      agentVersion: async () => '0.162.1',
+      now: clock,
+      setTimer: ((fn: () => void) => {
+        timers.push(fn);
+        return 0 as any;
+      }) as any,
+    });
+    const poll = async () => {
+      timers.shift()!();
+      await vi.waitFor(() => expect(timers).toHaveLength(1));
+    };
+    return { monitor, timers, poll };
+  };
+  it('resolves each launch once, then only captures its pane, under either prefix', async () => {
+    const calls: string[] = [];
+    const { monitor, timers, poll } = monitorOf(new Set(['la-OLD', 'gloss-NEW']), calls, () => [
+      running('OLD'),
+      running('NEW'),
+    ]);
+    monitor.start();
+    await vi.waitFor(() => expect(timers).toHaveLength(1));
+    expect(calls).toEqual([
+      'has gloss-OLD',
+      'has la-OLD',
+      'capture la-OLD',
+      'has gloss-NEW',
+      'capture gloss-NEW',
+    ]);
+    for (let i = 0; i < 3; i++) {
+      calls.length = 0;
+      await poll();
+      expect(calls).toEqual(['capture la-OLD', 'capture gloss-NEW']);
+    }
+    monitor.close();
+  });
+  it('resolves the name again once after a capture fails, and forgets ended launches', async () => {
+    let clock = 0;
+    const calls: string[] = [];
+    const alive = new Set(['la-OLD']);
+    let launches = [running('OLD')];
+    const { monitor, timers, poll } = monitorOf(
+      alive,
+      calls,
+      () => launches,
+      () => clock,
+    );
+    monitor.start();
+    await vi.waitFor(() => expect(timers).toHaveLength(1));
+    alive.clear();
+    calls.length = 0;
+    await poll();
+    expect(calls).toEqual(['capture la-OLD']);
+    alive.add('gloss-OLD');
+    clock = CAPTURE_RETRY_MS;
+    calls.length = 0;
+    await poll();
+    expect(calls).toEqual(['has gloss-OLD', 'capture gloss-OLD']);
+    calls.length = 0;
+    await poll();
+    expect(calls).toEqual(['capture gloss-OLD']);
+    launches = [];
+    await poll();
+    launches = [running('OLD')];
+    calls.length = 0;
+    await poll();
+    expect(calls).toEqual(['has gloss-OLD', 'capture gloss-OLD']);
+    monitor.close();
+  });
 });
