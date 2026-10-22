@@ -26,6 +26,8 @@ export type DeliveryRoute = { transport: DeliveryTransport } | { transport: null
 export interface DeliveryEvidence {
   nativeMessageId: string;
 }
+/** Evidence of a terminal send that names its transcript record: the rest is that record's message `sourceId`. */
+export const TRANSCRIPT_EVIDENCE_PREFIX = 'transcript:';
 export const DIALOG_OPEN_REASON = 'A dialog is open in the terminal';
 /** Stored on a terminal send from its claim until typing starts; at startup it means nothing was typed. */
 export const CHECKING_TERMINAL_REASON = 'Checking the terminal';
@@ -40,6 +42,10 @@ export interface Target {
   sessionRef: string;
   projectId: string;
 }
+export const sameTarget = (left: Target, right: Target) =>
+  left.agent === right.agent &&
+  left.sessionRef === right.sessionRef &&
+  left.projectId === right.projectId;
 export interface ImageAttachment {
   kind?: 'image';
   index?: number;
@@ -61,8 +67,20 @@ export interface Draft {
   localizedText: string;
   englishText: string;
 }
+/** A composer request's draft (`composer-<requestId>`); prepared instructions use other ids. */
+export const isComposerDraftId = (draftId: string) => draftId.startsWith('composer-');
+/** Text as the user wrote it in the composer, before Gloss translated it for the agent. */
+export interface WrittenText {
+  language: string;
+  text: string;
+}
 export interface Delivery {
   transport?: DeliveryTransport;
+  /**
+   * A composer send's text as the user wrote it: its draft's localized text, read from the draft and never stored on
+   * the delivery row. Prepared instructions have none.
+   */
+  written?: WrittenText;
   channelGeneration?: string;
   referenceFormat?: 'manifest-v1';
   attachments?: Attachment[];

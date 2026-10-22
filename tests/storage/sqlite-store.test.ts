@@ -366,7 +366,10 @@ it('persists composer delivery separately from the prepared review across reopen
     })),
   );
   expect(restored.composerDraft).toEqual(state.composerDraft);
-  expect(restored.deliveries).toContainEqual(receipt);
+  expect(restored.deliveries).toContainEqual({
+    ...receipt,
+    written: { language: 'he', text: 'Composer source' },
+  });
   reopened.close();
 });
 
@@ -456,5 +459,42 @@ it('recovers a terminal send stopped before typing, and a held row from a pre-re
     state: 'unconfirmed',
     transport: 'channel',
   });
+  reopened.close();
+});
+it('restores what the user wrote for composer deliveries only, and a native user record id, across reopen', () => {
+  const path = databasePath();
+  const store = new SqliteStore(path);
+  const state = snapshot();
+  state.codingMessages[0] = { ...state.codingMessages[0]!, clientId: 'a1b2c3d4' };
+  state.composerDraft = {
+    ...state.currentDraft!,
+    id: 'composer-request',
+    revision: 1,
+    language: 'he',
+    localizedText: 'תקן את הבדיקה',
+    englishText: 'Fix the test',
+  };
+  store.save(state);
+  store.claimDelivery({
+    ...delivery,
+    id: 'composer-delivery',
+    draftId: 'composer-request',
+    revision: 1,
+    englishText: 'Fix the test',
+    // Never stored on the delivery row; the draft supplies it on load.
+    written: { language: 'en', text: 'ignored' },
+  });
+  store.claimDelivery(delivery);
+  store.close();
+  const reopened = new SqliteStore(path);
+  const restored = reopened.load(state.id)!;
+  expect(restored.deliveries.find((item) => item.id === 'composer-delivery')?.written).toEqual({
+    language: 'he',
+    text: 'תקן את הבדיקה',
+  });
+  // A prepared instruction's localized text was written by the assistant, not the user.
+  expect(restored.deliveries.find((item) => item.id === delivery.id)).not.toHaveProperty('written');
+  expect(restored.codingMessages.find((m) => m.sourceId === 'm1')?.clientId).toBe('a1b2c3d4');
+  expect(restored.codingMessages.find((m) => m.sourceId === 'm2')).not.toHaveProperty('clientId');
   reopened.close();
 });

@@ -19,7 +19,9 @@ import {
   isAwaitingEvidence,
   isDeliverySubmitted,
   isDeliveryTransport,
+  isComposerDraftId,
   isDeliveryUnresolved,
+  sameTarget,
   sendGate,
   type Attachment,
   type DeliveryEvidence,
@@ -150,11 +152,6 @@ function assertAttachmentLimits(attachments: readonly Attachment[]) {
   )
     throw new Error(ATTACHMENT_AND_IMAGE_LIMIT_MESSAGE);
 }
-
-const sameTarget = (left: Target, right: Target) =>
-  left.agent === right.agent &&
-  left.sessionRef === right.sessionRef &&
-  left.projectId === right.projectId;
 
 export function createWorkflow(deps: WorkflowDependencies): Workflow {
   const createId =
@@ -1551,6 +1548,9 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         revision: draft.revision,
         target: copy(draft.target),
         englishText,
+        ...(isComposerDraftId(draft.id)
+          ? { written: { language: draft.language, text: draft.localizedText } }
+          : {}),
         ...(attachments.length
           ? {
               attachments: copy(attachments),
