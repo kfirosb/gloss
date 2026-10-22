@@ -8,12 +8,25 @@ const state = vi.hoisted(() => ({
     experimental: true,
     instructions: 'This makes one model request when run.',
   })),
+  migration: vi.fn(async (): Promise<{ kind: string }> => ({ kind: 'already-new' })),
+  opened: vi.fn(),
+}));
+// Never run the real migration from a test: it would act on the real home folder.
+vi.mock('../../src/runtime/data-migration.js', () => ({
+  migrateDataDir: state.migration,
+  stateDbInUse: async () => false,
 }));
 vi.mock('../../src/runtime/claude-channel-setup.js', () => ({
   createNewSessionSetup: state.prepare,
 }));
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
-vi.mock('../../src/storage/sqlite-store.js', () => ({ SqliteStore: class {} }));
+vi.mock('../../src/storage/sqlite-store.js', () => ({
+  SqliteStore: class {
+    constructor(path: string) {
+      state.opened(path);
+    }
+  },
+}));
 vi.mock('../../src/agents/claude/index.js', () => ({ createClaudeAdapter: () => ({}) }));
 vi.mock('../../src/agents/codex/index.js', () => ({
   createCodexAdapter: (options: any) => {
@@ -72,4 +85,16 @@ it('installs the local source sink before registered adapters replay', async () 
   } finally {
     output.mockRestore();
   }
+});
+it('migrates the data folder before opening the database, and stops while it is in use', async () => {
+  state.migration.mockClear();
+  state.opened.mockClear();
+  state.migration.mockResolvedValueOnce({ kind: 'in-use' });
+  await expect(launch(['--agent', 'codex', '--session', 'native'])).rejects.toThrow(
+    /Another copy of Gloss is still running/,
+  );
+  expect(state.migration).toHaveBeenCalledWith(
+    expect.objectContaining({ home: expect.any(String) }),
+  );
+  expect(state.opened).not.toHaveBeenCalled();
 });

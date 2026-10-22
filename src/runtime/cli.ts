@@ -1,6 +1,8 @@
 import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { dataDir } from './data-dir.js';
+import { migrateDataDir, stateDbInUse } from './data-migration.js';
 import { pathToFileURL } from 'node:url';
 import { INITIAL_LANGUAGE_DEFAULTS } from '../core/language-settings.js';
 import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
@@ -69,6 +71,16 @@ export async function launch(args: string[]) {
     import('../agents/codex/index.js'),
     import('../agents/source-sink.js'),
   ]);
+  // Before anything opens state.db: the desktop app has usually done this already and this call finds `already-new`.
+  const migration = await migrateDataDir({
+    home: homedir(),
+    inUse: (path) => stateDbInUse(path),
+    log: (message) => process.stderr.write(message + '\n'),
+  });
+  if (migration.kind === 'in-use')
+    throw new Error(
+      'Another copy of Gloss is still running and using ~/.language-assistant. Quit it, then start again.',
+    );
   const root = dataDir();
   await mkdir(root, { recursive: true, mode: 0o700 });
   const store = new SqliteStore(join(root, 'state.db'));

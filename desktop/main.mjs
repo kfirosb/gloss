@@ -3,13 +3,14 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
 import { createRevealHandler } from './reveal-path.mjs';
+import { migrateUserData } from './migrate-user-data.mjs';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = () => join(app.getPath('userData'), 'desktop.json');
@@ -108,7 +109,35 @@ function startServer(port, capability, path) {
   });
 }
 
+// Moves ~/.language-assistant to ~/.gloss before the backend opens it. Returns false when the user chose Quit
+// because an older copy of Gloss still has the old database open.
+async function migrateDataFolder() {
+  const { migrateDataDir, stateDbInUse } = await import(
+    pathToFileURL(join(appRoot, 'dist/server/runtime/data-migration.js')).href
+  );
+  for (;;) {
+    const result = await migrateDataDir({
+      home: homedir(),
+      inUse: (path) => stateDbInUse(path),
+      log: (message) => console.log(message),
+    });
+    if (result.kind !== 'in-use') return true;
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      message: 'Another copy of Gloss is still running. Quit it, then choose Retry.',
+      buttons: ['Retry', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return false;
+  }
+}
+
 async function boot() {
+  if (!(await migrateDataFolder())) {
+    app.quit();
+    return false;
+  }
   const config = readConfig();
   config.capability ??= randomUUID();
   config.port ??= await freePort();
@@ -123,6 +152,7 @@ async function boot() {
     writeConfig(config);
     server = await startServer(config.port, config.capability, path);
   }
+  return true;
 }
 
 function createWindow() {
@@ -241,6 +271,30 @@ function createWindow() {
   void mainWindow.loadURL(panelUrl);
 }
 
+// userData must be final before the single-instance lock, which lives there. The settings folder took the package
+// name before the rename; move it once, never merging into an existing Gloss folder.
+{
+  const appData = app.getPath('appData');
+  try {
+    const outcome = migrateUserData({
+      appData,
+      legacyName: 'language-assistant',
+      name: 'Gloss',
+      rename: renameSync,
+      exists: existsSync,
+    });
+    if (outcome === 'both-exist')
+      console.log(
+        `Both settings folders exist in ${appData}; using Gloss and leaving language-assistant untouched.`,
+      );
+  } catch (error) {
+    console.error(
+      `Could not move the settings folder: ${error instanceof Error ? error.message : error}`,
+    );
+  }
+  app.setPath('userData', join(appData, 'Gloss'));
+}
+
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.setName('Gloss');
@@ -263,7 +317,9 @@ else {
   app
     .whenReady()
     .then(boot)
-    .then(createWindow)
+    .then((started) => {
+      if (started) createWindow();
+    })
     .catch(async (error) => {
       dialog.showErrorBox(
         'Gloss could not start',
