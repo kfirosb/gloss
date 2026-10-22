@@ -22,11 +22,11 @@
     "test:e2e": "playwright test",
     "start": "node dist/server/runtime/cli.js",
     "desktop": "npm run build && electron .",
-    "desktop:package": "npm run build && electron-builder --mac --dir",
-    "desktop:dmg": "npm run build && electron-builder --mac dmg",
+    "desktop:package": "npm run build && electron-builder --mac --dir -p never",
+    "desktop:dmg": "npm run build && electron-builder --mac dmg zip -p never",
     "desktop:install": "sh scripts/install-mac.sh",
     "predesktop:linux": "node scripts/check-linux-vendor.mjs",
-    "desktop:linux": "npm run build && node scripts/stage-linux-node-pty.mjs && electron-builder --linux -c.npmRebuild=false",
+    "desktop:linux": "npm run build && node scripts/stage-linux-node-pty.mjs && electron-builder --linux -c.npmRebuild=false -p never",
     "build:linux-vendor": "sh scripts/build-linux-vendor.sh x64 && sh scripts/build-linux-vendor.sh arm64",
     "build:tmux": "sh scripts/build-tmux.sh",
     "build:whisper": "sh scripts/build-whisper.sh",
@@ -37,6 +37,7 @@
     "@vitejs/plugin-react": "6.1.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "electron-updater": "6.8.11",
     "node-pty": "1.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -63,6 +64,13 @@
     "productName": "Gloss",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kfirosb",
+        "repo": "gloss"
+      }
+    ],
     "directories": {
       "output": "release"
     },

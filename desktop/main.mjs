@@ -3,6 +3,8 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
 import { createRevealHandler } from './reveal-path.mjs';
+import { createUpdater } from './updater.mjs';
+import electronUpdater from 'electron-updater';
 import {
   IN_USE_MESSAGE,
   migrateUserData,
@@ -39,6 +41,9 @@ let serverCapability;
 let panelUrl;
 let mainWindow;
 let quitting = false;
+// The 7-day rule lives in the updater; this only wakes it up, so a long-running app still checks about weekly.
+const UPDATE_POLL_MS = 6 * 60 * 60 * 1000;
+let updatePoll;
 
 function readConfig() {
   try {
@@ -276,6 +281,37 @@ function createWindow() {
   ipcMain.handle('reveal-path', (event, payload) =>
     fromMainWindow(event) ? reveal.handle(payload) : { error: 'Not allowed' },
   );
+  // Update notice: the full state goes to the page on every change; the page may also ask for it once on load.
+  const { autoUpdater } = electronUpdater;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  const updates = createUpdater({
+    updater: autoUpdater,
+    now: Date.now,
+    store: {
+      lastCheck: () => {
+        const last = readConfig().lastUpdateCheck;
+        return typeof last === 'number' ? last : undefined;
+      },
+      setLastCheck: (time) => writeConfig({ ...readConfig(), lastUpdateCheck: time }),
+    },
+    platform: process.platform,
+    openExternal: (url) => shell.openExternal(url),
+    send: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('update-state', state);
+    },
+  });
+  ipcMain.removeHandler('update-state');
+  ipcMain.handle('update-state', (event) => (fromMainWindow(event) ? updates.state() : null));
+  ipcMain.removeHandler('update-check');
+  ipcMain.handle('update-check', async (event) => {
+    if (fromMainWindow(event)) await updates.checkNow();
+  });
+  ipcMain.removeHandler('update-install');
+  ipcMain.handle('update-install', async (event) => {
+    if (fromMainWindow(event)) await updates.install();
+  });
   mainWindow.on('focus', () => badge.refresh());
   mainWindow.on('blur', () => badge.refresh());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -288,9 +324,15 @@ function createWindow() {
       if (/^https?:/.test(url)) void shell.openExternal(url);
     }
   });
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    void updates.maybeCheck();
+  });
+  clearInterval(updatePoll);
+  updatePoll = setInterval(() => void updates.maybeCheck(), UPDATE_POLL_MS);
   mainWindow.on('close', () => writeConfig({ ...readConfig(), bounds: mainWindow.getBounds() }));
   mainWindow.on('closed', () => {
+    clearInterval(updatePoll);
     badge.clear();
     mainWindow = undefined;
   });
