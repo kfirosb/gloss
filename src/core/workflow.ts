@@ -57,7 +57,11 @@ import {
   needsSendTranslation,
   type LanguageSettings,
 } from './language-settings.js';
-import { translateMessageResult } from './translations.js';
+import {
+  composerLiteralPattern,
+  translateKeepingLiterals,
+  translateMessageResult,
+} from './translations.js';
 import type { ActivityEvent } from './activity-contracts.js';
 import { applyActivityEvent, emptyActivity } from './activity.js';
 import { orderAgentMessages, type SendContext } from './contracts.js';
@@ -1144,11 +1148,22 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
         throw new Error(`Enter text to translate (at most ${MAX_TEXT_CHARS} characters)`);
       if (!needsSendTranslation(settings)) return text;
       const version = languageContextVersion;
+      // Attachment references stay verbatim so "@Image 3" still names the References block's Image 3.
       const result = await languageOperation(version, (signal) =>
-        deps.languageSession.translate(text, languageName(settings.send), signal),
+        translateKeepingLiterals(
+          text,
+          composerLiteralPattern(),
+          (protectedText) =>
+            deps.languageSession.translate(protectedText, languageName(settings.send), signal),
+          signal,
+        ),
       );
       requireOpen();
       requireCurrentContext(version);
+      if (result === undefined)
+        throw new Error(
+          'Translation dropped an attachment reference; your input is preserved. Try again.',
+        );
       if (!result.trim()) throw new Error('Translation returned no text; your input is preserved');
       return result;
     },

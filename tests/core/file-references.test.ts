@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
 import { createTestWorkflow } from '../helpers/create-test-workflow.js';
 import type { FileReference } from '../../src/core/file-references.js';
-import { attachmentManifest } from '../../src/core/file-references.js';
+import { attachmentManifest, attachmentMention } from '../../src/core/file-references.js';
 import { codexMessage } from '../../src/agents/codex/index.js';
+import { claudeMessage } from '../../src/agents/claude/index.js';
 const file = (id: string, index: number): FileReference => ({
   id,
   index,
@@ -244,5 +245,56 @@ it('amends the captured instruction while excluding later discussion and file me
   ]);
   expect(input.discussion).toEqual([]);
   expect(app.workflow.snapshot().currentDraft?.attachments).toEqual([file('feature', 1)]);
+  await app.workflow.close();
+});
+const image = (id: string, index: number): FileReference => ({
+  ...file(id, index),
+  kind: 'image',
+  name: `${id}.png`,
+  path: `/p/${id}.png`,
+  mime: 'image/png',
+});
+it('names an attachment the same way in message text and in the References block for both agents', () => {
+  const files = [image('shot', 3), file('notes', 2)];
+  const text = `Compare ${attachmentMention(files[0]!)} with ${attachmentMention(files[1]!)}`;
+  expect(text).toBe('Compare @Image 3 with @File 2');
+  for (const message of [codexMessage(text, files), claudeMessage(text, files)]) {
+    expect(message).toBe(`${text}\n\n${attachmentManifest(files)}`);
+    expect(message).toContain('\nImage 3: name="shot.png"');
+    expect(message).toContain('\nFile 2: name="notes.ts"');
+  }
+});
+it('keeps attachment references verbatim when a Hebrew composer message is translated', async () => {
+  const app = await createTestWorkflow({
+    capabilities: { fileReferences: true },
+    deliveryResult: { state: 'queued' },
+  });
+  app.language.translateTransform = (text) =>
+    text
+      .replace('תסתכל על', 'Look at')
+      .replace('ותקן את', 'and fix')
+      .replace('הכפתור', 'the button')
+      .replace('לפי', 'per');
+  const sentence = 'תסתכל על @Image 3 ותקן את הכפתור לפי @File 2';
+  await app.workflow.sendComposer('refs', sentence, [image('shot', 3), file('notes', 2)]);
+  // The model never sees the reference itself, so it cannot translate or renumber it.
+  expect(app.language.translated.at(-1)).toBe(
+    'תסתכל על ⟪LITERAL_0⟫ ותקן את הכפתור לפי ⟪LITERAL_1⟫',
+  );
+  expect(app.language.translatedLanguages.at(-1)).toBe('English');
+  expect(app.agent.sent[0]?.englishText).toBe('Look at @Image 3 and fix the button per @File 2');
+  await app.workflow.close();
+});
+it('refuses a composer translation that loses an attachment reference and keeps the text unsent', async () => {
+  const app = await createTestWorkflow({ capabilities: { fileReferences: true } });
+  app.language.translateTransform = () => 'Look at the screenshot';
+  await expect(app.workflow.translateComposer('תסתכל על @Image 3')).rejects.toThrow(
+    'attachment reference',
+  );
+  expect(app.language.translated).toHaveLength(2);
+  await expect(
+    app.workflow.sendComposer('lost', 'תסתכל על @Image 3', [image('shot', 3)]),
+  ).rejects.toThrow('preserved');
+  expect(app.agent.sent).toHaveLength(0);
   await app.workflow.close();
 });

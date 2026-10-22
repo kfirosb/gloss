@@ -27,7 +27,12 @@ import { FilesWindow } from './files-window.js';
 import { FilePicker, type FilePickerHandle } from './file-picker.js';
 import { InventoryPicker, detectInvocation, type InvocationMention } from './inventory-picker.js';
 import type { CardReference } from './attachment-cards.js';
-import type { FileReference } from '../core/file-references.js';
+import { attachmentLabel, isFileReference, type FileReference } from '../core/file-references.js';
+import {
+  insertAttachmentMentions,
+  removeAttachmentMention,
+  type TextRange,
+} from './attachment-mentions.js';
 import { MovableWorkspace } from './movable-workspace.js';
 import {
   DEFAULT_LIVE_LAYOUT,
@@ -649,25 +654,14 @@ export function SessionWorkspace({
         throw new Error('Attachment does not belong to this session');
       await addReference(file);
       workspace.update((data) => {
-        const reference = `@${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`;
-        if (new RegExp(reference + '(?![0-9])').test(data.composer)) return;
-        if (
+        const end = data.composer.length;
+        const range =
           token &&
           data.composer.slice(token.start, token.end) === '@' + token.query &&
           !/[^\s]/.test(data.composer[token.end] ?? '')
-        )
-          data.composer =
-            data.composer.slice(0, token.start) +
-            REFERENCE_MARK +
-            reference +
-            ' ' +
-            data.composer.slice(token.end);
-        else
-          data.composer +=
-            (data.composer && !/\s$/.test(data.composer) ? ' ' : '') +
-            REFERENCE_MARK +
-            reference +
-            ' ';
+            ? token
+            : { start: end, end };
+        data.composer = insertAttachmentMentions(data.composer, range, [file]).text;
       });
       if (mounted.current) {
         setMention(null);
@@ -675,7 +669,7 @@ export function SessionWorkspace({
           current?.path === path
             ? {
                 ...current,
-                attached: `Attached as ${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`,
+                attached: `Attached as ${attachmentLabel(file)}`,
               }
             : current,
         );
@@ -688,7 +682,36 @@ export function SessionWorkspace({
       if (mounted.current) setUploading(false);
     }
   };
-  const addImages = async (files: File[]) => {
+  /** Where references for new attachments go: the caret (a paste replaces the selection), else the end. */
+  const composerTarget = (replaceSelection: boolean): { text: string } & TextRange => {
+    const value = workspace.record.data.composer;
+    const input = textarea.current;
+    if (!input || input.value !== value)
+      return { text: value, start: value.length, end: value.length };
+    const end = input.selectionEnd;
+    return { text: value, start: replaceSelection ? input.selectionStart : end, end };
+  };
+  /**
+   * Uploads finish after the user may have typed on; the references then go to the end of the text instead of
+   * a stale caret, and the caret is left where the user is typing.
+   */
+  const insertMentions = (
+    files: readonly FileReference[],
+    target: ReturnType<typeof composerTarget>,
+  ) =>
+    workspace.update((data) => {
+      const unchanged = data.composer === target.text;
+      const end = data.composer.length;
+      const result = insertAttachmentMentions(
+        data.composer,
+        unchanged ? target : { start: end, end },
+        files,
+      );
+      if (result.text === data.composer) return;
+      data.composer = result.text;
+      if (unchanged) pendingCaret.current = result.caret;
+    });
+  const addImages = async (files: File[], replaceSelection = false) => {
     if (uploadLock.current) {
       setError('Wait for the current files to finish attaching');
       return;
@@ -697,6 +720,8 @@ export function SessionWorkspace({
       setError(ATTACHMENT_LIMIT_MESSAGE);
       return;
     }
+    const target = composerTarget(replaceSelection);
+    const attached: FileReference[] = [];
     uploadLock.current = true;
     setUploading(true);
     setError('');
@@ -715,18 +740,25 @@ export function SessionWorkspace({
           mime: file.type,
         });
         await addReference(image);
+        attached.push(image);
       }
     } catch (e) {
       setError(errorMessage(e, 'File upload failed; existing attachments preserved'));
     } finally {
+      // Files attached before a failure keep their references.
+      if (attached.length) insertMentions(attached, target);
       uploadLock.current = false;
       setUploading(false);
     }
   };
-  const removeImage = (id: string) =>
+  const removeImage = (id: string) => {
+    const removed = images.find((file) => file.id === id);
     workspace.update((data) => {
       data.attachmentIds = data.attachmentIds.filter((value) => value !== id);
+      if (removed && !('status' in removed) && isFileReference(removed))
+        data.composer = removeAttachmentMention(data.composer, removed);
     });
+  };
   const composerDelivery =
     composerAttempt &&
     snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
@@ -1537,7 +1569,7 @@ export function SessionWorkspace({
               );
               if (files.length) {
                 e.preventDefault();
-                void addImages(files);
+                void addImages(files, true);
               }
             }}
             id="composer"

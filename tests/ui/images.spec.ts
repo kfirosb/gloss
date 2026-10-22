@@ -86,22 +86,28 @@ for (const [width, height] of [
       );
     }, png);
     await expect(page.locator('.image-thumb')).toHaveCount(1);
-    await expect(input).toHaveValue('Use these references');
+    await expect(input).toHaveValue('Use these references \u200E@Image 1 ');
     await page.getByLabel('Attach files').setInputFiles({
       name: 'File.png',
       mimeType: 'image/png',
       buffer: Buffer.from(png, 'base64'),
     });
     await expect(page.locator('.image-thumb')).toHaveCount(2);
+    await expect(input).toHaveValue('Use these references \u200E@Image 1 \u200E@Image 2 ');
+    // Removing an attachment removes its reference, so the text never names a missing attachment.
     await page.getByRole('button', { name: 'Remove Image 1', exact: true }).click();
     await expect(page.locator('.image-thumb')).toHaveCount(1);
+    await expect(input).toHaveValue('Use these references \u200E@Image 2 ');
     await page.reload();
     await expect(page.locator('.image-thumb img')).toHaveCount(1);
-    await expect(input).toHaveValue('Use these references');
+    await expect(input).toHaveValue('Use these references \u200E@Image 2 ');
     await page.getByRole('button', { name: 'Send to Terminal in English', exact: true }).click();
-    expect(calls.find((a) => a.type === 'send-composer').attachmentIds).toEqual(['image-2']);
+    expect(calls.find((a) => a.type === 'send-composer')).toMatchObject({
+      text: 'Use these references @Image 2 ',
+      attachmentIds: ['image-2'],
+    });
     await expect(page.locator('.image-thumb')).toHaveCount(1);
-    await expect(input).toHaveValue('Use these references');
+    await expect(input).toHaveValue('Use these references \u200E@Image 2 ');
     sent = true;
     await expect(page.locator('.image-thumb')).toHaveCount(0, { timeout: 7000 });
     await expect(input).toHaveValue('');
@@ -219,3 +225,85 @@ for (const width of [1280, 390])
     await expect(input).toHaveValue('');
     expect(discussionCalls).toBe(3);
   });
+
+test('paste and drop insert attachment references at the caret of a Hebrew sentence', async ({
+  page,
+}) => {
+  let serial = 0;
+  const snapshot = {
+    id: 'image-references',
+    target: { agent: 'claude', sessionRef: 's', projectId: 'p' },
+    codingState: 'idle',
+    capabilities: { imageAttachments: true, fileReferences: true },
+    codingMessages: [],
+    discussion: [],
+    deliveries: [],
+    language: 'he',
+    languageSessionId: 'l',
+    languageModel: 'm',
+    sourceRevision: 1,
+  };
+  await mockSession(page, () => snapshot);
+  await page.route('**/api/sessions/*/events', (r) =>
+    r.fulfill({
+      contentType: 'text/event-stream',
+      body: 'data: ' + JSON.stringify({ sessionId: snapshot.id, sequence: 1, snapshot }) + '\n\n',
+    }),
+  );
+  await page.route('**/api/sessions/*/files', (r) => {
+    const { name, mime } = r.request().postDataJSON();
+    const image = mime.startsWith('image/');
+    serial++;
+    return r.fulfill({
+      json: {
+        id: `upload-${serial}`,
+        name,
+        mime,
+        size: 68,
+        kind: image ? 'image' : 'file',
+        // Session numbering is per kind and never reused, like the server's counters.
+        index: image ? 3 : 2,
+        sessionId: snapshot.id,
+        path: `/tmp/${name}`,
+        worktreePath: '/project',
+        source: 'upload',
+      },
+    });
+  });
+  await page.route('**/api/sessions/*/files/*/content', (r) =>
+    r.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') }),
+  );
+  await page.goto('/#capability=test');
+  const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
+  await input.fill('תסתכל על ותקן');
+  const caret = 'תסתכל על '.length;
+  await input.evaluate((e: HTMLTextAreaElement, at) => e.setSelectionRange(at, at), caret);
+  await input.evaluate((e, data) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], 'Pasted.png', {
+        type: 'image/png',
+      }),
+    );
+    e.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }),
+    );
+  }, png);
+  await expect(input).toHaveValue('תסתכל על \u200E@Image 3 ותקן');
+  // The caret follows the reference, so typing continues the sentence.
+  await expect
+    .poll(() => input.evaluate((e: HTMLTextAreaElement) => e.selectionStart))
+    .toBe('תסתכל על \u200E@Image 3 '.length);
+  await input.evaluate((e: HTMLTextAreaElement) =>
+    e.setSelectionRange(e.value.length, e.value.length),
+  );
+  await page.locator('form.composer').evaluate((form) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+    form.dispatchEvent(
+      new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(input).toHaveValue('תסתכל על \u200E@Image 3 ותקן \u200E@File 2 ');
+  await expect(page.locator('.attachment-card')).toHaveCount(2);
+});
