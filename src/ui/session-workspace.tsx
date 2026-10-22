@@ -446,6 +446,15 @@ export function SessionWorkspace({
 
   const snapshot = workspace.envelope?.snapshot ?? initial.snapshot;
   const languageSettings = snapshot.languageSettings ?? legacyLanguageSettings(snapshot.language);
+  const translationFollowsView = languageSettings.translateOnlyWhileReading === true;
+  const serverEpoch = workspace.envelope?.epoch ?? initial.epoch;
+  // Reported only while translation follows the view; a restarted server (new epoch) starts without it.
+  useEffect(() => {
+    if (!translationFollowsView) return;
+    void call({ type: 'conversation-view', view: liveView }).catch(() => {
+      /* Best effort: until a report lands the server translates nothing on its own, and Translate still works. */
+    });
+  }, [translationFollowsView, liveView, serverEpoch]);
   const text = data.composer;
   const [error, setError] = useState('');
   const [liveHistory, setLiveHistory] = useState(false);

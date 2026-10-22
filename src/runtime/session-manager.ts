@@ -403,6 +403,9 @@ export function createSessionManager(options: {
         case 'translate-message':
           await w.translateMessage(action.sourceId);
           break;
+        case 'conversation-view':
+          w.setConversationView(action.view);
+          break;
         case 'older-history':
           await w.loadOlderHistory();
           break;

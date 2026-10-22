@@ -14,6 +14,8 @@ import {
   needsSendTranslation,
   validateLanguageOverride,
   validateLanguageSettings,
+  autoTranslatesReplies,
+  showsTranslatedReplies,
 } from '../../src/core/language-settings.js';
 
 describe('language settings', () => {
@@ -61,6 +63,43 @@ describe('language settings', () => {
     expect(validateLanguageOverride({})).toEqual({});
     expect(() => validateLanguageOverride({ reply: 'xx' })).toThrow('Invalid language settings');
     expect(() => validateLanguageOverride('he')).toThrow('Invalid language settings');
+  });
+  it('keeps the translate-only-while-reading flag only as a boolean', () => {
+    const he = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
+    expect(validateLanguageSettings({ ...he, translateOnlyWhileReading: true })).toEqual({
+      ...he,
+      translateOnlyWhileReading: true,
+    });
+    expect(validateLanguageOverride({ translateOnlyWhileReading: false })).toEqual({
+      translateOnlyWhileReading: false,
+    });
+    for (const bad of ['true', 1, null])
+      expect(() => validateLanguageOverride({ translateOnlyWhileReading: bad })).toThrow(
+        'Invalid language settings',
+      );
+    expect(() => validateLanguageSettings({ ...he, translateOnlyWhileReading: 'yes' })).toThrow(
+      'Invalid language settings',
+    );
+  });
+  it('a session override of the reading flag wins over the default', () => {
+    const he = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
+    const on = { ...he, translateOnlyWhileReading: true };
+    expect(
+      effectiveLanguageSettings(on, { translateOnlyWhileReading: false }).translateOnlyWhileReading,
+    ).toBe(false);
+    expect(effectiveLanguageSettings(he, { translateOnlyWhileReading: true })).toEqual(on);
+  });
+  it('replies follow the view only when the flag is on; Translated and Split are reading', () => {
+    const he = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
+    const on = { ...he, translateOnlyWhileReading: true };
+    expect(showsTranslatedReplies('translated') && showsTranslatedReplies('split')).toBe(true);
+    for (const view of ['original', 'terminal', 'activity', undefined] as const) {
+      expect(showsTranslatedReplies(view)).toBe(false);
+      expect(autoTranslatesReplies(he, view)).toBe(true);
+      expect(autoTranslatesReplies(on, view)).toBe(false);
+    }
+    expect(autoTranslatesReplies(on, 'split')).toBe(true);
+    expect(autoTranslatesReplies({ ...on, reply: 'en' }, 'translated')).toBe(false);
   });
   it('maps a legacy conversation language', () => {
     expect(legacyLanguageSettings('he')).toEqual({
