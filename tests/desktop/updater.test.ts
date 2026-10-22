@@ -3,17 +3,25 @@ import { expect, it } from 'vitest';
 import { UPDATE_CHECK_INTERVAL_MS, createUpdater } from '../../desktop/updater.mjs';
 
 type State = { kind: string; version?: string; percent?: number; message?: string };
-type CheckResult = { isUpdateAvailable: boolean; updateInfo: { version: string } } | null;
+type UpdateFile = { url: string; sha512: string; size: number };
+type CheckResult = {
+  isUpdateAvailable: boolean;
+  updateInfo: { version: string; files: UpdateFile[] };
+} | null;
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 100 * DAY;
-const available = (version: string): CheckResult => ({
+const file = (url: string): UpdateFile => ({ url, sha512: 'x', size: 1 });
+const ARM_ZIP = file('Gloss-1.1.0-arm64.zip');
+const X64_ZIP = file('Gloss-1.1.0-x64.zip');
+const BOTH = [file('Gloss-1.1.0-arm64.dmg'), ARM_ZIP, file('Gloss-1.1.0-x64.dmg'), X64_ZIP];
+const available = (version: string, files: UpdateFile[] = BOTH): CheckResult => ({
   isUpdateAvailable: true,
-  updateInfo: { version },
+  updateInfo: { version, files },
 });
 const current = (version: string): CheckResult => ({
   isUpdateAvailable: false,
-  updateInfo: { version },
+  updateInfo: { version, files: BOTH },
 });
 
 function harness(
@@ -22,11 +30,15 @@ function harness(
     download?: () => Promise<unknown>;
     lastCheck?: number;
     platform?: string;
+    arch?: string;
+    latest?: () => Promise<{ version: string }>;
+    openExternal?: () => Promise<unknown>;
   } = {},
 ) {
   const calls: string[] = [];
   const states: State[] = [];
   let progress: ((p: { percent: number }) => void) | undefined;
+  let failure: ((error: Error) => void) | undefined;
   let lastCheck = options.lastCheck;
   const updater = createUpdater({
     updater: {
@@ -39,7 +51,10 @@ function harness(
         return (options.download ?? (async () => []))();
       },
       quitAndInstall: () => calls.push('quitAndInstall'),
-      on: (_event: string, cb: (p: { percent: number }) => void) => (progress = cb),
+      on: (event: string, cb: never) => {
+        if (event === 'error') failure = cb;
+        else progress = cb;
+      },
     },
     now: () => NOW,
     store: {
@@ -47,10 +62,26 @@ function harness(
       setLastCheck: (t: number) => (lastCheck = t),
     },
     platform: options.platform ?? 'darwin',
-    openExternal: (url: string) => calls.push('open ' + url),
+    arch: options.arch ?? 'arm64',
+    currentVersion: '1.0.0',
+    fetchLatestRelease: () => {
+      calls.push('fetch');
+      return (options.latest ?? (async () => ({ version: '1.0.0' })))();
+    },
+    openExternal: (url: string) => {
+      calls.push('open ' + url);
+      return options.openExternal?.();
+    },
     send: (state: State) => states.push(state),
   });
-  return { updater, calls, states, lastCheck: () => lastCheck, progress: () => progress };
+  return {
+    updater,
+    calls,
+    states,
+    lastCheck: () => lastCheck,
+    progress: () => progress,
+    fail: (e: Error) => failure?.(e),
+  };
 }
 
 const coded = (code: string) => Object.assign(new Error(code), { code });
@@ -118,7 +149,7 @@ it('a null result means up to date', async () => {
 });
 
 it('missing artifact means no update, not an error', async () => {
-  for (const code of ['ERR_UPDATER_ASSET_NOT_FOUND', 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND']) {
+  for (const code of ['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND', 'ERR_UPDATER_NO_PUBLISHED_VERSIONS']) {
     const check = async () => {
       throw coded(code);
     };
@@ -184,9 +215,96 @@ it('install without an available update does nothing', async () => {
   expect(h.calls).toEqual([]);
 });
 
-it('install on linux opens the releases page and downloads nothing', async () => {
-  const h = harness({ platform: 'linux', check: async () => available('1.1.0') });
+it('a missing latest release is a failed check, not a missing artifact', async () => {
+  const h = harness({
+    check: async () => {
+      throw coded('ERR_UPDATER_LATEST_VERSION_NOT_FOUND');
+    },
+  });
+  await h.updater.checkNow();
+  expect(h.updater.state().kind).toBe('error');
+});
+
+it('picks the zip for this architecture', async () => {
+  for (const arch of ['arm64', 'x64']) {
+    const h = harness({ arch, check: async () => available('1.1.0') });
+    await h.updater.checkNow();
+    expect(h.updater.state()).toEqual({ kind: 'available', version: '1.1.0' });
+  }
+});
+
+it('an arm64 Mac with only the x64 zip gets no update', async () => {
+  const files = [file('Gloss-1.1.0-x64.dmg'), X64_ZIP];
+  const manual = harness({ arch: 'arm64', check: async () => available('1.1.0', files) });
+  await manual.updater.checkNow();
+  expect(manual.updater.state()).toEqual({ kind: 'up-to-date' });
+  const weekly = harness({ arch: 'arm64', check: async () => available('1.1.0', files) });
+  await weekly.updater.maybeCheck();
+  expect(weekly.updater.state()).toEqual({ kind: 'idle' });
+  await weekly.updater.install();
+  expect(weekly.calls).not.toContain('download');
+});
+
+it('an x64 Mac with only the arm64 zip gets no update', async () => {
+  const h = harness({ arch: 'x64', check: async () => available('1.1.0', [ARM_ZIP]) });
+  await h.updater.checkNow();
+  expect(h.updater.state()).toEqual({ kind: 'up-to-date' });
+});
+
+it('an updater error after quitAndInstall moves to error without throwing', async () => {
+  const h = harness({ check: async () => available('1.1.0') });
   await h.updater.checkNow();
   await h.updater.install();
-  expect(h.calls).toEqual(['check', 'open https://github.com/kfirosb/gloss/releases/latest']);
+  expect(() => h.fail(new Error('Squirrel failed'))).not.toThrow();
+  expect(h.updater.state()).toEqual({ kind: 'error', message: 'Squirrel failed' });
+});
+
+it('an updater error while not installing is ignored', async () => {
+  const h = harness();
+  await h.updater.checkNow();
+  h.fail(new Error('stray'));
+  expect(h.updater.state()).toEqual({ kind: 'up-to-date' });
+});
+
+it('linux checks the latest release instead of electron-updater', async () => {
+  const newer = harness({ platform: 'linux', latest: async () => ({ version: '1.1.0' }) });
+  await newer.updater.checkNow();
+  expect(newer.updater.state()).toEqual({ kind: 'available', version: '1.1.0' });
+  expect(newer.calls).toEqual(['fetch']);
+  expect(newer.lastCheck()).toBe(NOW);
+  const same = harness({ platform: 'linux' });
+  await same.updater.checkNow();
+  expect(same.updater.state()).toEqual({ kind: 'up-to-date' });
+});
+
+it('linux fetch failure is silent for the weekly check and an error for checkNow', async () => {
+  const latest = async () => {
+    throw new Error('rate limited');
+  };
+  const weekly = harness({ platform: 'linux', latest });
+  await weekly.updater.maybeCheck();
+  expect(weekly.updater.state()).toEqual({ kind: 'idle' });
+  expect(weekly.lastCheck()).toBeUndefined();
+  const manual = harness({ platform: 'linux', latest });
+  await manual.updater.checkNow();
+  expect(manual.updater.state()).toEqual({ kind: 'error', message: 'rate limited' });
+});
+
+it('install on linux opens the releases page and downloads nothing', async () => {
+  const h = harness({ platform: 'linux', latest: async () => ({ version: '1.1.0' }) });
+  await h.updater.checkNow();
+  await h.updater.install();
+  expect(h.calls).toEqual(['fetch', 'open https://github.com/kfirosb/gloss/releases/latest']);
+});
+
+it('a rejected openExternal does not throw', async () => {
+  const h = harness({
+    platform: 'linux',
+    latest: async () => ({ version: '1.1.0' }),
+    openExternal: async () => {
+      throw new Error('no browser');
+    },
+  });
+  await h.updater.checkNow();
+  await expect(h.updater.install()).resolves.toBeUndefined();
 });

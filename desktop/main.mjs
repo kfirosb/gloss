@@ -43,7 +43,7 @@ let mainWindow;
 let quitting = false;
 // The 7-day rule lives in the updater; this only wakes it up, so a long-running app still checks about weekly.
 const UPDATE_POLL_MS = 6 * 60 * 60 * 1000;
-let updatePoll;
+let updates;
 
 function readConfig() {
   try {
@@ -186,6 +186,48 @@ async function boot() {
   return true;
 }
 
+// Update notice: one updater for the whole app run, so a window opened later (macOS reopen) sees the live state.
+// The full state goes to the current window on every change; the page may also ask for it once on load.
+function ensureUpdates() {
+  if (updates) return updates;
+  const { autoUpdater } = electronUpdater;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  updates = createUpdater({
+    updater: autoUpdater,
+    now: Date.now,
+    store: {
+      lastCheck: () => {
+        const last = readConfig().lastUpdateCheck;
+        return typeof last === 'number' ? last : undefined;
+      },
+      setLastCheck: (time) => writeConfig({ ...readConfig(), lastUpdateCheck: time }),
+    },
+    platform: process.platform,
+    // The architecture the app was built for, also under Rosetta, which decides the zip the updater installs.
+    arch: process.arch,
+    currentVersion: app.getVersion(),
+    // Linux checks GitHub's latest non-draft, non-prerelease release directly; see updater.mjs.
+    fetchLatestRelease: async () => {
+      const response = await fetch('https://api.github.com/repos/kfirosb/gloss/releases/latest', {
+        headers: { accept: 'application/vnd.github+json', 'user-agent': 'Gloss' },
+      });
+      if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+      const body = await response.json();
+      if (typeof body?.tag_name !== 'string') throw new Error('Unexpected release response');
+      return { version: body.tag_name.replace(/^v/, '') };
+    },
+    openExternal: (url) => shell.openExternal(url),
+    send: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('update-state', state);
+    },
+  });
+  // The updater applies the 7-day rule; this only wakes it, so a long-running app still checks about weekly.
+  setInterval(() => void updates.maybeCheck(), UPDATE_POLL_MS);
+  return updates;
+}
+
 function createWindow() {
   const { bounds } = readConfig();
   mainWindow = new BrowserWindow({
@@ -281,27 +323,7 @@ function createWindow() {
   ipcMain.handle('reveal-path', (event, payload) =>
     fromMainWindow(event) ? reveal.handle(payload) : { error: 'Not allowed' },
   );
-  // Update notice: the full state goes to the page on every change; the page may also ask for it once on load.
-  const { autoUpdater } = electronUpdater;
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  const updates = createUpdater({
-    updater: autoUpdater,
-    now: Date.now,
-    store: {
-      lastCheck: () => {
-        const last = readConfig().lastUpdateCheck;
-        return typeof last === 'number' ? last : undefined;
-      },
-      setLastCheck: (time) => writeConfig({ ...readConfig(), lastUpdateCheck: time }),
-    },
-    platform: process.platform,
-    openExternal: (url) => shell.openExternal(url),
-    send: (state) => {
-      if (mainWindow && !mainWindow.isDestroyed())
-        mainWindow.webContents.send('update-state', state);
-    },
-  });
+  const updates = ensureUpdates();
   ipcMain.removeHandler('update-state');
   ipcMain.handle('update-state', (event) => (fromMainWindow(event) ? updates.state() : null));
   ipcMain.removeHandler('update-check');
@@ -328,11 +350,8 @@ function createWindow() {
     mainWindow.show();
     void updates.maybeCheck();
   });
-  clearInterval(updatePoll);
-  updatePoll = setInterval(() => void updates.maybeCheck(), UPDATE_POLL_MS);
   mainWindow.on('close', () => writeConfig({ ...readConfig(), bounds: mainWindow.getBounds() }));
   mainWindow.on('closed', () => {
-    clearInterval(updatePoll);
     badge.clear();
     mainWindow = undefined;
   });
