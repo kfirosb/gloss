@@ -163,7 +163,7 @@ Pressing History in the Live Conversation or Assistant pane (`src/ui/reading-pan
 
 ## 30. Do not translate the user's own messages back
 
-Status: complete; released in Gloss 0.20.0. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money. The last open item (showing the text the user wrote) is implemented on branch `task/30-user-messages` (2026-10-22); not released. Merged on `integration/tasks-30-32-34-35` with tasks 30, 32, 34, 35 and 18; the user checked it in a desktop test copy on 2026-10-22 and confirmed it works.
+Status: complete; released in Gloss 0.20.0. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money. The last open item (showing the text the user wrote) followed. Released in Gloss 0.22.0 (2026-10-22) together with tasks 30, 32, 34, 35 and 18, after the user checked them in a desktop test copy.
 
 A message the user writes in Hebrew is translated to English and sent to the agent. It comes back into Gloss from the agent's transcript as an English `user` message, and Gloss then translates it into Hebrew. Cause: `translateIfNeeded` in `src/core/workflow.ts` has no role check, and its automatic callers (each new transcript message, `ingestSourceMessage`, and the catch-up loop after attaching a session) pass user messages too. Only the manual Translate action (`translateMessage`) and the re-translation after a language change limit themselves to `role === 'assistant'`. Present since the first public release.
 
@@ -188,7 +188,7 @@ The terminal is not hung while the question is open; Claude is blocked on keyboa
 
 ## 32. Translate only while reading translated
 
-Status: implemented on branch `task/32-translate-when-reading` (2026-10-22); not released. Merged on `integration/tasks-30-32-34-35` with tasks 30, 32, 34, 35 and 18; the user checked it in a desktop test copy on 2026-10-22 and confirmed it works.
+Status: complete. Released in Gloss 0.22.0 (2026-10-22) together with tasks 30, 32, 34, 35 and 18, after the user checked them in a desktop test copy.
 
 Today every complete assistant reply is translated automatically whenever the session's reply language is not English (`translateIfNeeded` in `src/core/workflow.ts`, gated only by `needsReplyTranslation`). The Translated / Original / Split / Terminal / Activity tabs are a browser-side display preference (`src/ui/live-view.ts`, `src/ui/display-preferences.ts`); the workflow never sees them, so a session watched only in the Terminal tab still pays for every translation, as does the catch-up pass after attaching. The only off switch is setting the reply language to EN. The user wants to save users who mostly read in English and occasionally switch to Hebrew, without them having to change the language each time.
 
@@ -213,7 +213,7 @@ When a worktree or folder is selected and it has no open sessions (a new worktre
 
 ## 34. Attachment references inside the text
 
-Status: captured on 2026-10-20; implemented on branch `task/34-attachment-refs` (2026-10-22), not released. Merged on `integration/tasks-30-32-34-35` with tasks 30, 32, 34, 35 and 18; the user checked it in a desktop test copy on 2026-10-22 and confirmed it works. The reference uses the wording Gloss already wrote for files attached from the Files panel, `@Image 3` / `@File 2`, so every attach path inserts the same text (`attachmentMention` in `src/core/file-references.ts`; insertion and removal in `src/ui/attachment-mentions.ts`).
+Status: complete. Released in Gloss 0.22.0 (2026-10-22) together with tasks 30, 32, 34, 35 and 18, after the user checked them in a desktop test copy. The reference uses the wording Gloss already wrote for files attached from the Files panel, `@Image 3` / `@File 2`, so every attach path inserts the same text (`attachmentMention` in `src/core/file-references.ts`; insertion and removal in `src/ui/attachment-mentions.ts`).
 
 Pasting a screenshot or dropping a file into the composer adds it as an attachment card, and the sent message ends with a "References:" block listing each one (`attachmentManifest` in `src/core/file-references.ts`, appended by `claudeMessage` in `src/agents/claude/index.ts` and its Codex counterpart). The text itself never says where an attachment belongs, so a message with several images cannot say "look at image 3 here". The user wants a reference inserted into the text line, at the cursor, when the image or file is pasted or dropped, so the sentence reads naturally and the agent knows which attachment it is.
 
@@ -225,7 +225,7 @@ Pasting a screenshot or dropping a file into the composer adds it as an attachme
 
 ## 35. More file types in the preview, and open in Finder
 
-Status: captured on 2026-10-20. Remaining items implemented on branch `task/35-media-preview` (2026-10-22); not released. Merged on `integration/tasks-30-32-34-35` with tasks 30, 32, 34, 35 and 18; the user checked it in a desktop test copy on 2026-10-22 and confirmed it works.
+Status: complete. Released in Gloss 0.22.0 (2026-10-22) together with tasks 30, 32, 34, 35 and 18, after the user checked them in a desktop test copy.
 
 The Files panel previews text and code (with syntax colouring), Markdown and HTML (rendered) and images; everything else gets "Preview unavailable for this file type. You can still attach the file." (`src/ui/file-content-preview.tsx`; the server decides text / image / large in `src/runtime/http-server.ts`). The user wants more kinds previewed, video among them, and a way to open the file's folder on the computer from the Files panel.
 
@@ -443,7 +443,7 @@ Status: complete; confirmed done by the user on 2026-10-19.
 
 ## 18. Editing and creating files
 
-Status: implemented on branch `task/18-edit-files`; not released. Merged on `integration/tasks-30-32-34-35` with tasks 30, 32, 34, 35 and 18; the user checked it in a desktop test copy on 2026-10-22 and confirmed it works.
+Status: complete. Released in Gloss 0.22.0 (2026-10-22) together with tasks 30, 32, 34, 35 and 18, after the user checked them in a desktop test copy.
 
 - [x] Scope: edit existing UTF-8 text files (text, code, Markdown, `.env`-style) up to the text preview limit (`MAX_EDITABLE_FILE_BYTES`, 128 KiB, in `src/core/content-policy.ts`), and create new text files plus any missing parent folders, inside the session's connected folder. No delete, rename, binary or image editing. Edit button in the preview header (only for a fully shown text preview); "New file" as a + in the Files column header (session root) and as "New file…" in a folder row's context menu. A new file is created empty and opens in the editor.
 - [x] Editor: plain monospace text area in the preview (`src/ui/file-editor.tsx`) with Save and Cancel; Cmd/Ctrl+S saves. Cancel, closing the popup, closing the Files column and opening another file ask first in the app ("Keep editing" / "Discard …"; Escape keeps editing) — never `window.confirm`. Unsaved text is kept in memory per session and file (`src/ui/file-edit-drafts.ts`, never browser storage), so switching sessions and coming back reopens the editor with it; the browser build also asks before a page reload or close.
