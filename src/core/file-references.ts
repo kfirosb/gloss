@@ -5,6 +5,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_IMAGES,
 } from './content-policy.js';
+import type { EditableFile, SavedFile } from './file-edits.js';
 
 export interface FileReference {
   id: string;
@@ -50,6 +51,15 @@ export interface BrowserSearch {
   guidance: string;
 }
 export interface FileRegistry {
+  /** Opens a text file for editing; see src/runtime/file-editor.ts for the write scoping. */
+  readEditable(sessionId: string, relativePath: string): Promise<EditableFile>;
+  saveFile(
+    sessionId: string,
+    relativePath: string,
+    text: unknown,
+    baseVersion: unknown,
+  ): Promise<SavedFile>;
+  createFile(sessionId: string, relativePath: string, text: unknown): Promise<SavedFile>;
   reviewText(
     sessionId: string,
     relativePath: string,

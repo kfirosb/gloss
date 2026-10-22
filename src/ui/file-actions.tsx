@@ -59,8 +59,13 @@ function useNote() {
   };
   return [note, report] as const;
 }
-/** The context menu of a Files row, opened by right-click, the Menu key or Shift+F10. */
-export function useFileEntryMenu(client: SessionClient, relativePath: string, name: string) {
+/** The context menu of a Files row, opened by right-click, the Menu key or Shift+F10; `extra` items come first. */
+export function useFileEntryMenu(
+  client: SessionClient,
+  relativePath: string,
+  name: string,
+  extra: PopupMenuItem[] = [],
+) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [note, report] = useNote();
   const row = useRef<HTMLButtonElement>(null);
@@ -96,7 +101,7 @@ export function useFileEntryMenu(client: SessionClient, relativePath: string, na
             label={`Actions for ${name}`}
             menuLabel={`Actions for ${name}`}
             menuClassName="session-saved-menu session-context-menu"
-            items={locationActions(client, relativePath, report)}
+            items={[...extra, ...locationActions(client, relativePath, report)]}
           />
         </div>
       )}

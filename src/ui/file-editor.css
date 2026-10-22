@@ -1,0 +1,96 @@
+.file-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.file-editor-text {
+  flex: 1;
+  /* Fills the pane: the global textarea height cap is for the composer. */
+  height: auto;
+  max-height: none;
+  min-height: 120px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 8px 10px;
+  font:
+    12px/1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  color: inherit;
+  background: light-dark(#fafbfe, var(--dk-bg-fafbfe));
+  border: 1px solid light-dark(#dce2ea, var(--dk-bg-dce2ea));
+  border-radius: 6px;
+}
+.file-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: none;
+}
+.file-edit-actions .preview-format-note {
+  margin: 0 auto 0 0;
+}
+.file-edit-actions button {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.file-edit-actions button[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: default;
+}
+.file-edit-prompt {
+  flex: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: light-dark(#a34135, var(--dk-fg-a34135));
+  background: light-dark(#fcf1ed, var(--dk-bg-fcf1ed));
+  border: 1px solid light-dark(#efd3ca, var(--dk-bg-efd3ca));
+}
+.file-edit-prompt p {
+  margin: 0 0 6px;
+}
+.file-edit-danger {
+  color: light-dark(#a34135, var(--dk-fg-a34135));
+}
+.file-saved-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+.file-saved-note button,
+.file-new-form button {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.file-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+.file-new-form input {
+  font: inherit;
+  min-width: 0;
+}
+.file-new-form .file-edit-actions {
+  justify-content: flex-start;
+}
+.file-preview-pane .file-edit-button {
+  flex: none;
+  font-size: 0.75rem;
+}

@@ -38,3 +38,11 @@ export const ATTACHMENT_AND_IMAGE_LIMIT_MESSAGE = `Attach at most ${MAX_ATTACHME
 export const DISTINCT_ATTACHMENT_LIMIT_MESSAGE = `Attach at most ${MAX_ATTACHMENTS} distinct files`;
 /** Newest-first cap on persisted file TL;DR/translation results, in rows. */
 export const MAX_FILE_REVIEW_CACHE_ROWS = 2000;
+/**
+ * Largest file the Files panel can edit or create, in UTF-8 bytes. It equals the text preview window
+ * (128 KiB), so the editor only ever opens a file the preview showed in full.
+ */
+export const MAX_EDITABLE_FILE_BYTES = 128 * 1024;
+export const MAX_EDITABLE_FILE_LABEL = `${MAX_EDITABLE_FILE_BYTES / 1024} KiB`;
+/** A save request carries the text JSON-escaped (up to 6 characters per byte) plus the path and version. */
+export const MAX_FILE_EDIT_REQUEST_BYTES = MAX_EDITABLE_FILE_BYTES * 6 + 16 * 1024;

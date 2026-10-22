@@ -24,6 +24,8 @@ import { useHistoryScroll } from './history-scroll.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
 import { FileBrowser, FILE_DRAG_TYPE } from './file-browser.js';
 import { FilesWindow } from './files-window.js';
+import { useFileEditGuard } from './use-file-edit-guard.js';
+import { fileEditedNote } from '../core/file-edits.js';
 import { FilePicker, type FilePickerHandle } from './file-picker.js';
 import { InventoryPicker, detectInvocation, type InvocationMention } from './inventory-picker.js';
 import type { CardReference } from './attachment-cards.js';
@@ -585,24 +587,26 @@ export function SessionWorkspace({
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setPreviewOpen(true);
   };
-  const closePreview = () => {
-    setPreviewOpen(false);
-    // A reopened popup starts without the last attach's outcome.
-    setPreview((current) => current && { ...current, attached: '' });
-    setAttachError('');
-    const opener = filesOpener.current;
-    filesOpener.current = null;
-    (opener?.isConnected ? opener : filesToggle.current)?.focus();
-  };
+  const closePreview = () =>
+    editGuard.leave('Discard and close', () => {
+      setPreviewOpen(false);
+      // A reopened popup starts without the last attach's outcome.
+      setPreview((current) => current && { ...current, attached: '' });
+      setAttachError('');
+      const opener = filesOpener.current;
+      filesOpener.current = null;
+      (opener?.isConnected ? opener : filesToggle.current)?.focus();
+    });
   /** `returnFocus` is false for the Files button, which keeps its own focus. */
-  const closeFiles = (returnFocus = true) => {
-    setFilesOpen(false);
-    setPreviewOpen(false);
-    setPreview(null);
-    setAttachError('');
-    filesOpener.current = null;
-    if (returnFocus) filesToggle.current?.focus();
-  };
+  const closeFiles = (returnFocus = true) =>
+    editGuard.leave('Discard and close', () => {
+      setFilesOpen(false);
+      setPreviewOpen(false);
+      setPreview(null);
+      setAttachError('');
+      filesOpener.current = null;
+      if (returnFocus) filesToggle.current?.focus();
+    });
   const [revealedFile, setRevealedFile] = useState('');
   // Attach failures from the preview pane, kept apart from the workspace-wide error.
   const [attachError, setAttachError] = useState('');
@@ -610,7 +614,16 @@ export function SessionWorkspace({
     path: string;
     token: typeof mention;
     attached?: string;
+    /** Opens in the editor: a file the user just created. */
+    edit?: boolean;
   } | null>(null);
+  // Only an open popup can hold an editor with unsaved edits.
+  const editGuard = useFileEditGuard(client.sessionId, previewOpen ? preview?.path : undefined);
+  /** "Tell the agent" after a save: an English note in the composer, sent only if the user sends it. */
+  const tellAgentAboutEdit = (path: string) =>
+    setComposerText(
+      (value) => (value.trim() ? value.replace(/\s*$/, '') + '\n' : '') + fileEditedNote(path),
+    );
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -618,12 +631,17 @@ export function SessionWorkspace({
       mounted.current = false;
     };
   }, []);
-  const openPreview = (path: string, token: typeof mention = null) => {
-    setError('');
-    setAttachError('');
-    showPreview();
-    setPreview({ path, token });
-    setMention(null);
+  const openPreview = (path: string, token: typeof mention = null, edit = false) => {
+    const open = () => {
+      setError('');
+      setAttachError('');
+      showPreview();
+      setPreview({ path, token, edit });
+      setMention(null);
+    };
+    // Choosing the file that is already open keeps its editor; another file asks about unsaved edits first.
+    if (previewOpen && preview?.path === path) open();
+    else editGuard.leave('Discard and open', open);
   };
   const openFileLink = (href: string, basePath = '') => {
     try {
@@ -1664,6 +1682,7 @@ export function SessionWorkspace({
       client={client}
       revealedFile={revealedFile}
       onPreview={(path) => openPreview(path)}
+      onCreated={(path) => openPreview(path, null, true)}
       column={{
         side: preferences.filesSide,
         sideButton: filesSideToggle,
@@ -1836,6 +1855,12 @@ export function SessionWorkspace({
               onAttach={() => void attachPath(preview.path, preview.token, true)}
               geometry={preferences.filesWindow}
               onGeometry={(next) => setPreferences((value) => ({ ...value, filesWindow: next }))}
+              edit={{
+                startEditing: !!preview.edit,
+                onDirtyChange: editGuard.onDirtyChange,
+                onTellAgent: tellAgentAboutEdit,
+                leavePrompt: editGuard.leavePrompt,
+              }}
             />
           )}
         </ImageSessionContext.Provider>
