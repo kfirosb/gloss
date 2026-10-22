@@ -1,7 +1,8 @@
 import { BrandMark } from './brand-mark.js';
 import type { AboutInfo } from '../runtime/application.js';
 import { PanelDialog } from './composer-dialogs.js';
-import { updatesBridge, useUpdateState, type UpdateState } from './update-state.js';
+import { UpdateButton } from './update-notice.js';
+import { updatesBridge, type UpdateState } from './update-state.js';
 const platformName = (p: string) =>
   p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : p === 'linux' ? 'Linux' : p;
 const archName = (a: string, p: string) =>
@@ -33,13 +34,18 @@ export function AboutDialog({
   close,
   about,
   error,
+  update = null,
+  install,
 }: {
   open: boolean;
   close(): void;
   about: AboutInfo | null;
   error?: string | undefined;
+  /** The desktop update state; null in the browser, where there is nothing to check. */
+  update?: UpdateState | null;
+  install?(): void;
 }) {
-  const updateState = useUpdateState();
+  const updateState = update;
   const result = updateState && updateResult(updateState);
   return (
     <PanelDialog
@@ -75,6 +81,9 @@ export function AboutDialog({
               Check for updates
             </button>
             {result && <p role="status">{result}</p>}
+            {updateState.kind === 'available' && install && (
+              <UpdateButton version={updateState.version} install={install} />
+            )}
           </div>
         )}
       </div>

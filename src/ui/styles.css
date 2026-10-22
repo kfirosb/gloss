@@ -4566,30 +4566,77 @@ button.activity-agent-head {
     transition: none;
   }
 }
-.update-mark {
+.version-group {
   display: inline-flex;
   align-items: center;
-  padding: 6px 6px !important;
+  gap: 2px;
+  min-width: 0;
+}
+.sidebar-footer .update-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: light-dark(#2f6f4e, var(--dk-fg-2f6f4e));
+  cursor: pointer;
+}
+.sidebar-footer .update-mark:hover,
+.sidebar-footer .update-mark:focus-visible {
+  background: light-dark(#e4ece6, var(--dk-bg-e4ece6));
 }
 .update-dot {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #2f7d57;
+}
+.update-mark-error .update-dot {
+  background: #a33a2c;
+}
+.update-ring {
+  width: 10px;
+  height: 10px;
+  margin: 0 4px;
+  border: 2px solid #2f7d57;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: update-spin 1s linear infinite;
+}
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-ring {
+    animation: none;
+  }
 }
 .update-progress,
 .update-error {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 11px;
-  color: #7d8a80;
+  color: light-dark(#4a5a50, var(--dk-fg-4a5a50));
   font-variant-numeric: tabular-nums;
 }
 .update-error {
   color: light-dark(#a33a2c, var(--dk-fg-a33a2c));
 }
+.update-error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sidebar-footer .update-retry {
+  flex-shrink: 0;
   font-size: 11px;
   padding: 3px 6px;
   text-decoration: underline;
@@ -4605,7 +4652,11 @@ button.activity-agent-head {
   margin: 0;
   font-size: 12px;
 }
-.sessions-sidebar[data-collapsed='true'] .update-progress,
-.sessions-sidebar[data-collapsed='true'] .update-error > span:first-child {
-  display: none;
+.about-update .update-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sessions-sidebar[data-collapsed='true'] .version-group {
+  flex-direction: column;
 }

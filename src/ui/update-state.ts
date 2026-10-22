@@ -18,29 +18,38 @@ export interface UpdatesBridge {
 
 export const updatesBridge = (): UpdatesBridge | undefined => window.gloss?.updates;
 
+/**
+ * Subscribes to update states and reads the current one once. A state pushed before the read resolves
+ * is newer than the read, so the read never overwrites it. Returns the disposer.
+ */
+export function watchUpdates(
+  bridge: UpdatesBridge,
+  onChange: (state: UpdateState) => void,
+): () => void {
+  let live = true;
+  let pushed = false;
+  const unsubscribe = bridge.onState((next) => {
+    pushed = true;
+    if (live) onChange(next);
+  });
+  bridge
+    .state()
+    .then((initial) => {
+      if (live && !pushed && initial) onChange(initial);
+    })
+    .catch(() => undefined); // best effort: the next pushed state fills it in
+  return () => {
+    live = false;
+    unsubscribe();
+  };
+}
+
 /** The current update state, or null in browser mode (no desktop bridge). */
 export function useUpdateState(): UpdateState | null {
   const [state, setState] = useState<UpdateState | null>(null);
   useEffect(() => {
     const bridge = updatesBridge();
-    if (!bridge) return;
-    let live = true;
-    // A pushed state is newer than the initial read, so the read must not overwrite it.
-    let pushed = false;
-    const unsubscribe = bridge.onState((next) => {
-      pushed = true;
-      if (live) setState(next);
-    });
-    bridge
-      .state()
-      .then((initial) => {
-        if (live && !pushed && initial) setState(initial);
-      })
-      .catch(() => undefined); // best effort: the next pushed state fills it in
-    return () => {
-      live = false;
-      unsubscribe();
-    };
+    return bridge ? watchUpdates(bridge, setState) : undefined;
   }, []);
   return state;
 }

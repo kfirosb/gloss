@@ -268,16 +268,20 @@ export function SessionsSidebar({
           >
             ⚙{!collapsed && <span className="settings-label"> Settings</span>}
           </button>
-          <button
-            type="button"
-            className="version-label"
-            aria-label={versionLabel}
-            title={versionLabel}
-            onClick={() => setDialog('about')}
-          >
-            {about ? `v${about.version}` : 'v…'}
-          </button>
-          {updateState && <UpdateNotice state={updateState} install={installUpdate} />}
+          <span className="version-group">
+            <button
+              type="button"
+              className="version-label"
+              aria-label={versionLabel}
+              title={versionLabel}
+              onClick={() => setDialog('about')}
+            >
+              {about ? `v${about.version}` : 'v…'}
+            </button>
+            {updateState && (
+              <UpdateNotice state={updateState} install={installUpdate} compact={collapsed} />
+            )}
+          </span>
         </div>
         <LanguageDefaultsDialog open={dialog === 'language'} onClose={close} />
         <HiddenProjectsDialog
@@ -300,7 +304,14 @@ export function SessionsSidebar({
             if (narrow) setOverlay(false);
           }}
         />
-        <AboutDialog open={dialog === 'about'} close={close} about={about} error={aboutError} />
+        <AboutDialog
+          open={dialog === 'about'}
+          close={close}
+          about={about}
+          error={aboutError}
+          update={updateState}
+          install={installUpdate}
+        />
       </nav>
     </SidebarFrame>
   );
