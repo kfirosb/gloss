@@ -12,7 +12,7 @@ import { join } from 'node:path';
 // @ts-expect-error untyped desktop module
 import * as desktopMigration from '../../desktop/migrate-user-data.mjs';
 
-const { migrateUserData, settleMigration, waitForOlderCopy } = desktopMigration;
+const { migrateUserData, settingsFolders, settleMigration, waitForOlderCopy } = desktopMigration;
 
 function setup(folders: string[]) {
   const appData = mkdtempSync(join(tmpdir(), 'gloss-appdata-'));
@@ -49,6 +49,17 @@ it('touches nothing when both folders exist', () => {
   expect(readFileSync(join(appData, 'language-assistant', 'desktop.json'), 'utf8')).toBe(
     'language-assistant',
   );
+});
+
+it('manages the settings folders under appData by default', () => {
+  expect(settingsFolders({ appData: '/AppData', explicitUserDataDir: false })).toEqual({
+    legacy: join('/AppData', 'language-assistant'),
+    next: join('/AppData', 'Gloss'),
+  });
+});
+
+it('leaves the settings folders alone when started with an explicit --user-data-dir', () => {
+  expect(settingsFolders({ appData: '/AppData', explicitUserDataDir: true })).toBeUndefined();
 });
 
 it('keeps the new folder when only it exists, and when neither does', () => {

@@ -8,6 +8,18 @@ import { join } from 'node:path';
 
 export const IN_USE_MESSAGE = 'Another copy of Gloss is still running. Quit it, then choose Retry.';
 
+export const LEGACY_SETTINGS_NAME = 'language-assistant';
+export const SETTINGS_NAME = 'Gloss';
+
+/**
+ * The settings folders Gloss manages under appData, or undefined when it was started with an explicit
+ * --user-data-dir: that folder is the caller's choice, so nothing is moved and userData is not overridden.
+ */
+export function settingsFolders({ appData, explicitUserDataDir }) {
+  if (explicitUserDataDir) return undefined;
+  return { legacy: join(appData, LEGACY_SETTINGS_NAME), next: join(appData, SETTINGS_NAME) };
+}
+
 export function migrateUserData({ appData, legacyName, name, rename, exists }) {
   const legacy = join(appData, legacyName);
   const next = join(appData, name);

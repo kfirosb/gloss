@@ -7,7 +7,10 @@ import { createUpdater } from './updater.mjs';
 import electronUpdater from 'electron-updater';
 import {
   IN_USE_MESSAGE,
+  LEGACY_SETTINGS_NAME,
+  SETTINGS_NAME,
   migrateUserData,
+  settingsFolders,
   settleMigration,
   waitForOlderCopy,
 } from './migrate-user-data.mjs';
@@ -364,24 +367,29 @@ function createWindow() {
 // hand itself to the old app and quit silently. While one is running, nothing moves and this start uses a throwaway
 // userData (creating Gloss/ now would make the later move find both folders and leave the settings behind); it only
 // asks to Retry or Quit, and once the old copy is gone it restarts so the next start moves both folders.
+// An explicit --user-data-dir (an isolated test run) keeps that folder: the settings folders under appData are
+// neither moved nor used, while the data folder under HOME still moves.
 const legacyStateDb = join(legacyDataDir(), 'state.db');
 const startupUse = (() => {
   const appData = app.getPath('appData');
-  const legacyUserData = join(appData, 'language-assistant');
-  const userData = join(appData, 'Gloss');
+  const folders = settingsFolders({
+    appData,
+    explicitUserDataDir: app.commandLine.hasSwitch('user-data-dir'),
+  });
   const pending =
-    (existsSync(legacyUserData) && !existsSync(userData)) ||
+    (folders !== undefined && existsSync(folders.legacy) && !existsSync(folders.next)) ||
     (existsSync(legacyDataDir()) && !existsSync(dataDir()));
   const use = pending ? probeStateDbSync(legacyStateDb) : 'free';
   if (use !== 'free') {
-    app.setPath('userData', mkdtempSync(join(tmpdir(), 'gloss-waiting-')));
+    if (folders) app.setPath('userData', mkdtempSync(join(tmpdir(), 'gloss-waiting-')));
     return use;
   }
+  if (!folders) return use;
   try {
     const outcome = migrateUserData({
       appData,
-      legacyName: 'language-assistant',
-      name: 'Gloss',
+      legacyName: LEGACY_SETTINGS_NAME,
+      name: SETTINGS_NAME,
       rename: renameSync,
       exists: existsSync,
     });
@@ -394,7 +402,7 @@ const startupUse = (() => {
       `Could not move the settings folder: ${error instanceof Error ? error.message : error}`,
     );
   }
-  app.setPath('userData', userData);
+  app.setPath('userData', folders.next);
   return use;
 })();
 
