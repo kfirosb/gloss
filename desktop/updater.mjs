@@ -24,6 +24,12 @@ const hasZipForArch = (files, arch) =>
       file.url.endsWith('.zip') &&
       file.url.includes('arm64') === (arch === 'arm64'),
   );
+/**
+ * The architecture whose zip electron-updater installs: MacUpdater takes the arm64 zip whenever the app runs on Apple
+ * silicon, also an x64 build under Rosetta (`app.runningUnderARM64Translation`).
+ */
+export const updateArch = (processArch, runningUnderARM64Translation) =>
+  processArch === 'arm64' || runningUnderARM64Translation === true ? 'arm64' : 'x64';
 const messageOf = (error) => (error instanceof Error ? error.message : String(error));
 
 export function createUpdater({
@@ -93,7 +99,8 @@ export function createUpdater({
     async maybeCheck() {
       const last = store.lastCheck();
       if (typeof last === 'number' && now() - last < UPDATE_CHECK_INTERVAL_MS) return;
-      if (inFlight || state.kind === 'downloading') return;
+      // A quiet check must not take back an update on offer (a failure would reset it to idle) or interrupt a download.
+      if (inFlight || state.kind === 'available' || state.kind === 'downloading') return;
       await run(true);
     },
     async checkNow() {

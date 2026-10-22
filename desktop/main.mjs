@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
 import { createRevealHandler } from './reveal-path.mjs';
-import { createUpdater } from './updater.mjs';
+import { createUpdater, updateArch } from './updater.mjs';
 import electronUpdater from 'electron-updater';
 import {
   IN_USE_MESSAGE,
@@ -139,6 +139,8 @@ function startServer(port, capability, path) {
 
 // Dialogs for a migration that cannot go ahead yet. `ask` resolves true for Retry.
 async function askRetry() {
+  // At startup no window is open yet; without focus the alert can open behind other apps' windows.
+  app.focus({ steal: true });
   const { response } = await dialog.showMessageBox({
     type: 'warning',
     message: IN_USE_MESSAGE,
@@ -207,8 +209,8 @@ function ensureUpdates() {
       setLastCheck: (time) => writeConfig({ ...readConfig(), lastUpdateCheck: time }),
     },
     platform: process.platform,
-    // The architecture the app was built for, also under Rosetta, which decides the zip the updater installs.
-    arch: process.arch,
+    // The zip electron-updater will install: arm64 on Apple silicon, also for an x64 build running under Rosetta.
+    arch: updateArch(process.arch, app.runningUnderARM64Translation),
     currentVersion: app.getVersion(),
     // Linux checks GitHub's latest non-draft, non-prerelease release directly; see updater.mjs.
     fetchLatestRelease: async () => {

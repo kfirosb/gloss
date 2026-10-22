@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 // @ts-expect-error untyped desktop module
-import { UPDATE_CHECK_INTERVAL_MS, createUpdater } from '../../desktop/updater.mjs';
+import { UPDATE_CHECK_INTERVAL_MS, createUpdater, updateArch } from '../../desktop/updater.mjs';
 
 type State = { kind: string; version?: string; percent?: number; message?: string };
 type UpdateFile = { url: string; sha512: string; size: number };
@@ -33,6 +33,7 @@ function harness(
     arch?: string;
     latest?: () => Promise<{ version: string }>;
     openExternal?: () => Promise<unknown>;
+    now?: () => number;
   } = {},
 ) {
   const calls: string[] = [];
@@ -56,7 +57,7 @@ function harness(
         else progress = cb;
       },
     },
-    now: () => NOW,
+    now: options.now ?? (() => NOW),
     store: {
       lastCheck: () => lastCheck,
       setLastCheck: (t: number) => (lastCheck = t),
@@ -249,6 +250,42 @@ it('an x64 Mac with only the arm64 zip gets no update', async () => {
   const h = harness({ arch: 'x64', check: async () => available('1.1.0', [ARM_ZIP]) });
   await h.updater.checkNow();
   expect(h.updater.state()).toEqual({ kind: 'up-to-date' });
+});
+
+it('under Rosetta the zip check follows the arm64 zip electron-updater downloads', async () => {
+  expect(updateArch('x64', true)).toBe('arm64');
+  expect(updateArch('x64', false)).toBe('x64');
+  expect(updateArch('arm64', false)).toBe('arm64');
+  expect(updateArch('x64', undefined)).toBe('x64');
+  const rosetta = harness({
+    arch: updateArch('x64', true),
+    check: async () => available('1.1.0', [ARM_ZIP]),
+  });
+  await rosetta.updater.checkNow();
+  expect(rosetta.updater.state()).toEqual({ kind: 'available', version: '1.1.0' });
+  const onlyIntel = harness({
+    arch: updateArch('x64', true),
+    check: async () => available('1.1.0', [X64_ZIP]),
+  });
+  await onlyIntel.updater.checkNow();
+  expect(onlyIntel.updater.state()).toEqual({ kind: 'up-to-date' });
+});
+
+it('a later weekly check never hides an update already on offer', async () => {
+  let clock = NOW;
+  const results: (() => Promise<CheckResult>)[] = [
+    async () => available('1.1.0'),
+    async () => {
+      throw new Error('offline');
+    },
+  ];
+  const h = harness({ now: () => clock, check: () => results.shift()!() });
+  await h.updater.maybeCheck();
+  expect(h.updater.state()).toEqual({ kind: 'available', version: '1.1.0' });
+  clock += 8 * DAY;
+  await h.updater.maybeCheck();
+  expect(h.calls).toEqual(['check']);
+  expect(h.updater.state()).toEqual({ kind: 'available', version: '1.1.0' });
 });
 
 it('an updater error after quitAndInstall moves to error without throwing', async () => {
