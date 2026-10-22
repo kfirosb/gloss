@@ -21,6 +21,7 @@ import { readProjectMetadata } from './project-metadata.js';
 import { validateSummarySource } from '../core/response-summaries.js';
 import type { ActivityEvent } from '../core/activity-contracts.js';
 import type { SummarySource, ResponseSummary } from '../core/summary-contracts.js';
+import { isSecretFileName } from '../core/file-edits.js';
 
 export interface SessionManager {
   reviewFile(
@@ -106,6 +107,8 @@ export function createSessionManager(options: {
         (version !== undefined && typeof version !== 'string')
       )
         throw new Error('Invalid file review request');
+      if (isSecretFileName(path))
+        throw new Error('Environment and key files are not sent for TL;DR or translation');
       if (!options.files) throw new Error('Files unavailable');
       const source = await options.files.reviewText(id, path, signal);
       if (version !== undefined && source.version !== version)

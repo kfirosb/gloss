@@ -13,6 +13,7 @@ export function FileRow({
   depth = 0,
   expanded,
   onKeyDown,
+  onNewFile,
 }: {
   entry: BrowserEntry;
   client: SessionClient;
@@ -21,9 +22,24 @@ export function FileRow({
   depth?: number;
   expanded?: boolean;
   onKeyDown?(event: KeyboardEvent<HTMLButtonElement>): void;
+  /** Offered on folders: start a new file inside this one. */
+  onNewFile?(folder: string): void;
 }) {
   const directory = entry.kind === 'directory';
-  const { row, triggers, menu } = useFileEntryMenu(client, entry.relativePath, entry.name);
+  const { row, triggers, menu } = useFileEntryMenu(
+    client,
+    entry.relativePath,
+    entry.name,
+    directory && onNewFile
+      ? [
+          {
+            key: 'new-file',
+            content: 'New file…',
+            onChoose: () => onNewFile(entry.relativePath),
+          },
+        ]
+      : [],
+  );
   return (
     <>
       <button
@@ -94,22 +110,17 @@ const emptyFolder = (): FolderState => ({
   error: '',
   offset: 0,
 });
-export function FileTree({
-  client,
-  onPreview,
-}: {
+interface FileTreeProps {
   client: SessionClient;
   onPreview(path: string): void;
-}) {
-  return <SessionFileTree key={client.sessionId} client={client} onPreview={onPreview} />;
+  onNewFile?(folder: string): void;
+  /** Changes after a file is created, so the loaded folders are listed again. */
+  revision?: number;
 }
-function SessionFileTree({
-  client,
-  onPreview,
-}: {
-  client: SessionClient;
-  onPreview(path: string): void;
-}) {
+export function FileTree(props: FileTreeProps) {
+  return <SessionFileTree key={props.client.sessionId} {...props} />;
+}
+function SessionFileTree({ client, onPreview, onNewFile, revision = 0 }: FileTreeProps) {
   const [folders, setFolders] = useState<Record<string, FolderState>>({});
   const [selected, setSelected] = useState('');
   const pending = useRef(new Map<string, AbortController>());
@@ -175,6 +186,18 @@ function SessionFileTree({
       pending.current.clear();
     };
   }, [client]);
+  // After a create, open folders are listed again and closed ones reload when next opened; expansion is kept.
+  useEffect(() => {
+    if (!revision) return;
+    for (const [path, state] of Object.entries(folders)) {
+      if (state.expanded) load(path);
+      else if (state.loaded)
+        setFolders((current) => ({
+          ...current,
+          [path]: { ...(current[path] ?? state), loaded: false },
+        }));
+    }
+  }, [revision]);
   const expand = (path: string, expanded: boolean) => {
     const state = folders[path];
     if (expanded && !state?.loaded && !state?.loading) {
@@ -198,6 +221,7 @@ function SessionFileTree({
               client={client}
               selected={selected === entry.relativePath}
               expanded={Boolean(folders[entry.relativePath]?.expanded)}
+              {...(onNewFile ? { onNewFile } : {})}
               onActivate={() => {
                 setSelected(entry.relativePath);
                 if (entry.kind === 'directory')

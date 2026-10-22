@@ -428,10 +428,18 @@ Status: complete; confirmed done by the user on 2026-10-19.
 
 ## 18. Editing and creating files
 
-Status: discussion needed; not urgent.
+Status: implemented on branch `task/18-edit-files`; not released.
 
-- [ ] Talk through letting the user edit existing files and create new ones from Gloss, for cases such as `.env`.
-- [ ] Decide scope, safety (secrets, unsaved changes, files the agent is also editing), and whether the agent is told about the change.
+- [x] Scope: edit existing UTF-8 text files (text, code, Markdown, `.env`-style) up to the text preview limit (`MAX_EDITABLE_FILE_BYTES`, 128 KiB, in `src/core/content-policy.ts`), and create new text files plus any missing parent folders, inside the session's connected folder. No delete, rename, binary or image editing. Edit button in the preview header (only for a fully shown text preview); "New file" as a + in the Files column header (session root) and as "New file…" in a folder row's context menu. A new file is created empty and opens in the editor.
+- [x] Editor: plain monospace text area in the preview (`src/ui/file-editor.tsx`) with Save and Cancel; Cmd/Ctrl+S saves. Cancel, closing the popup, closing the Files column and opening another file ask first in the app ("Keep editing" / "Discard …"; Escape keeps editing) — never `window.confirm`. Unsaved text is kept in memory per session and file (`src/ui/file-edit-drafts.ts`, never browser storage), so switching sessions and coming back reopens the editor with it; the browser build also asks before a page reload or close.
+- [x] Conflicts: the editor loads the file with a SHA-256 version; Save sends it and the server answers 409 `file-changed` if the file on disk differs (checked again just before the swap). The UI then offers "Reload (lose my edits)" or "Copy my edits"; it never overwrites. Create answers 409 `file-exists` for any existing entry and cannot replace one (the file is linked into place, which fails if the name is taken).
+- [x] Writes are atomic: a temporary file in the same folder with the original's permission bits, then a rename. Line endings: the text area shows LF; Save converts back to the file's dominant ending (CRLF files stay CRLF); a byte-order mark and the trailing newline stay as the user left them.
+- [x] Security boundary: `GET files/editable`, `PUT files/edit`, `POST files/create` under `/api/sessions/:id/` (`fileEditRoute` in `src/runtime/http-server.ts`; scoping in `src/runtime/file-editor.ts`), behind the same loopback host/origin and bearer-capability checks as every other endpoint. Paths must be relative with plain segments (no `..`, `.`, empty, absolute or NUL; query strings are decoded once), resolve inside the canonical session root, and every folder on the way and the target itself must be real entries, not symbolic links (a symlinked file is not editable even when it points inside). Nothing inside a `.git` folder or file can be written (case-insensitive). File content is never logged or put in a URL.
+- [x] Secrets: `.env`, `.env.*`, `*.env`, `.envrc`, `.netrc`, `.npmrc`, `.pypirc`, `*.pem`/`*.key`/`*.p12`/`*.pfx` and `id_*` keys (`isSecretFileName`, `src/core/file-edits.ts`) can be edited, but the preview offers no TL;DR/Translate for them and the server refuses a file review for them. The editor never translates (`translate="no"`, no review tools while editing).
+- [x] Telling the agent: never automatic. After a save, "Tell the agent" puts `I edited <path>.` in the composer; nothing is sent until the user sends it.
+- [x] Both builds: the UI and endpoints are shared by the desktop app and the browser build.
+- Not done: the desktop app's quit/close does not wait for unsaved edits (a `beforeunload` there would silently block quitting while the server is already stopping); hard links to an edited file are replaced by a new file, as with any atomic save; a symlinked file must be edited at its real path; a file with mixed line endings is saved with its dominant ending; a race between the final version check and the rename (milliseconds) is narrowed, not closed.
+- Tests: `tests/runtime/file-editor.test.ts`, `tests/runtime/file-edit-http.test.ts`, `tests/core/file-edits.test.ts`, `tests/ui/file-edit.spec.ts`.
 
 ## Shared constraints
 

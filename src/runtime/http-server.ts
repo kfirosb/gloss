@@ -1,4 +1,4 @@
-import { MAX_UPLOAD_REQUEST_BYTES } from '../core/content-policy.js';
+import { MAX_FILE_EDIT_REQUEST_BYTES, MAX_UPLOAD_REQUEST_BYTES } from '../core/content-policy.js';
 import { parseMoveRequest } from './claude-move.js';
 import { MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -23,6 +23,7 @@ import {
   serveMediaLink,
   type MediaLinks,
 } from './media-links.js';
+import { FileEditConflict } from './file-editor.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -101,6 +102,44 @@ async function attachmentRoute(
     return true;
   }
   return false;
+}
+/**
+ * Editing and creating text files in the session folder. The registry scopes every path (see file-editor.ts);
+ * this route only reads the untrusted body and maps refusals the UI can act on to 409.
+ * Request and response bodies carry file contents, so nothing here is logged.
+ */
+async function fileEditRoute(
+  files: NonNullable<Application['files']>,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+  route: string,
+  url: URL,
+) {
+  const editable = route === 'files/editable' && req.method === 'GET';
+  const save = route === 'files/edit' && req.method === 'PUT';
+  const create = route === 'files/create' && req.method === 'POST';
+  if (!editable && !save && !create) return false;
+  res.setHeader('cache-control', 'no-store');
+  try {
+    if (editable) {
+      respond(res, 200, await files.readEditable(id, url.searchParams.get('path') ?? ''));
+      return true;
+    }
+    const body = recordOf(await readBody(req, MAX_FILE_EDIT_REQUEST_BYTES));
+    if (!body || typeof body.path !== 'string') throw new Error('Invalid file edit request');
+    respond(
+      res,
+      200,
+      save
+        ? await files.saveFile(id, body.path, body.text, body.baseVersion)
+        : await files.createFile(id, body.path, body.text),
+    );
+  } catch (error) {
+    if (!(error instanceof FileEditConflict)) throw error;
+    respond(res, 409, { error: error.message, code: error.code });
+  }
+  return true;
 }
 // Saved records carry the repository's project key (git common dir) so worktrees group under their repository.
 const projectMetadataCache = createAsyncCache<string, ProjectMetadata>({ ttlMs: 30_000 });
@@ -276,6 +315,7 @@ async function sessionRoute(
     respond(res, 200, { id: imageId, name, mime, size });
     return true;
   }
+  if (app.files && (await fileEditRoute(app.files, req, res, id, route, url))) return true;
   if (app.files) {
     const fileMetadata = /^files\/([^/]+)\/metadata$/.exec(route);
     if (fileMetadata && req.method === 'GET') {

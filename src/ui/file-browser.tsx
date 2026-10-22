@@ -8,6 +8,10 @@ import type { SessionClient } from './session-client.js';
 import type { FilesSide } from './display-preferences.js';
 import { errorMessage } from './error-message.js';
 import { FileLocationButtons } from './file-actions.js';
+import { DiscardEditsPrompt, FileEditor, type DiscardEditsQuestion } from './file-editor.js';
+import { readDraft } from './file-edit-drafts.js';
+import { NewFileForm } from './new-file-form.js';
+import type { SavedFile } from '../core/file-edits.js';
 export const FILE_DRAG_TYPE = 'application/x-session-file';
 /** The docked column's header controls. */
 interface FileColumnControls {
@@ -20,14 +24,19 @@ interface FileColumnControls {
 export function FileBrowser({
   client,
   onPreview,
+  onCreated,
   revealedFile = '',
   column,
 }: {
   revealedFile?: string;
   client: SessionClient;
   onPreview(path: string): void;
+  /** A new file exists at `path`; the workspace opens it in the editor. */
+  onCreated(path: string): void;
   column: FileColumnControls;
 }) {
+  const [newFileFolder, setNewFileFolder] = useState<string | null>(null);
+  const [treeRevision, setTreeRevision] = useState(0);
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'name' | 'content'>('name');
   const [entries, setEntries] = useState<BrowserEntry[]>([]);
@@ -62,7 +71,20 @@ export function FileBrowser({
   }, [client, query, mode]);
   return (
     <aside className="file-sidebar compact-file-sidebar" aria-label="Session files" dir="ltr">
-      <FileColumnHeader {...column} />
+      <FileColumnHeader {...column} onNewFile={() => setNewFileFolder('')} />
+      {newFileFolder !== null && (
+        <NewFileForm
+          key={newFileFolder}
+          client={client}
+          folder={newFileFolder}
+          onCancel={() => setNewFileFolder(null)}
+          onCreated={(path) => {
+            setNewFileFolder(null);
+            setTreeRevision((n) => n + 1);
+            onCreated(path);
+          }}
+        />
+      )}
       {revealedFile && (
         <div className="revealed-file file-entries">
           <small>Opened file</small>
@@ -101,7 +123,13 @@ export function FileBrowser({
         </select>
       </div>
       <div className="file-tree-container" hidden={Boolean(query)}>
-        <FileTree key={client.sessionId} client={client} onPreview={onPreview} />
+        <FileTree
+          key={client.sessionId}
+          client={client}
+          onPreview={onPreview}
+          onNewFile={setNewFileFolder}
+          revision={treeRevision}
+        />
       </div>
       {query && (
         <>
@@ -132,12 +160,21 @@ export function FileBrowser({
     </aside>
   );
 }
-function FileColumnHeader({ side, sideButton, onSide, onClose }: FileColumnControls) {
+function FileColumnHeader({
+  side,
+  sideButton,
+  onSide,
+  onClose,
+  onNewFile,
+}: FileColumnControls & { onNewFile(): void }) {
   const other: FilesSide = side === 'left' ? 'right' : 'left';
   const moveLabel = `Move files to the ${other}`;
   return (
     <div className="file-toolbar">
       <strong>Files</strong>
+      <button type="button" onClick={onNewFile} aria-label="New file" title="New file">
+        +
+      </button>
       <button
         ref={sideButton}
         type="button"
@@ -153,7 +190,17 @@ function FileColumnHeader({ side, sideButton, onSide, onClose }: FileColumnContr
     </div>
   );
 }
-/** Read-only preview of one session file with TL;DR/Translate and Attach; the preview popup owns closing. */
+/** How the preview pane's editor reports to the workspace. */
+export interface FileEditControls {
+  /** Open straight in the editor (a file the user just created). */
+  startEditing: boolean;
+  onDirtyChange(dirty: boolean): void;
+  /** Puts the English "I edited <path>." note in the composer; nothing is sent. */
+  onTellAgent(path: string): void;
+  /** Asked when closing the popup or opening another file would drop unsaved edits. */
+  leavePrompt: DiscardEditsQuestion | null;
+}
+/** Preview of one session file with TL;DR/Translate, Edit and Attach; the preview popup owns closing. */
 export function FilePreviewPane({
   languageSettings,
   client,
@@ -162,6 +209,7 @@ export function FilePreviewPane({
   attachError,
   attached,
   onAttach,
+  edit,
 }: {
   client: SessionClient;
   path: string;
@@ -170,9 +218,16 @@ export function FilePreviewPane({
   attached: string;
   onAttach(): void;
   languageSettings: LanguageSettings;
+  edit: FileEditControls;
 }) {
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [error, setError] = useState('');
+  // A file with unsaved edits kept from earlier reopens in the editor.
+  const [editing, setEditing] = useState(
+    () => edit.startEditing || !!readDraft(client.sessionId, path),
+  );
+  const [saved, setSaved] = useState<SavedFile | null>(null);
+  const [reloads, setReloads] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setPreview(null);
@@ -186,15 +241,56 @@ export function FilePreviewPane({
         if (!controller.signal.aborted) setError(errorMessage(error, 'Preview unavailable'));
       });
     return () => controller.abort();
-  }, [client, path]);
+  }, [client, path, reloads]);
+  const editable = preview?.state === 'text' && !preview.truncated;
   return (
     <section className="file-preview-pane" aria-label="File contents" dir="ltr">
       {/* The popup's title bar names the file; the full path stays here. */}
       <div className="preview-header">
         <p className="preview-path">{path}</p>
+        {editable && !editing && (
+          <button
+            type="button"
+            className="file-edit-button"
+            onClick={() => {
+              setSaved(null);
+              setEditing(true);
+            }}
+          >
+            Edit
+          </button>
+        )}
         <FileLocationButtons client={client} relativePath={path} />
       </div>
-      {error ? (
+      {edit.leavePrompt && <DiscardEditsPrompt {...edit.leavePrompt} />}
+      {saved && !editing && (
+        <p className="file-saved-note" role="status">
+          Saved {saved.relativePath}.
+          <button
+            type="button"
+            title="Puts a short English note in the composer; nothing is sent until you send it"
+            onClick={() => {
+              edit.onTellAgent(saved.relativePath);
+              setSaved(null);
+            }}
+          >
+            Tell the agent
+          </button>
+        </p>
+      )}
+      {editing ? (
+        <FileEditor
+          client={client}
+          path={path}
+          onDirtyChange={edit.onDirtyChange}
+          onClose={(result) => {
+            setEditing(false);
+            if (!result) return;
+            setSaved(result);
+            setReloads((n) => n + 1);
+          }}
+        />
+      ) : error ? (
         <div className="preview-content">
           <p role="alert">Preview unavailable: {error}</p>
         </div>
@@ -222,7 +318,7 @@ export function FilePreviewPane({
       {attached && <p role="status">{attached}</p>}
       {attachError && <p role="alert">{attachError}</p>}
       <div className="file-toolbar">
-        <span>Read-only preview</span>
+        <span>{editing ? 'Editing' : 'Preview'}</span>
         {/* aria-disabled, not disabled: disabling the focused button would drop focus to the body,
             where the window's Escape handler no longer sees the key. */}
         <button

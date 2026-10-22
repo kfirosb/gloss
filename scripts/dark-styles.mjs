@@ -8,6 +8,7 @@ const SHEETS = [
   'src/ui/file-tree.css',
   'src/ui/file-content-preview.css',
   'src/ui/files-window.css',
+  'src/ui/file-editor.css',
 ];
 const OUT = 'src/ui/dark-styles.css';
 const FG = new Set([
