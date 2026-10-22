@@ -262,6 +262,21 @@ Today, when the Gloss window is not in front, Gloss only bounces the Dock icon, 
 - [ ] Implementation idea: a small frameless, always-on-top Electron window owned by the desktop shell, fed by the same attention events as the Dock bounce. Alternative or complement: a real macOS notification (possible since 0.19.0 is Developer ID signed) with a reply action; it looks native but gives less control over layout and placement. Linux: the same window where the desktop allows it.
 - [ ] Tests: the banner appears only when the window is not focused and the session is not the one in view; a quick reply reaches the right session or reports "Not sent"; Open in Gloss selects the session.
 
+## 38. Gloss on the phone: read, reply and get notified from anywhere
+
+Status: captured on 2026-10-22; needs design.
+
+Today Gloss works only on the computer it runs on. The local server accepts only loopback hosts and origins (`isLoopbackHost` / `isLoopbackOrigin` in `src/runtime/http-server.ts`, bound to `LOOPBACK_HOST`), and the web UI is laid out for a desktop window. The user wants to follow and answer their sessions from the phone while away from the computer, not only on the same Wi-Fi. The agents keep running on the Mac; the phone is a remote view and composer.
+
+- [ ] Read from the phone: the session list (name, project/worktree, running / waiting / ended) and each session's conversation, with replies in the session's reply language (translated when translation is on), opening at the latest messages like task 29.
+- [ ] Reply from the phone: send to the chosen session through the existing send path (same destination checks, review/translation rules and "Not sent" handling as the composer). Approval prompts and option questions (task 31): decide in design whether the phone may answer them, and if so show exactly what is being approved.
+- [ ] Push notifications: the phone is notified when a session replies or asks for approval, fed by the same attention events as the Dock bounce and the reply banner (task 37). Tapping the notification opens that session. Separate on/off in Settings > Notifications; no reply text in the notification unless the user turns that on.
+- [ ] Mobile-friendly web UI: the existing UI usable at phone width: one pane at a time (sessions → conversation → composer), touch-sized controls, no horizontal scroll, right-to-left Hebrew layout kept. Installable as a home-screen web app (PWA), which iOS requires for web push.
+- [ ] Reach from anywhere: the phone connects to the Mac over a secure tunnel or relay, never by opening the loopback server to the network. Options to weigh: Tailscale (private network, no Gloss-run service), Cloudflare Tunnel with Access, or a small Gloss relay. Push needs a sender the phone can receive from (Web Push through the browser's push service, or APNs if a native app is ever made).
+- [ ] Security before anything ships: explicit pairing (QR code shown on the Mac, each device revocable in Settings), every remote request authenticated, remote access off by default, and the phone gets only what the UI needs: no file writes, no terminal input beyond the composer's send path, no secrets. The loopback-only checks stay for the local UI; remote access is a separate entry point the user turns on deliberately.
+- [ ] When the Mac sleeps or Gloss is closed: the phone shows "Mac offline" with the last known state instead of failing silently; a message is never queued for later sending without the user knowing.
+- [ ] Tests: an unpaired or revoked device is refused; a remote send reaches the right session or reports "Not sent"; the loopback server still rejects non-loopback hosts; the layout has no horizontal scroll at 375 px width.
+
 ## 19. lsof storm in Claude session liveness checks
 
 Status: complete; released in Gloss 0.10.5 and 0.10.6. One low-priority follow-up below.
