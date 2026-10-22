@@ -10,6 +10,7 @@ import {
 import React, {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useState,
   useRef,
   useId,
@@ -17,7 +18,8 @@ import React, {
   type ReactNode,
 } from 'react';
 
-import type { AgentMessage, Delivery } from '../core/contracts.js';
+import type { AgentMessage, Delivery, WrittenText } from '../core/contracts.js';
+import { writtenOriginals } from '../core/user-originals.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import { useHistoryScroll } from './history-scroll.js';
@@ -117,6 +119,7 @@ import { errorMessage } from './error-message.js';
 function Message({
   message,
   original,
+  written,
   replyLanguage,
   assist,
   client,
@@ -124,6 +127,8 @@ function Message({
 }: {
   message: AgentMessage;
   original: boolean;
+  /** What the user wrote for this user message, when it is matched to its composer delivery. */
+  written?: WrittenText | undefined;
   replyLanguage: string;
   assist: string;
   client: SessionClient;
@@ -133,8 +138,20 @@ function Message({
   const current = (message.translationLanguage ?? replyLanguage) === replyLanguage;
   const status =
     message.translationStatus === 'complete' && !current ? undefined : message.translationStatus;
+  const user = message.role === 'user';
+  const ownText = !original && user ? written : undefined;
+  // User messages are never translated now; a translation saved before that still shows, never a pending or failed one.
+  const userTranslation =
+    !original && user && !ownText && status === 'complete' ? message.translatedText : undefined;
   const body = original ? (
     <RichText language="auto" text={message.text} />
+  ) : ownText ? (
+    <RichText language={ownText.language} text={ownText.text} />
+  ) : user ? (
+    <RichText
+      language={userTranslation === undefined ? 'auto' : replyLanguage}
+      text={userTranslation ?? message.text}
+    />
   ) : (
     <RichText
       language={status === 'complete' ? replyLanguage : 'auto'}
@@ -149,19 +166,30 @@ function Message({
       }
     />
   );
+  const translationStatus = original
+    ? 'original'
+    : ownText
+      ? 'written'
+      : user
+        ? userTranslation === undefined
+          ? 'none'
+          : 'complete'
+        : (status ?? 'none');
   return (
     <article
       data-source-id={message.sourceId}
       data-sequence={message.revision}
-      data-translation-status={original ? 'original' : (status ?? 'none')}
+      data-translation-status={translationStatus}
       className={'message ' + message.role}
     >
       <small>
-        {message.role === 'assistant'
+        {!user
           ? !original && status === 'complete'
             ? 'Coding agent · translated'
             : 'Coding agent · original'
-          : 'Coding agent · original user message'}
+          : ownText
+            ? 'You · as you wrote it'
+            : 'Coding agent · original user message'}
       </small>
       <SummarizableResponse
         client={client}
@@ -182,9 +210,9 @@ function Message({
             Translate
           </button>
         )}
-      {!original && (
+      {!original && (!user || translationStatus !== 'none') && (
         <details>
-          <summary>Original</summary>
+          <summary>{ownText ? 'Sent to the agent' : 'Original'}</summary>
           <pre dir="ltr">{message.text}</pre>
         </details>
       )}
@@ -1040,6 +1068,10 @@ export function SessionWorkspace({
   const latestReply =
     [...ordered].reverse().find((message) => message.role === 'assistant') ?? ordered.at(-1);
   const visibleMessages = liveHistory ? ordered : latestReply ? [latestReply] : [];
+  const userOriginals = useMemo(
+    () => writtenOriginals(snapshot.codingMessages, snapshot.deliveries, snapshot.target),
+    [snapshot.codingMessages, snapshot.deliveries, snapshot.target],
+  );
   const indexedDiscussion = snapshot.discussion.map((m, index) => ({ ...m, index }));
   const visibleDiscussion = assistantHistory ? indexedDiscussion : indexedDiscussion.slice(-1);
   const beforeEarlierMessages = useHistoryScroll(
@@ -1255,12 +1287,13 @@ export function SessionWorkspace({
         <Message
           key={m.sourceId}
           message={m}
+          written={userOriginals.get(m.sourceId)}
           client={client}
           replyLanguage={languageSettings.reply}
           assist={languageSettings.assist}
           original={
-            m.role === 'assistant' &&
-            (conversationView === 'original' || !needsReplyTranslation(languageSettings))
+            conversationView === 'original' ||
+            (m.role === 'assistant' && !needsReplyTranslation(languageSettings))
           }
           onTranslate={() =>
             void call({ type: 'translate-message', sourceId: m.sourceId }).catch((e) =>

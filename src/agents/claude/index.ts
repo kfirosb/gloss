@@ -34,7 +34,12 @@ import {
 } from '../shared.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { orderAgentMessages, type AgentEvent, type AgentMessage } from '../../core/contracts.js';
+import {
+  orderAgentMessages,
+  TRANSCRIPT_EVIDENCE_PREFIX,
+  type AgentEvent,
+  type AgentMessage,
+} from '../../core/contracts.js';
 import { claudeActivity } from './coding-state.js';
 import { createChannelRegistry } from './channel-registry.js';
 import { createClaudeLiveness, pidExists, type Liveness } from './liveness.js';
@@ -66,8 +71,6 @@ import {
   type TypedSend,
 } from './tmux-delivery.js';
 
-/** A typed delivery's evidence names the transcript record that showed it. */
-const TYPED_EVIDENCE_PREFIX = 'transcript:';
 /** A message this adapter typed into a session, and the transcript record that confirmed it once one did. */
 interface TypedInFlight {
   send: TypedSend;
@@ -696,8 +699,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           const typed = typedSend(delivery);
           if (!typed || typed.id === send.id) continue;
           const sourceId =
-            delivery.state === 'sent' && delivery.nativeMessageId?.startsWith(TYPED_EVIDENCE_PREFIX)
-              ? delivery.nativeMessageId.slice(TYPED_EVIDENCE_PREFIX.length)
+            delivery.state === 'sent' &&
+            delivery.nativeMessageId?.startsWith(TRANSCRIPT_EVIDENCE_PREFIX)
+              ? delivery.nativeMessageId.slice(TRANSCRIPT_EVIDENCE_PREFIX.length)
               : undefined;
           entries.set(typed.id, {
             send: typed,
@@ -833,7 +837,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
             return {
               state: 'sent' as const,
               nativeAfterRevision: send.after,
-              nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId,
+              nativeMessageId: TRANSCRIPT_EVIDENCE_PREFIX + sourceId,
             };
           }
           if (now() >= deadline || confirmationStop.signal.aborted) break;
@@ -1022,7 +1026,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
           const send = typedSend(delivery);
           if (!send) return false;
           const sourceId = await confirmTyped(send, earlier ?? []);
-          return sourceId ? { nativeMessageId: TYPED_EVIDENCE_PREFIX + sourceId } : false;
+          return sourceId ? { nativeMessageId: TRANSCRIPT_EVIDENCE_PREFIX + sourceId } : false;
         }
         if (delivery.transport === 'channel') {
           if (!context?.panelSessionId) return false;

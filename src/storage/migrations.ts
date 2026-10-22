@@ -196,4 +196,9 @@ export const MIGRATIONS = [
     version: 26,
     sql: 'ALTER TABLE source_messages ADD COLUMN translation_language TEXT;',
   },
+  {
+    version: 27,
+    // The request id a native user record carries (a peer message's Gloss tag), so a reload still matches its delivery.
+    sql: 'ALTER TABLE source_messages ADD COLUMN client_id TEXT;',
+  },
 ] as const;
