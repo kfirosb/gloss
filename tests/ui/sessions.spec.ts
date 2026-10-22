@@ -56,12 +56,12 @@ for (const size of [
     await page.getByRole('button', { name: 'Prepare instruction', exact: true }).click();
     await page.getByRole('button', { name: 'Close review', exact: true }).click();
     await selectSession(page, 'A');
-    await expect(input).toHaveValue('A text');
+    await expect(input).toHaveValue('A text \u200E@Image 1 ');
     await expect(page.getByLabel('Panel layout')).toHaveValue('rows');
     await expect(page.locator('[data-panel-id="live"]')).toHaveAttribute('data-slot', '1');
     await expect(page.getByRole('button', { name: 'Remove Image 1' })).toBeVisible();
     await page.reload();
-    await expect(input).toHaveValue('A text');
+    await expect(input).toHaveValue('A text \u200E@Image 1 ');
     await expect(page.getByRole('separator', { name: 'Resize Live Conversation' })).toHaveAttribute(
       'aria-valuenow',
       liveSize!,
@@ -76,7 +76,7 @@ for (const size of [
     ).toContainText('Edited A review');
     await page.getByRole('button', { name: 'Close review', exact: true }).click();
     await selectSession(page, 'B');
-    await expect(input).toHaveValue('B text');
+    await expect(input).toHaveValue('B text \u200E@Image 2 \u200E@Image 3 ');
     await expect(page.getByLabel('Panel layout')).toHaveValue('columns');
     await expect(page.locator('.image-thumb')).toHaveCount(2);
     await page.getByRole('button', { name: 'Resume review' }).click();
@@ -347,7 +347,7 @@ test('successful discussion cleans submitted text and images even when newer SSE
   await context.route('**/api/sessions/A/actions', async (route) => {
     expect(route.request().postDataJSON()).toMatchObject({
       type: 'discuss',
-      text: 'Acknowledged discussion',
+      text: 'Acknowledged discussion @Image 1 ',
       attachmentIds: ['A-1'],
     });
     const snapshot = structuredClone(f.snapshots.A);

@@ -105,11 +105,21 @@ export function selectFileReferences(
     throw new Error(IMAGE_LIMIT_MESSAGE);
   return selected;
 }
+/** "Image 3" or "File 2": how the References block and the message text both name an attachment. */
+export function attachmentLabel(file: Pick<FileReference, 'kind' | 'index'>): string {
+  return `${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`;
+}
+/** The reference written into message text for an attachment, e.g. "@Image 3". */
+export function attachmentMention(file: Pick<FileReference, 'kind' | 'index'>): string {
+  return '@' + attachmentLabel(file);
+}
+/** Source of a pattern matching any attachment reference in text; never the prefix of a longer number. */
+export const ATTACHMENT_MENTION_SOURCE = '@(?:Image|File) [1-9]\\d*(?!\\d)';
 export function attachmentManifest(files: FileReference[]): string {
   if (!files.length) return '';
   const lines = files.map(
     (file) =>
-      `${file.kind === 'image' ? 'Image' : 'File'} ${file.index}: name=${JSON.stringify(file.name)} path=${JSON.stringify(file.path)} worktree=${JSON.stringify(file.worktreePath)}`,
+      `${attachmentLabel(file)}: name=${JSON.stringify(file.name)} path=${JSON.stringify(file.path)} worktree=${JSON.stringify(file.worktreePath)}`,
   );
   return [
     'References:',
