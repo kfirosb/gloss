@@ -162,7 +162,7 @@ git commit -am 'Update gloss to <version>'
 git push
 ```
 
-`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. The cask declares `auto_updates true`, because the app updates itself. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
+`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. The cask does not declare `auto_updates true`: with it `brew upgrade` skips Gloss, and Homebrew users on 0.21.x and earlier (which have no in-app updater) would never get a newer version. Consider adding it in a later release, once most users run 0.22 or newer. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
 
 ## 8. Replace the installed app only when requested
 

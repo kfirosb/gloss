@@ -18,7 +18,8 @@ it('renders a cask that picks the DMG and checksum for the running architecture'
   expect(cask).not.toContain('depends_on arch');
   expect(cask).toContain('depends_on macos: :ventura');
   expect(cask).toContain('app "Gloss.app"');
-  expect(cask).toContain('auto_updates true');
+  // Without auto_updates, `brew upgrade` still moves 0.21 users (who have no in-app updater) forward.
+  expect(cask).not.toContain('auto_updates');
   expect(cask).toContain('"~/.gloss",');
   expect(cask).toContain('"~/.language-assistant",');
   expect(cask).toContain(
