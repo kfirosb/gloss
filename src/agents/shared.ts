@@ -4,7 +4,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { lsofPath, supportsProcessProbes } from '../runtime/platform-tools.js';
+import {
+  lsofDiagnosticsClean,
+  lsofPath,
+  supportsProcessProbes,
+} from '../runtime/platform-tools.js';
 import { orderAgentMessages, sendGate } from '../core/contracts.js';
 import type {
   AgentCapabilities,
@@ -67,8 +71,6 @@ const OWNER_OUTPUT_BYTES_PER_PATH = 32_768;
 const OWNER_OUTPUT_MAX_BYTES = 1024 * 1024;
 const OWNER_BATCH_PATHS = 128;
 const OWNER_BATCH_ARGV_BYTES = 65_536;
-// A stale record whose socket file is gone must not fail every other path in its batch.
-const MISSING_PATH_DIAGNOSTIC = /^lsof: status error on .+: No such file or directory$/;
 
 /**
  * Holders of each exact path, from as few read-only `lsof` walks of the process
@@ -128,9 +130,8 @@ async function ownersOfBatch(
   if (
     outcome.reason !== 'exited' ||
     (outcome.code !== 0 && outcome.code !== 1) ||
-    outcome.diagnostics
-      .split('\n')
-      .some((line) => line.trim() && !MISSING_PATH_DIAGNOSTIC.test(line.trim()))
+    // A stale record whose socket file is gone must not fail every other path in its batch.
+    !lsofDiagnosticsClean(outcome.diagnostics)
   )
     throw new Error('Socket owner probe failed');
   const expected = new Set(paths);

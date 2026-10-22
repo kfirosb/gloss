@@ -10,16 +10,19 @@ const state = vi.hoisted(() => ({
   })),
   migration: vi.fn(async (): Promise<{ kind: string }> => ({ kind: 'already-new' })),
   opened: vi.fn(),
+  mkdir: vi.fn(),
 }));
 // Never run the real migration from a test: it would act on the real home folder.
 vi.mock('../../src/runtime/data-migration.js', () => ({
   migrateDataDir: state.migration,
-  stateDbInUse: async () => false,
+  probeStateDb: async () => 'free',
+  migrationBlockedMessage: (result: { kind: string }) =>
+    result.kind === 'cross-device' ? 'different disks' : undefined,
 }));
 vi.mock('../../src/runtime/claude-channel-setup.js', () => ({
   createNewSessionSetup: state.prepare,
 }));
-vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
+vi.mock('node:fs/promises', () => ({ mkdir: state.mkdir }));
 vi.mock('../../src/storage/sqlite-store.js', () => ({
   SqliteStore: class {
     constructor(path: string) {
@@ -96,5 +99,15 @@ it('migrates the data folder before opening the database, and stops while it is 
   expect(state.migration).toHaveBeenCalledWith(
     expect.objectContaining({ home: expect.any(String) }),
   );
+  expect(state.opened).not.toHaveBeenCalled();
+});
+it('refuses a cross-disk move without creating the data folder', async () => {
+  state.mkdir.mockClear();
+  state.opened.mockClear();
+  state.migration.mockResolvedValueOnce({ kind: 'cross-device' });
+  await expect(launch(['--agent', 'codex', '--session', 'native'])).rejects.toThrow(
+    'different disks',
+  );
+  expect(state.mkdir).not.toHaveBeenCalled();
   expect(state.opened).not.toHaveBeenCalled();
 });

@@ -3,14 +3,34 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { createBadgeController } from './attention-badge.mjs';
 import { createAlertHandler } from './attention-alert.mjs';
 import { createRevealHandler } from './reveal-path.mjs';
-import { migrateUserData } from './migrate-user-data.mjs';
+import {
+  IN_USE_MESSAGE,
+  migrateUserData,
+  settleMigration,
+  waitForOlderCopy,
+} from './migrate-user-data.mjs';
+import { dataDir, legacyDataDir } from '../dist/server/runtime/data-dir.js';
+import {
+  migrateDataDir,
+  migrationBlockedMessage,
+  probeStateDb,
+  probeStateDbSync,
+} from '../dist/server/runtime/data-migration.js';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = () => join(app.getPath('userData'), 'desktop.json');
@@ -109,32 +129,38 @@ function startServer(port, capability, path) {
   });
 }
 
-// Moves ~/.language-assistant to ~/.gloss before the backend opens it. Returns false when the user chose Quit
-// because an older copy of Gloss still has the old database open.
-async function migrateDataFolder() {
-  const { migrateDataDir, stateDbInUse } = await import(
-    pathToFileURL(join(appRoot, 'dist/server/runtime/data-migration.js')).href
-  );
-  for (;;) {
-    const result = await migrateDataDir({
-      home: homedir(),
-      inUse: (path) => stateDbInUse(path),
-      log: (message) => console.log(message),
-    });
-    if (result.kind !== 'in-use') return true;
-    const { response } = await dialog.showMessageBox({
-      type: 'warning',
-      message: 'Another copy of Gloss is still running. Quit it, then choose Retry.',
-      buttons: ['Retry', 'Quit'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (response !== 0) return false;
-  }
+// Dialogs for a migration that cannot go ahead yet. `ask` resolves true for Retry.
+async function askRetry() {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    message: IN_USE_MESSAGE,
+    buttons: ['Retry', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  return response === 0;
+}
+async function tellBlocked(result) {
+  await dialog.showMessageBox({
+    type: 'warning',
+    message: migrationBlockedMessage(result, homedir()) ?? 'Gloss could not move its data folder.',
+    buttons: ['Quit'],
+  });
 }
 
 async function boot() {
-  if (!(await migrateDataFolder())) {
+  // Moves ~/.language-assistant to ~/.gloss before the backend opens it; the backend's own call then finds it done.
+  const migration = await settleMigration({
+    attempt: () =>
+      migrateDataDir({
+        home: homedir(),
+        probe: (path) => probeStateDb(path),
+        log: (message) => console.log(message),
+      }),
+    ask: askRetry,
+    tell: tellBlocked,
+  });
+  if (migration === 'quit') {
     app.quit();
     return false;
   }
@@ -271,10 +297,25 @@ function createWindow() {
   void mainWindow.loadURL(panelUrl);
 }
 
-// userData must be final before the single-instance lock, which lives there. The settings folder took the package
-// name before the rename; move it once, never merging into an existing Gloss folder.
-{
+// userData must be final before the single-instance lock, which lives there, so this runs synchronously before ready.
+// The settings folder took the package name before the rename. It moves only while no older Gloss holds the old
+// database: moving it under a running 0.21 would carry that app's live lock into Gloss/, and this start would then
+// hand itself to the old app and quit silently. While one is running, nothing moves and this start uses a throwaway
+// userData (creating Gloss/ now would make the later move find both folders and leave the settings behind); it only
+// asks to Retry or Quit, and once the old copy is gone it restarts so the next start moves both folders.
+const legacyStateDb = join(legacyDataDir(), 'state.db');
+const startupUse = (() => {
   const appData = app.getPath('appData');
+  const legacyUserData = join(appData, 'language-assistant');
+  const userData = join(appData, 'Gloss');
+  const pending =
+    (existsSync(legacyUserData) && !existsSync(userData)) ||
+    (existsSync(legacyDataDir()) && !existsSync(dataDir()));
+  const use = pending ? probeStateDbSync(legacyStateDb) : 'free';
+  if (use !== 'free') {
+    app.setPath('userData', mkdtempSync(join(tmpdir(), 'gloss-waiting-')));
+    return use;
+  }
   try {
     const outcome = migrateUserData({
       appData,
@@ -292,10 +333,28 @@ function createWindow() {
       `Could not move the settings folder: ${error instanceof Error ? error.message : error}`,
     );
   }
-  app.setPath('userData', join(appData, 'Gloss'));
-}
+  app.setPath('userData', userData);
+  return use;
+})();
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (startupUse !== 'free') {
+  app.setName('Gloss');
+  app
+    .whenReady()
+    .then(() =>
+      waitForOlderCopy({
+        probe: () => probeStateDbSync(legacyStateDb),
+        ask: askRetry,
+        tell: tellBlocked,
+        relaunch: () => {
+          app.relaunch();
+          app.exit(0);
+        },
+        quit: () => app.quit(),
+      }),
+    )
+    .catch(() => app.quit());
+} else if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.setName('Gloss');
   app.on('second-instance', () => {

@@ -10,7 +10,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // @ts-expect-error untyped desktop module
-import { migrateUserData } from '../../desktop/migrate-user-data.mjs';
+import * as desktopMigration from '../../desktop/migrate-user-data.mjs';
+
+const { migrateUserData, settleMigration, waitForOlderCopy } = desktopMigration;
 
 function setup(folders: string[]) {
   const appData = mkdtempSync(join(tmpdir(), 'gloss-appdata-'));
@@ -54,4 +56,66 @@ it('keeps the new folder when only it exists, and when neither does', () => {
   const fresh = setup([]);
   expect(migrateUserData(fresh.options)).toBe('kept');
   expect(fresh.renames).toEqual([]);
+});
+
+function dialogs(answers: boolean[]) {
+  const events: string[] = [];
+  return {
+    events,
+    ask: async () => {
+      const retry = answers.shift() ?? false;
+      events.push(retry ? 'retry' : 'quit');
+      return retry;
+    },
+    tell: async (result: { kind: string }) => {
+      events.push('tell ' + result.kind);
+    },
+  };
+}
+
+it('retries while the old database is in use, then proceeds', async () => {
+  const results = [{ kind: 'in-use' }, { kind: 'in-use' }, { kind: 'moved' }];
+  const d = dialogs([true, true]);
+  const attempt = async () => results.shift();
+  expect(await settleMigration({ attempt, ask: d.ask, tell: d.tell })).toBe('proceed');
+  expect(d.events).toEqual(['retry', 'retry']);
+  expect(results).toEqual([]);
+});
+
+it('stops on Quit without another attempt', async () => {
+  let attempts = 0;
+  const d = dialogs([false]);
+  const attempt = async () => {
+    attempts += 1;
+    return { kind: 'in-use' };
+  };
+  expect(await settleMigration({ attempt, ask: d.ask, tell: d.tell })).toBe('quit');
+  expect(attempts).toBe(1);
+});
+
+it('explains a refusal the user must fix and quits', async () => {
+  for (const kind of ['cross-device', 'lsof-missing']) {
+    const d = dialogs([]);
+    const attempt = async () => ({ kind });
+    expect(await settleMigration({ attempt, ask: d.ask, tell: d.tell })).toBe('quit');
+    expect(d.events).toEqual(['tell ' + kind]);
+  }
+});
+
+it('waits for an older copy, then relaunches; Quit quits without relaunching', async () => {
+  const run = async (uses: string[], answers: boolean[]) => {
+    const d = dialogs(answers);
+    const calls: string[] = [];
+    await waitForOlderCopy({
+      probe: () => uses.shift(),
+      ask: d.ask,
+      tell: d.tell,
+      relaunch: () => calls.push('relaunch'),
+      quit: () => calls.push('quit'),
+    });
+    return [...d.events, ...calls];
+  };
+  expect(await run(['in-use', 'free'], [true])).toEqual(['retry', 'relaunch']);
+  expect(await run(['in-use'], [false])).toEqual(['quit', 'quit']);
+  expect(await run(['lsof-missing'], [])).toEqual(['tell lsof-missing', 'quit']);
 });
