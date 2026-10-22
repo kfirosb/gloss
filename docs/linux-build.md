@@ -27,13 +27,23 @@ npm run desktop:linux             # every Linux target: x64 AppImage, x64 and ar
 
 Nothing is signed. The Mac packaging is unchanged; its vendor entries simply moved under the `mac` key.
 
+## Checksums for the release
+
+The GitHub release carries a `.sha256` file beside each Linux package. From `release/`:
+
+```sh
+shasum -a 256 'Gloss-<version>-amd64.deb' > 'Gloss-<version>-amd64.deb.sha256'
+shasum -a 256 'Gloss-<version>-arm64.deb' > 'Gloss-<version>-arm64.deb.sha256'
+shasum -a 256 'Gloss-<version>-x86_64.AppImage' > 'Gloss-<version>-x86_64.AppImage.sha256'
+```
+
 ## 3. Smoke test in a container
 
 ```sh
 sh scripts/linux-smoke.sh release/Gloss-<version>-arm64.deb
 ```
 
-This installs the deb (or, for an AppImage, the deb's dependency list and the file itself, run with `--appimage-extract-and-run` because containers have no FUSE) in a fresh `ubuntu:24.04` container, starts Xvfb, launches `/opt/Gloss/gloss` as an unprivileged user, waits for the app's `desktop.json` under `~/.config` (Electron names that folder `gloss`, after the package name), checks that the local server answers on the recorded port, saves `release/smoke/smoke-<kind>.png` and prints the app log. The container runs with `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` so Chromium's setuid sandbox can create namespaces as it does on a real host; the packaged app is not changed. It exits non-zero when the server never answers. Use the arm64 deb on an Apple Silicon Mac. The x64 packages cannot be launched here: Chromium is not reliable under qemu and qemu refuses to load the AppImage runtime at all, so the x64 deb and AppImage are checked for their contents and for the runtime's shared-library needs (`readelf -d`), not launched. The script also accepts an `.AppImage` (installing the deb's dependency list and running it with `--appimage-extract-and-run`) for when a usable arm64 AppImage runtime exists.
+This installs the deb (or, for an AppImage, the deb's dependency list and the file itself, run with `--appimage-extract-and-run` because containers have no FUSE) in a fresh `ubuntu:24.04` container, starts Xvfb, launches `/opt/Gloss/gloss` as an unprivileged user, waits for the app's `desktop.json` under `~/.config` (the settings folder is `~/.config/Gloss`; Linux paths are case-sensitive), checks that the local server answers on the recorded port, saves `release/smoke/smoke-<kind>.png` and prints the app log. The container runs with `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` so Chromium's setuid sandbox can create namespaces as it does on a real host; the packaged app is not changed. It exits non-zero when the server never answers. Use the arm64 deb on an Apple Silicon Mac. The x64 packages cannot be launched here: Chromium is not reliable under qemu and qemu refuses to load the AppImage runtime at all, so the x64 deb and AppImage are checked for their contents and for the runtime's shared-library needs (`readelf -d`), not launched. The script also accepts an `.AppImage` (installing the deb's dependency list and running it with `--appimage-extract-and-run`) for when a usable arm64 AppImage runtime exists.
 
 ## What differs from macOS at runtime
 

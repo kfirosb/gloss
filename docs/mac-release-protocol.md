@@ -145,7 +145,18 @@ Review the final diff. Stage only the intended source, tests, configuration, loc
 4. Provide clickable local links to both DMGs and, when useful, their checksums and release notes. If the user asks for the release to be delivered, move the DMGs, their `.sha256` files and the release notes from `release/` to `~/Downloads` (keep earlier DMGs; do not overwrite a file of the same name) and give the new paths.
 5. When asked to merge the release into `main`, fast-forward local `main` to the release branch (`git -C <main checkout> merge --ff-only release/<version>`) so the release tag stays on `main`'s history. If `main` moved during the release (another session may merge work at any time), do not rebase or reset: create a temporary branch from `main` in the release worktree, merge `release/<version>` into it, resolve conflicts, run the full test and browser suites, then fast-forward `main` to that branch and delete it. Tell the user that `main` now holds unreleased work alongside the release. Pushing `main` and the tag to `origin` publishes them; do it only on explicit request, and never push `private-history`.
 
-GitHub release (only on the maintainer's explicit request). Create it as a DRAFT with every asset: both DMGs and their `.sha256` files, both zips and their `.blockmap` files, `latest-mac.yml`, and the Linux deb and AppImage with their `.sha256` files (see [linux-build.md](linux-build.md)). Check the uploaded asset list against that expected set (`gh release view v<version> --json assets`), then publish in one step with `gh release edit v<version> --draft=false`. Never publish a release with assets missing: a published release reaches every 0.22+ user within a week, because Gloss checks for updates at most every 7 days.
+GitHub release (only on the maintainer's explicit request). Create it as a DRAFT with every asset: both DMGs and their `.sha256` files, both zips and their `.blockmap` files, `latest-mac.yml`, and the Linux debs and AppImage with their `.sha256` files (made with `shasum -a 256` as in [linux-build.md](linux-build.md#checksums-for-the-release)). Push the tag first (`git push origin v<version>`, on explicit request): `--verify-tag` refuses to create the draft for a tag that is not on GitHub. From `release/`, with `<notes>` the user-facing release notes:
+
+```sh
+gh release create v<version> --draft --verify-tag --title "Gloss <version>" --notes-file <notes> \
+  Gloss-<version>-arm64.dmg Gloss-<version>-arm64.dmg.sha256 Gloss-<version>-x64.dmg Gloss-<version>-x64.dmg.sha256 \
+  Gloss-<version>-arm64.zip Gloss-<version>-arm64.zip.blockmap Gloss-<version>-x64.zip Gloss-<version>-x64.zip.blockmap \
+  latest-mac.yml \
+  Gloss-<version>-amd64.deb Gloss-<version>-amd64.deb.sha256 Gloss-<version>-arm64.deb Gloss-<version>-arm64.deb.sha256 \
+  Gloss-<version>-x86_64.AppImage Gloss-<version>-x86_64.AppImage.sha256
+```
+
+Check the uploaded asset list against that expected set (`gh release view v<version> --json assets`), then publish in one step with `gh release edit v<version> --draft=false`. Never publish a release with assets missing: a published release reaches every 0.22+ user within a week, because Gloss checks for updates at most every 7 days.
 
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Builds are Developer ID signed and notarized; say which `spctl` result each DMG's app gave, and if a build is only signed or only ad-hoc signed say so and do not deliver it as a release. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
