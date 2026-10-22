@@ -1,3 +1,4 @@
+import type { LiveView } from '../core/language-settings.js';
 import type {
   ConversationSnapshot,
   Target,
@@ -39,6 +40,7 @@ export type Action =
   | { type: 'discard'; draftId: string }
   | { type: 'send'; draftId: string; revision: number; transport?: DeliveryTransport }
   | { type: 'translate-message'; sourceId: string }
+  | { type: 'conversation-view'; view: LiveView }
   | { type: 'older-history' };
 export interface RuntimeSnapshot {
   sessionId?: string;

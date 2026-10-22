@@ -62,3 +62,12 @@ it('ignores corrupted stored JSON by falling back to initial defaults', () => {
     assist: 'he',
   });
 });
+it('round-trips the translate-only-while-reading flag in defaults and overrides', () => {
+  const store = new SqliteStore(':memory:');
+  register(store, 'A');
+  const defaults = { write: 'he', send: 'en', reply: 'he', assist: 'he' };
+  store.writeLanguageDefaults({ ...defaults, translateOnlyWhileReading: true });
+  store.writeLanguageOverride('A', { translateOnlyWhileReading: false });
+  expect(store.readLanguageDefaults()).toEqual({ ...defaults, translateOnlyWhileReading: true });
+  expect(store.readLanguageOverride('A')).toEqual({ translateOnlyWhileReading: false });
+});

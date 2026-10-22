@@ -51,11 +51,15 @@ import { randomUUID } from 'node:crypto';
 import { ResponseSummaries } from './response-summaries.js';
 import type { SummarySource, ResponseSummary } from './summary-contracts.js';
 import {
+  autoTranslatesReplies,
+  isLiveView,
   languageName,
   legacyLanguageSettings,
   needsReplyTranslation,
   needsSendTranslation,
+  showsTranslatedReplies,
   type LanguageSettings,
+  type LiveView,
 } from './language-settings.js';
 import { translateMessageResult } from './translations.js';
 import type { ActivityEvent } from './activity-contracts.js';
@@ -104,6 +108,8 @@ export interface Workflow {
   translateComposer(text: string): Promise<string>;
   refreshLanguageSettings(): void;
   translateMessage(sourceId: string): Promise<void>;
+  /** The Live Conversation view the user has selected for this session; translation may follow it. */
+  setConversationView(view: LiveView): void;
   subagentActivity(taskId: string, signal: AbortSignal): AsyncIterable<ActivityEvent>;
   /** The validated path of a background task's output file. */
   backgroundOutput(taskId: string): Promise<string>;
@@ -238,6 +244,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
     return true;
   };
 
+  /** Unknown until the UI reports it; with translateOnlyWhileReading, an unreported view translates nothing. */
+  let conversationView: LiveView | undefined;
   const translationQueue = new Map<string, AgentMessage>();
   const dropPendingTranslations = () => {
     for (const id of translationQueue.keys()) translating.delete(id);
@@ -319,9 +327,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!closed) void pumpTranslations();
     }
   };
-  const translateIfNeeded = (source: AgentMessage) => {
+  /** Only the reply the reader sees is translated on its own while translation follows the view; History waits for Translate. */
+  const translateLatestReply = () => {
+    const latest = state.codingMessages.findLast((message) => message.role === 'assistant');
+    if (latest) translateIfNeeded(latest);
+  };
+  /** `requested` is the user's own Translate press, which no reading view gates. */
+  const translateIfNeeded = (source: AgentMessage, requested = false) => {
     // The user wrote their own messages in their language; translating the sent English back duplicates it.
     if (source.role !== 'assistant' || !needsReplyTranslation(settings)) return;
+    if (!requested && !autoTranslatesReplies(settings, conversationView)) return;
     const current = state.codingMessages.find((message) => message.sourceId === source.sourceId);
     if (!source.complete || !current) return;
     if (
@@ -893,7 +908,8 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           }
         }
       publish();
-      for (const message of state.codingMessages) translateIfNeeded(copy(message));
+      if (settings.translateOnlyWhileReading) translateLatestReply();
+      else for (const message of state.codingMessages) translateIfNeeded(copy(message));
       eventAbort = new AbortController();
       void watchEvents(attached, eventAbort.signal);
     },
@@ -1620,14 +1636,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       settings = readSettings();
       if (JSON.stringify(previous) === JSON.stringify(settings)) return;
       if (!needsReplyTranslation(settings)) dropPendingTranslations();
-      if (
+      const replyLanguageChanged =
         needsReplyTranslation(settings) &&
-        (!needsReplyTranslation(previous) || previous.reply !== settings.reply)
-      ) {
+        (!needsReplyTranslation(previous) || previous.reply !== settings.reply);
+      if (replyLanguageChanged) {
         // A translation completed before this build recorded its language was made in the previous reply language.
         for (const message of state.codingMessages)
           if (message.translationStatus === 'complete' && message.translationLanguage === undefined)
             message.translationLanguage = previous.reply;
+      }
+      if (replyLanguageChanged && !settings.translateOnlyWhileReading) {
         const recent = state.codingMessages
           .filter(
             (m) =>
@@ -1637,6 +1655,13 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
           )
           .slice(-20);
         for (const message of recent) translateIfNeeded(message);
+      } else if (
+        replyLanguageChanged ||
+        Boolean(previous.translateOnlyWhileReading) !== Boolean(settings.translateOnlyWhileReading)
+      ) {
+        // History waits for Translate while translation follows the view, and when it stops following, only
+        // the reply on screen catches up.
+        translateLatestReply();
       }
       publish();
     },
@@ -1647,7 +1672,16 @@ export function createWorkflow(deps: WorkflowDependencies): Workflow {
       if (!message || message.role !== 'assistant' || !message.complete)
         throw new Error('Message unavailable for translation');
       if (!needsReplyTranslation(settings)) throw new Error('Translation is off for this session');
-      translateIfNeeded(message);
+      translateIfNeeded(message, true);
+    },
+
+    setConversationView(view) {
+      requireOpen();
+      if (!isLiveView(view)) throw new Error('Unknown conversation view');
+      conversationView = view;
+      // Opening a translated view shows the latest reply, so a reply skipped while away is translated now.
+      if (settings.translateOnlyWhileReading && showsTranslatedReplies(view))
+        translateLatestReply();
     },
 
     subagentActivity(taskId, signal) {
