@@ -104,7 +104,7 @@ Verification (2026-10-18):
 
 ## 27. More languages
 
-Status: implemented on branch `multi-languages` (2026-10-20), not yet released; one item needs a manual pass. The user wants any language the AI can translate, not only Hebrew.
+Status: complete; released in Gloss 0.20.0 (2026-10-20). Still open: the manual quality pass with a real model and two follow-ups (below). The user wants any language the AI can translate, not only Hebrew.
 
 Decisions: a table of 19 languages in `src/core/language-settings.ts` (English, Hebrew, Arabic, Chinese (Simplified), Dutch, French, German, Hindi, Italian, Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian, Urdu; right-to-left: Hebrew, Arabic, Persian, Urdu) feeds the settings menus, validation and the dictation bridge. Strict validation accepts bare codes only; `resolveLanguage` leniently resolves names, region suffixes (`he-IL`) and the `iw` alias for display, direction, prompts and legacy records. The app's own interface stays English and names the chosen language ("Write in French...", "Summarize in Arabic"); the conversation root direction follows the "I write in" language, so the layout flips for left-to-right languages. Style guidance and product-term protection apply to every non-English language, and the Hebrew prompt text is byte-identical so cached translations stay valid. Dictation accepts every listed language; seed prompts and silence fillers exist for Hebrew, English, Arabic, French, Hindi and Chinese.
 
@@ -116,10 +116,10 @@ Decisions: a table of 19 languages in `src/core/language-settings.ts` (English, 
 - [x] Dictation: pass the chosen language; every listed language is accepted.
 - [x] Decide whether the app's own interface text is translated too: it stays English and names the chosen language.
 - [x] Existing users keep Hebrew settings unchanged after the update (legacy records resolve leniently; Hebrew prompt text is byte-identical).
-- [ ] Follow-up: a draft sent without preparation is tagged with the assistant language (`src/core/workflow.ts`, around the direct-send draft), so with different "I write in" and "Language Assistant speaks" settings the review dialog shows the user's text in the assistant's direction. Pre-existing; only reachable with mixed settings.
+- [x] (released in Gloss 0.21.0 (2026-10-22); the review dialog only shows prepared drafts, so the wrong tag lived only in the saved composer draft) Follow-up: a draft sent without preparation is tagged with the assistant language (`src/core/workflow.ts`, around the direct-send draft), so with different "I write in" and "Language Assistant speaks" settings the review dialog shows the user's text in the assistant's direction. Pre-existing; only reachable with mixed settings.
 - [x] Review on the test build (2026-10-20): switching the reply language left replies already translated in the old language, a manual Translate skipped them, and a switch during a translation was lost; each translation now records its language (`translationLanguage`) and the switch re-queues them (`src/core/workflow.ts`). Pane dividers moved against the pointer and arrow keys in left-to-right sessions; they now read the workspace direction (`src/ui/pane-divider.tsx`). Second pass: the translation language was not persisted (migration 26 adds `translation_language`), and a reply translated in another language still displayed as translated with no Translate button; the message card now shows the original and the button when the languages differ.
-- [x] Follow-up: README and docs/reference.md now describe the 19 languages (2026-10-20). Still Hebrew-only in wording: the Homebrew cask description (`scripts/homebrew-cask.mjs`) and the Claude language skill's default (`integrations/claude/language/SKILL.md`), left for a code pass.
-- [ ] Follow-up: dictation's repetition guards split on spaces (`collapseRuns`, `isRepetitive` in `src/core/dictation-contracts.ts`), so whisper loops in Chinese or Japanese are neither collapsed nor kept out of the next prompt.
+- [x] Follow-up: README and docs/reference.md now describe the 19 languages (2026-10-20). The Homebrew cask description and the Claude language skill wording are language-neutral released in Gloss 0.21.0 (2026-10-22). Previously Hebrew-only in wording: the Homebrew cask description (`scripts/homebrew-cask.mjs`) and the Claude language skill's default (`integrations/claude/language/SKILL.md`), left for a code pass.
+- [x] (released in Gloss 0.21.0 (2026-10-22); Thai not covered) Follow-up: dictation's repetition guards split on spaces (`collapseRuns`, `isRepetitive` in `src/core/dictation-contracts.ts`), so whisper loops in Chinese or Japanese are neither collapsed nor kept out of the next prompt.
 
 Verification (2026-10-20):
 
@@ -152,18 +152,18 @@ Desktop app and IDE sessions:
 
 ## 29. History opens at the latest messages
 
-Status: fixed on branch `no-user-translation` on 2026-10-20 (`useHistoryScroll` in `src/ui/history-scroll.ts`); not merged or released.
+Status: complete; released in Gloss 0.20.0 (`useHistoryScroll` in `src/ui/history-scroll.ts`).
 
 Pressing History in the Live Conversation or Assistant pane (`src/ui/reading-pane.tsx`; `liveHistory` and `assistantHistory` in `src/ui/session-workspace.tsx`) switches from the latest reply to the whole conversation. The user wants it to open at the newest messages, at the bottom, and scroll up to older ones, like a chat.
 
 - [x] On pressing History, show the newest messages at the bottom of the pane, scrolled to the end, instead of starting at the oldest message.
 - [x] Scrolling up reaches older messages; loading earlier history (`historyCursor`) keeps the reader's place instead of jumping. "Load earlier messages" moved to the top of the feed; new messages are followed only while the reader is at the bottom. The keep-place step has no automated test.
 - [x] Same in the expanded (dialog) view and in both panes. Open: whether Activity's History should behave the same.
-- [ ] Pressing Latest returns to the latest reply as today.
+- [x] Pressing Latest returns to the latest reply as today. Tested by the user on 2026-10-21.
 
 ## 30. Do not translate the user's own messages back
 
-Status: fixed on branch `no-user-translation` on 2026-10-20; not merged or released. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money.
+Status: complete; released in Gloss 0.20.0. The goal is to avoid duplicate translation: the user wrote the message in Hebrew, so a Hebrew translation of it is wasted work and money.
 
 A message the user writes in Hebrew is translated to English and sent to the agent. It comes back into Gloss from the agent's transcript as an English `user` message, and Gloss then translates it into Hebrew. Cause: `translateIfNeeded` in `src/core/workflow.ts` has no role check, and its automatic callers (each new transcript message, `ingestSourceMessage`, and the catch-up loop after attaching a session) pass user messages too. Only the manual Translate action (`translateMessage`) and the re-translation after a language change limit themselves to `role === 'assistant'`. Present since the first public release.
 
@@ -201,15 +201,15 @@ Today every complete assistant reply is translated automatically whenever the se
 
 ## 33. Empty folder view: a + in the middle, or an explanation
 
-Status: captured on 2026-10-20.
+Status: implemented released in Gloss 0.21.0 (2026-10-22).
 
 When a worktree or folder is selected and it has no open sessions (a new worktree, or a folder whose sessions all ended), the main area is blank: only the tabs row says "No open sessions in this folder." next to a small + (`session-tabs-empty` in `src/ui/session-tabs.tsx`; the body below is empty). The user says it feels empty and does not tell a new user what to do next.
 
-- [ ] Fill the empty body with a centered empty state: a large + that opens the same New session dialog as the tabs-row +, and a line of explanation (what a session is, that it starts Claude Code or Codex in this folder; the implementer writes the copy).
-- [ ] Show it for a new worktree as soon as it is created and selected, and for any folder without open or pending sessions. Hide it once a session is launched or attached, including while a launch is pending.
-- [ ] When the folder has saved sessions, mention them (for example "or resume a saved session") pointing at the existing Saved sessions menu.
-- [ ] Keep the tabs-row message or drop it, whichever reads better with the new body; both must agree.
-- [ ] UI test: a folder without sessions shows the empty state; launching a session replaces it with the workspace.
+- [x] Fill the empty body with a centered empty state: a large + that opens the same New session dialog as the tabs-row +, and a line of explanation (what a session is, that it starts Claude Code or Codex in this folder; the implementer writes the copy).
+- [x] Show it for a new worktree as soon as it is created and selected, and for any folder without open or pending sessions. Hide it once a session is launched or attached, including while a launch is pending.
+- [x] When the folder has saved sessions, mention them (for example "or resume a saved session") pointing at the existing Saved sessions menu.
+- [x] Keep the tabs-row message or drop it, whichever reads better with the new body; both must agree.
+- [x] UI test: a folder without sessions shows the empty state; launching a session replaces it with the workspace.
 
 ## 34. Attachment references inside the text
 
@@ -232,7 +232,7 @@ The Files panel previews text and code (with syntax colouring), Markdown and HTM
 - [ ] Preview more kinds in place: video (mp4, mov, webm) and audio (mp3, m4a, wav) with the browser's own player, streamed from the local server rather than loaded as a data URL (the videos under `docs/media` are tens of MB); PDF in an embedded viewer; SVG as an image as well as source. Keep the per-kind size limits explicit and say which kinds are still not previewed (archives, binaries) instead of the generic message.
 - [ ] Serve media over an authenticated local URL with range requests so seeking works, scoped to the session's folder like the existing file endpoints; no new path outside the connected folder may become readable.
 - [ ] Attaching keeps working for every kind, and the attachment card shows the kind (video, audio, PDF) so the agent reference line says "File N" with a sensible name.
-- [ ] "Open in Finder" (Linux: "Open in file manager") on every file and folder in the Files tree and in the preview header: reveals the file, or opens the folder, through Electron's shell in the desktop main process (`desktop/main.mjs`, exposed via `desktop/preload.cjs` like `pick-folder`). In the browser build the action is hidden. Also "Copy path".
+- [x] (released in Gloss 0.21.0 (2026-10-22); a file or a package-like folder such as `Foo.app` is revealed, never opened; not yet clicked in the real Electron window) "Open in Finder" (Linux: "Open in file manager") on every file and folder in the Files tree and in the preview header: reveals the file, or opens the folder, through Electron's shell in the desktop main process (`desktop/main.mjs`, exposed via `desktop/preload.cjs` like `pick-folder`). In the browser build the action is hidden. Also "Copy path".
 - [ ] Tests: the server refuses a media path outside the folder; a range request returns 206; the Files tree menu shows the open action only in the desktop build.
 
 ## 36. Language Assistant with file access and a choice of model
@@ -275,7 +275,7 @@ Gloss 0.10.4 ran one `/usr/sbin/lsof` per Claude socket on every session refresh
 - [x] Measured: built backend 2–3 Claude `lsof` runs per 10 s; packaged 0.10.5 1 Claude run per 6 s. Browser suite 279/279 in about 5 minutes.
 - [x] Installed 0.10.5 (9 Claude records, 93 catalog entries): all `lsof` runs fell from 143 per 5 s to 42–52 per 10 s; Claude's share is 6 per 10 s. Load average fell from 12–14 to about 4. Unit 1102/1102; browser 279/279 in 4.7 min.
 - [x] Codex probes (`ps`, `lsof -Fpcfn` on writer locks, `lsof -a -d cwd`) share one round across discovery, status and sends for 3 s (Gloss 0.10.6). Installed 2026-10-16: per 15 s, Codex fell from 16 writer `lsof` + 15 `cwd` `lsof` + 16 `ps` to 4 + 1 + 4; all `lsof` together about 1/s (30 in 30 s).
-- [ ] Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in. Not seen with the installed 0.12.0 while logged in (0 runs in 10 s on 2026-10-17). Cause to confirm: `ClaudeBackend.open()` runs the check on every session open with no cache, so failed opens that retry repeat it.
+- [x] (released in Gloss 0.21.0 (2026-10-22); cause confirmed: the catalog's 2 s scan reconnects every disconnected session and each open ran the check; now one shared check per backend, cached 5 s on success and 3 s on failure, Codex too) Possible follow-up (seen only in a logged-out test home): language workers re-run `claude auth status` about 5 times a second when Claude is not logged in. Not seen with the installed 0.12.0 while logged in (0 runs in 10 s on 2026-10-17). Cause to confirm: `ClaudeBackend.open()` runs the check on every session open with no cache, so failed opens that retry repeat it.
 
 ## 15. Claude discovery accepts invalid `entrypoint` values
 
@@ -400,7 +400,7 @@ Status: complete; delivered by task 26 (Activity view), released in Gloss 0.15.1
 Status: partly covered by task 26, checked on 2026-10-19. For a Claude session, a command started in the background (`run_in_background`) shows in the Activity view with a live output panel and "show earlier" in 64 KB pages, read from Claude's own output file. Open below.
 
 - [ ] When a session runs a server in the background, let the user see its logs.
-- [ ] Color codes are shown raw: server logs with ANSI colors appear as `\x1b[32m…` text in the output panel. Strip or render them.
+- [x] (released in Gloss 0.21.0 (2026-10-22)) Color codes are shown raw: server logs with ANSI colors appear as `\x1b[32m…` text in the output panel. Strip or render them.
 - [ ] Not seen: servers started outside Claude's background tasks (`nohup … &`, a log file, another terminal) and Codex sessions.
 
 ## 14. Local DevOps tools and their permissions
