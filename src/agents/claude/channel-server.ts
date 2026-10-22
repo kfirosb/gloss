@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
-import { existingDataDir } from '../../runtime/data-dir.js';
+import { existingDataDir, legacyDataDir } from '../../runtime/data-dir.js';
+import { channelLedgerPath } from './legacy-ledger.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -133,6 +134,17 @@ async function startInertServer(): Promise<{ close(): Promise<void> }> {
   return { close };
 }
 
+/** Opens the ledger by `path`; a link that was removed since it was chosen falls back to the folder's own ledger. */
+function openLedger(path: string, own: string): ChannelStore {
+  if (path === own) return new ChannelStore(own);
+  try {
+    return new ChannelStore(path, { create: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return new ChannelStore(own);
+  }
+}
+
 /** Experimental macOS channel. Readiness proves local initialization, not Claude
  * consent, processing or delivery. Stdio is exclusively MCP; HTTP never supplies
  * identity, credentials, filesystem paths, or permission decisions.
@@ -147,6 +159,10 @@ export async function startClaudeChannel(
   if (!enabled) return startInertServer();
   // Never the new folder before the entry points have moved the old one there.
   const stateDir = resolve(options.stateDir ?? existingDataDir());
+  const ownLedger = join(stateDir, CHANNEL_LEDGER_FILE);
+  // While older helpers write through the old folder's link, this one uses that name too (see channelLedgerPath).
+  const ledgerPath =
+    options.stateDir === undefined ? channelLedgerPath(stateDir, legacyDataDir()) : ownLedger;
   let registry: Registry | undefined;
   let record: ChannelRecord | undefined;
   let store: ChannelStore | undefined;
@@ -325,13 +341,17 @@ export async function startClaudeChannel(
     if (process.stdin.readableEnded || process.stdin.destroyed) throw new Error('Stdio closed');
     registry =
       options.registryFactory?.({ port, stateDir }) ??
-      createChannelRegistry({ registryDir: join(stateDir, CHANNEL_REGISTRY_DIR), port });
+      createChannelRegistry({
+        registryDir: join(stateDir, CHANNEL_REGISTRY_DIR),
+        port,
+        ledgerPath,
+      });
     await mcp.connect(new StdioServerTransport());
     record = await registry.registerChannel(port);
     if (closed) throw new Error('Stdio closed during registration');
     await ensurePrivateDirectory(stateDir, 'Unsafe channel state directory', { recursive: true });
     if (closed) throw new Error('Stdio closed during startup');
-    store = new ChannelStore(join(stateDir, CHANNEL_LEDGER_FILE));
+    store = openLedger(ledgerPath, ownLedger);
     store.registerGeneration(record.generation, record.target);
     finishStartup();
     return { close };

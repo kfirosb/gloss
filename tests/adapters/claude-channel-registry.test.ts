@@ -865,6 +865,49 @@ describe('experimental native Claude channel registry', () => {
       expect(await readdir(legacyRegistryDir)).toEqual([]);
     });
 
+    it('fails the whole lookup when the current registry directory is unsafe', async () => {
+      const f = await fixture();
+      const legacyRegistryDir = await legacy(f);
+      await f.seed(f.record, join(legacyRegistryDir, `${generation}.json`));
+      await rename(f.registryDir, f.registryDir + '.real');
+      await symlink(f.registryDir + '.real', f.registryDir);
+      const registry = createChannelRegistry({ ...f.options, legacyRegistryDir });
+      expect(await registry.resolveChannel(f.target)).toBeUndefined();
+    });
+
+    it('records the ledger path the helper opened', async () => {
+      const f = await fixture();
+      const ledgerPath = join(f.dir, 'legacy', 'claude-channel-ledger.db');
+      const record = await createChannelRegistry({ ...f.options, ledgerPath }).registerChannel();
+      expect(record.ledgerPath).toBe(ledgerPath);
+      expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(record);
+    });
+
+    it('says which ledger path live helpers still use', async () => {
+      const f = await fixture();
+      const legacyRegistryDir = await legacy(f);
+      const link = join(f.dir, 'legacy', 'claude-channel-ledger.db');
+      const current = join(f.dir, 'state', 'claude-channel-ledger.db');
+      let alive = true;
+      const registry = createChannelRegistry({
+        ...f.options,
+        legacyRegistryDir,
+        alive: (pid) => pid === 300 && alive,
+      });
+      expect(await registry.ledgerInUse(link)).toBe(false);
+      // Written before 0.22: no ledgerPath, so it uses the old folder's ledger.
+      await f.seed(f.record, join(legacyRegistryDir, `${generation}.json`));
+      expect(await registry.ledgerInUse(link)).toBe(true);
+      alive = false;
+      expect(await registry.ledgerInUse(link)).toBe(false);
+      alive = true;
+      await rm(join(legacyRegistryDir, `${generation}.json`));
+      await f.seed({ ...f.record, ledgerPath: current });
+      expect(await registry.ledgerInUse(link)).toBe(false);
+      await f.seed({ ...f.record, ledgerPath: link });
+      expect(await registry.ledgerInUse(link)).toBe(true);
+    });
+
     it('does not count one registration twice when both names are the same folder', async () => {
       const f = await fixture();
       await f.seed();

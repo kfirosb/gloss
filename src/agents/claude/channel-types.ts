@@ -20,6 +20,11 @@ export type ChannelRecord = {
   generation: string;
   port: number;
   token: string;
+  /**
+   * The path the helper opened its ledger by. Helpers before 0.22 never wrote it and always used the old data
+   * folder's ledger; Gloss keeps that folder's ledger link while any such helper lives.
+   */
+  ledgerPath?: string;
 };
 export type ChannelReply = { key: ChannelKey; text: string; sequence: number; timestamp: string };
 export type ChannelStatus = {

@@ -29,6 +29,8 @@ export interface ChannelRegistryOptions {
    * no-symlink checks: a helper from before the data-folder move can still register there.
    */
   legacyRegistryDir?: string;
+  /** The ledger path this helper opened, recorded in its registration (see `ChannelRecord.ledgerPath`). */
+  ledgerPath?: string;
   configDir?: string;
   port?: number;
   pid?: number;
@@ -38,6 +40,8 @@ export interface ChannelRegistryOptions {
   /** Trusted test seam; production authenticates the numeric-loopback endpoint. */
   healthProbe?: (record: ChannelRecord, signal: AbortSignal) => Promise<unknown>;
   runner?: ProcessRunner;
+  /** Whether a pid still names a process; defaults to `kill(pid, 0)`. Used only to keep files, never to bind. */
+  alive?: (pid: number) => boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -47,6 +51,15 @@ const IDENTITY_PS_TIMEOUT_MS = 1000;
 const positivePid = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 const validPort = (value: unknown): value is number => positivePid(value) && value <= 65535;
+/** A process exists unless the kernel says it does not; pid reuse only keeps things a little longer. */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+};
 const sameTarget = (a: Target, b: Target) =>
   a.agent === b.agent && a.sessionRef === b.sessionRef && a.projectId === b.projectId;
 interface NativeRecord {
@@ -73,6 +86,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     legacyRegistryDir === undefined || legacyRegistryDir === registryDir
       ? [registryDir]
       : [registryDir, legacyRegistryDir];
+  const alive = options.alive ?? processAlive;
   const configDir = resolve(claudeConfigDir(options.configDir));
   const uid = () => options.uid ?? process.getuid?.();
   const supported = () => supportsProcessProbes(options.platform) && uid() !== undefined;
@@ -348,7 +362,8 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
       uuid.test(generation) &&
       validPort(r.port) &&
       typeof r.token === 'string' &&
-      /^[a-f0-9]{64}$/.test(r.token)
+      /^[a-f0-9]{64}$/.test(r.token) &&
+      (r.ledgerPath === undefined || (typeof r.ledgerPath === 'string' && isAbsolute(r.ledgerPath)))
     );
   }
   async function ready(record: ChannelRecord, parentSignal: AbortSignal): Promise<boolean> {
@@ -462,6 +477,9 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
               generation: randomUUID(),
               port,
               token: randomBytes(32).toString('hex'),
+              ...(options.ledgerPath === undefined
+                ? {}
+                : { ledgerPath: resolve(options.ledgerPath) }),
             };
             await write(record, checkDeadline);
             try {
@@ -496,18 +514,51 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
         validateTarget(target, 'claude');
         if ((await projectIdentity(target.projectId)) !== target.projectId) return undefined;
         const signal = AbortSignal.timeout(10_000);
-        const candidates: ChannelRecord[] = [];
-        for (const directory of readDirs) {
-          try {
-            candidates.push(...(await liveRecords(directory, target, signal)));
-          } catch {
-            /* An absent or unsafe registry directory contributes nothing. */
-          }
-        }
+        // An unsafe current directory fails the whole lookup; an absent or unsafe legacy one only adds nothing.
+        const candidates = await liveRecords(registryDir, target, signal);
+        if (legacyRegistryDir !== undefined && legacyRegistryDir !== registryDir)
+          candidates.push(
+            ...(await liveRecords(legacyRegistryDir, target, signal).catch(
+              () => [] as ChannelRecord[],
+            )),
+          );
         return !signal.aborted && candidates.length === 1 ? candidates[0] : undefined;
       } catch {
         return undefined;
       }
+    },
+    /**
+     * Whether a helper that may still be running opened its ledger by `path`: a registration with that `ledgerPath`,
+     * or one without it (written before 0.22, so the old folder's ledger), whose channel process exists. Any doubt
+     * (an unreadable or unsafe directory, an unreadable record) answers true; only a missing directory counts as empty.
+     */
+    async ledgerInUse(path: string): Promise<boolean> {
+      const target = resolve(path);
+      for (const directory of readDirs) {
+        let entries: string[];
+        try {
+          entries = await names(directory, true);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          return true;
+        }
+        for (const name of entries) {
+          const generation = name.endsWith('.json') ? name.slice(0, -5) : '';
+          if (!uuid.test(generation)) continue;
+          let record: JsonRecord;
+          try {
+            record = await readJson(join(directory, name), true);
+          } catch (error) {
+            // A registration removed while listing is gone, not in doubt.
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+            return true;
+          }
+          if (!validRecord(record, generation)) continue;
+          const opened = record.ledgerPath === undefined ? undefined : resolve(record.ledgerPath);
+          if ((opened === undefined || opened === target) && alive(record.channelPid)) return true;
+        }
+      }
+      return false;
     },
     async removeChannel(generation: string): Promise<void> {
       const record = own.get(generation);

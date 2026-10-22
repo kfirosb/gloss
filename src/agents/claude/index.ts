@@ -47,7 +47,8 @@ import {
   type ClaudeSessionRecord,
 } from './session-records.js';
 import { ChannelStore } from './channel-store.js';
-import { CHANNEL_LEDGER_FILE, CHANNEL_REGISTRY_DIR, isChannelServer } from './channel-names.js';
+import { channelLedgerPath, createLegacyLedgerPruner } from './legacy-ledger.js';
+import { CHANNEL_REGISTRY_DIR, isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 import { SESSION_GONE_REASON, selectClaudeRoute } from './route.js';
 import {
@@ -433,6 +434,16 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   const liveness = claudeLiveness(options);
   /** Shared by every connection to a session, so two sends never type into the same pane at once. */
   const typeInTurn = createTypingQueue();
+  /** The real data folder's old counterpart; an injected `stateDir` has none. */
+  const legacyStateDir = options.stateDir === undefined ? legacyDataDir() : undefined;
+  const pruneLegacyLedger =
+    legacyStateDir === undefined
+      ? undefined
+      : createLegacyLedgerPruner({
+          stateDir: dataDir(),
+          legacyStateDir,
+          log: (message) => process.stderr.write(message + '\n'),
+        });
   const typingBySession = new Map<string, SessionTyping>();
   const now = () => options.clock?.now?.() ?? Date.now();
   /** The session's typing memory, dropping any session idle past the grace period. */
@@ -469,7 +480,12 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
   }
   return {
     kind: 'claude',
-    discoverOpen: (signal) => discoverOpenClaude(options, signal, liveness),
+    discoverOpen: (signal) => {
+      // Each discovery scan also retires the old folder's ledger link once no helper needs it; after that it is one
+      // lstat. Best effort and not awaited: it never delays or fails the scan.
+      void pruneLegacyLedger?.();
+      return discoverOpenClaude(options, signal, liveness);
+    },
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       const targets: Target[] = [];
@@ -516,19 +532,26 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         createChannelRegistry({
           configDir: config,
           registryDir: join(stateDir, CHANNEL_REGISTRY_DIR),
-          // Only with the real data folder: an injected one has no old counterpart.
-          ...(options.stateDir === undefined
-            ? { legacyRegistryDir: join(legacyDataDir(), CHANNEL_REGISTRY_DIR) }
-            : {}),
+          ...(legacyStateDir === undefined
+            ? {}
+            : { legacyRegistryDir: join(legacyStateDir, CHANNEL_REGISTRY_DIR) }),
         });
       let ownedLedger: ChannelStore | undefined;
+      let ownedLedgerPath: string | undefined;
       const ledger = () => {
         if (!context?.panelSessionId) return undefined;
         if (options.channelLedger) return options.channelLedger();
-        const ledgerPath = join(stateDir, CHANNEL_LEDGER_FILE);
+        // The helpers' name for the ledger (see channelLedgerPath); reopen when it changes, so this reader always
+        // looks for a crashed writer's journal under the name the writers use.
+        const ledgerPath = channelLedgerPath(stateDir, legacyStateDir);
+        if (ownedLedger && ownedLedgerPath !== ledgerPath) {
+          ownedLedger.close();
+          ownedLedger = undefined;
+        }
         if (!ownedLedger) {
           try {
             ownedLedger = new ChannelStore(ledgerPath, { readOnly: true });
+            ownedLedgerPath = ledgerPath;
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
           }

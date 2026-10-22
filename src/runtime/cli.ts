@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { dataDir } from './data-dir.js';
+import { dataDir, legacyDataDir } from './data-dir.js';
 import { migrateDataDir, migrationBlockedMessage, probeStateDb } from './data-migration.js';
 import { pathToFileURL } from 'node:url';
 import { INITIAL_LANGUAGE_DEFAULTS } from '../core/language-settings.js';
@@ -87,6 +87,13 @@ export async function launch(args: string[]) {
   if (blocked) throw new Error(blocked);
   const root = dataDir();
   await mkdir(root, { recursive: true, mode: 0o700 });
+  // Retire the old folder's channel-ledger link if the helpers that needed it have ended (the adapter rechecks on scans).
+  const { createLegacyLedgerPruner } = await import('../agents/claude/legacy-ledger.js');
+  await createLegacyLedgerPruner({
+    stateDir: root,
+    legacyStateDir: legacyDataDir(home),
+    log: (message) => process.stderr.write(message + '\n'),
+  })();
   const store = new SqliteStore(join(root, 'state.db'));
   let localSink: ReturnType<typeof createHttpSourceSink> | undefined;
   const sourceSink =

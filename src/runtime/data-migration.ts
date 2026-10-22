@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 import { link as linkFile, lstat, mkdir, readdir, rename as renameFolder } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CHANNEL_LEDGER_FILE, CHANNEL_REGISTRY_DIR } from '../agents/claude/channel-names.js';
@@ -57,9 +58,11 @@ export async function migrateDataDir(options: {
   const [hasLegacy, hasNext] = await Promise.all([present(legacy), present(next)]);
   const bothExist = async (): Promise<MigrationResult> => {
     if (await onlyHelperFiles(legacy)) {
-      options.log(
-        `${legacy} holds only files of older Claude channel helpers; using ${next} and leaving it untouched.`,
-      );
+      if (!legacyHelpersReported)
+        options.log(
+          `${legacy} holds only files of older Claude channel helpers; using ${next} and leaving it untouched.`,
+        );
+      legacyHelpersReported = true;
       return { kind: 'legacy-helpers' };
     }
     options.log(`Both ${legacy} and ${next} exist; using ${next} and leaving ${legacy} untouched.`);
@@ -92,8 +95,14 @@ const HELPER_ENTRIES = new Set([
   CHANNEL_REGISTRY_DIR,
   ...['', '-journal', '-wal', '-shm'].map((suffix) => CHANNEL_LEDGER_FILE + suffix),
 ]);
-const onlyHelperFiles = async (legacy: string) =>
-  (await readdir(legacy)).every((name) => HELPER_ENTRIES.has(name));
+/** An unreadable old folder (or a file at its path) is not known to hold only helper files. */
+const onlyHelperFiles = (legacy: string) =>
+  readdir(legacy).then(
+    (names) => names.every((name) => HELPER_ENTRIES.has(name)),
+    () => false,
+  );
+/** The legacy-helpers state lasts until those sessions end; say so once per process, not on every check. */
+let legacyHelpersReported = false;
 
 /**
  * A channel helper started before the move keeps its ledger open, but SQLite writes by path: each commit first checks
@@ -116,7 +125,16 @@ async function keepLedgerWritable(options: {
     if (!(await present(ledger))) return;
     // Unsure counts as held: an unneeded link only leaves a small folder, a missing one breaks running sessions.
     if ((await options.probe(ledger)) === 'free') return;
-    await mkdir(options.legacy, { mode: 0o700 });
+    try {
+      await mkdir(options.legacy, { mode: 0o700 });
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') throw error;
+      // A helper started during the move recreated the folder, possibly with a fresh ledger: never link over it.
+      options.log(
+        `${options.legacy} was recreated by a Claude channel helper before the ledger could be linked; not linking. Sessions whose helpers started before the move need their channel reconnected.`,
+      );
+      return;
+    }
     await (options.link ?? linkFile)(ledger, alias);
   } catch (error) {
     options.log(
@@ -139,8 +157,8 @@ export function migrationBlockedMessage(result: MigrationResult, home: string): 
 }
 
 /**
- * Decides from one `lsof -t -- <db> <db>-wal` run, with the same stderr policy as every other lsof probe: exit 1 with
- * no pids is "free" only when stderr holds nothing but missing-path notices (the WAL often does not exist). The
+ * Decides from one `lsof -t -- <db> [<db>-wal]` run, with the same stderr policy as every other lsof probe: exit 1 with
+ * no pids is "free" only when stderr holds nothing but missing-path notices (a WAL can vanish between the check and the run). The
  * current process is ignored. Anything unexpected counts as in use: moving a live database is worse than a retry.
  */
 function decideLsof(
@@ -154,19 +172,43 @@ function decideLsof(
   return run.pids.some((pid) => pid !== String(ownPid)) ? 'in-use' : 'free';
 }
 
-const lsofArgs = (path: string) => ['-t', '--', path, path + '-wal'];
+/** Whether anything is at the path; an unreadable entry still counts, so lsof decides about it. */
+const pathPresent = (path: string): boolean => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    return errorCode(error) !== 'ENOENT';
+  }
+};
+/**
+ * The lsof arguments for the database and its WAL, naming only paths that exist: macOS lsof given nothing but missing
+ * paths prints its usage banner, which the stderr policy rightly treats as a failure. No database means nobody holds
+ * it, so the result is undefined and the probe answers `free` without running lsof.
+ */
+function lsofArgs(path: string, exists: (path: string) => boolean): string[] | undefined {
+  if (!exists(path)) return undefined;
+  return ['-t', '--', path, ...(exists(path + '-wal') ? [path + '-wal'] : [])];
+}
 const pidLines = (lines: string[]) => lines.map((line) => line.trim()).filter(Boolean);
 
 /** Whether a process other than this one has `state.db` or its WAL open. */
 export async function probeStateDb(
   path: string,
-  options: { runner?: ProcessRunner; pid?: number; platform?: NodeJS.Platform } = {},
+  options: {
+    runner?: ProcessRunner;
+    pid?: number;
+    platform?: NodeJS.Platform;
+    exists?: (path: string) => boolean;
+  } = {},
 ): Promise<StateDbUse> {
   const platform = options.platform ?? process.platform;
   if (!supportsProcessProbes(platform)) return 'in-use';
+  const args = lsofArgs(path, options.exists ?? pathPresent);
+  if (!args) return 'free';
   const runner = options.runner ?? runProcess;
   const { lines, outcome } = await collectProcess(
-    runner(lsofPath(platform), lsofArgs(path), '', AbortSignal.timeout(LSOF_TIMEOUT_MS + 500), {
+    runner(lsofPath(platform), args, '', AbortSignal.timeout(LSOF_TIMEOUT_MS + 500), {
       timeoutMs: LSOF_TIMEOUT_MS,
       maxOutputBytes: LSOF_MAX_OUTPUT_BYTES,
     }),
@@ -199,11 +241,18 @@ const runSync: SyncRun = (executable, args) =>
  */
 export function probeStateDbSync(
   path: string,
-  options: { run?: SyncRun; pid?: number; platform?: NodeJS.Platform } = {},
+  options: {
+    run?: SyncRun;
+    pid?: number;
+    platform?: NodeJS.Platform;
+    exists?: (path: string) => boolean;
+  } = {},
 ): StateDbUse {
   const platform = options.platform ?? process.platform;
   if (!supportsProcessProbes(platform)) return 'in-use';
-  const run = (options.run ?? runSync)(lsofPath(platform), lsofArgs(path));
+  const args = lsofArgs(path, options.exists ?? pathPresent);
+  if (!args) return 'free';
+  const run = (options.run ?? runSync)(lsofPath(platform), args);
   if (run.error) return errorCode(run.error) === 'ENOENT' ? 'lsof-missing' : 'in-use';
   return decideLsof(
     { code: run.status, pids: pidLines(run.stdout.split('\n')), diagnostics: run.stderr },

@@ -77,12 +77,18 @@ export class ChannelStore {
   private readonly readOnly: boolean;
   private closed = false;
 
-  constructor(path: string, options: { readOnly?: boolean } = {}) {
+  /** `create: false` opens an existing ledger only (a missing one fails with ENOENT); readers never create. */
+  constructor(path: string, options: { readOnly?: boolean; create?: boolean } = {}) {
     if (!path || path === ':memory:') throw new Error('A durable channel ledger path is required');
     this.readOnly = options.readOnly === true;
-    if (!this.readOnly) mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const create = !this.readOnly && options.create !== false;
+    if (create) mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     // Readers must neither create a missing ledger nor repair its permissions.
-    const mode = this.readOnly ? constants.O_RDONLY : constants.O_CREAT | constants.O_RDWR;
+    const mode = this.readOnly
+      ? constants.O_RDONLY
+      : create
+        ? constants.O_CREAT | constants.O_RDWR
+        : constants.O_RDWR;
     const file = openSync(path, mode | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
     try {
       if (!fstatSync(file).isFile()) throw new Error('Channel ledger must be a regular file');

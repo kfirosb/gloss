@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs/promises';
 import { lstat, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +14,11 @@ import {
 } from '../../src/runtime/data-migration.js';
 import type { ProcessRunner } from '../../src/runtime/process-runner.js';
 
+/** A fresh copy of the module, so its once-per-process log state starts clean. */
+const freshMigration = async () => {
+  vi.resetModules();
+  return import('../../src/runtime/data-migration.js');
+};
 const tempHome = () => mkdtemp(join(tmpdir(), 'gloss-migrate-'));
 const exists = (path: string) =>
   stat(path).then(
@@ -105,9 +111,13 @@ describe('migrateDataDir', () => {
     await mkdir(dataDir(home));
     await writeFile(join(dataDir(home), 'state.db'), 'new');
     const h = harness();
-    expect(await migrateDataDir(h.options(home))).toEqual({ kind: 'legacy-helpers' });
+    const fresh = await freshMigration();
+    expect(await fresh.migrateDataDir(h.options(home))).toEqual({ kind: 'legacy-helpers' });
     expect(h.logs).toHaveLength(1);
     expect(h.logs[0]).toMatch(/older Claude channel helpers/);
+    // The state lasts while those sessions run: later checks in this process stay quiet.
+    expect(await fresh.migrateDataDir(h.options(home))).toEqual({ kind: 'legacy-helpers' });
+    expect(h.logs).toHaveLength(1);
     expect((await readdir(old)).sort()).toEqual([
       'claude-channel-ledger.db',
       'claude-channel-ledger.db-journal',
@@ -127,6 +137,14 @@ describe('migrateDataDir', () => {
     await writeFile(join(old, 'state.db'), 'old');
     await mkdir(dataDir(home));
     expect(await migrateDataDir(harness().options(home))).toEqual({ kind: 'both-exist' });
+  });
+
+  it('calls it both-exist, without throwing, when the old path cannot be listed', async () => {
+    const home = await tempHome();
+    await writeFile(legacyDataDir(home), 'not a folder');
+    await mkdir(dataDir(home));
+    expect(await migrateDataDir(harness().options(home))).toEqual({ kind: 'both-exist' });
+    expect(await readFile(legacyDataDir(home), 'utf8')).toBe('not a folder');
   });
 
   describe('channel helpers running across the move', () => {
@@ -184,6 +202,25 @@ describe('migrateDataDir', () => {
       expect(await migrateDataDir(o)).toEqual({ kind: 'moved' });
       expect(await exists(old)).toBe(false);
       expect(h.checked).toEqual([join(old, 'state.db')]);
+    });
+
+    it('never links over an old folder a helper recreated during the move', async () => {
+      const home = await tempHome();
+      const old = await seedLegacy(home);
+      await writeFile(join(old, ledger), 'ledger');
+      const { h, options: o } = options(home, 'in-use');
+      const result = await migrateDataDir({
+        ...o,
+        // The helper wins the race: the old folder is back, with a fresh ledger, before the link.
+        rename: async (from, to) => {
+          await fs.rename(from, to);
+          await mkdir(from, { mode: 0o700 });
+          await writeFile(join(from, ledger), 'fresh');
+        },
+      });
+      expect(result).toEqual({ kind: 'moved' });
+      expect(await readFile(join(old, ledger), 'utf8')).toBe('fresh');
+      expect(h.logs.some((line) => /recreated by a Claude channel helper/.test(line))).toBe(true);
     });
 
     it('still reports the move when linking fails, and logs why', async () => {
@@ -263,7 +300,32 @@ const failingRunner = (reason: 'spawn-error' | 'timeout'): ProcessRunner =>
 describe('probeStateDb', () => {
   const db = '/home/u/.language-assistant/state.db';
   const probe = (runner: ProcessRunner, platform: NodeJS.Platform = 'darwin') =>
-    probeStateDb(db, { runner, pid: 42, platform });
+    probeStateDb(db, { runner, pid: 42, platform, exists: () => true });
+
+  it('is free without running lsof when there is no state.db', async () => {
+    const home = await tempHome();
+    const calls: string[][] = [];
+    const path = join(home, 'state.db');
+    expect(await probeStateDb(path, { runner: fakeRunner([], 1, '', calls), pid: 42 })).toBe(
+      'free',
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('names only state.db when its WAL does not exist', async () => {
+    const home = await tempHome();
+    const calls: string[][] = [];
+    const path = join(home, 'state.db');
+    await writeFile(path, 'db');
+    expect(
+      await probeStateDb(path, {
+        runner: fakeRunner([], 1, '', calls),
+        pid: 42,
+        platform: 'darwin',
+      }),
+    ).toBe('free');
+    expect(calls).toEqual([['/usr/sbin/lsof', '-t', '--', path]]);
+  });
 
   it('asks the platform lsof once about the database and its WAL', async () => {
     const calls: string[][] = [];
@@ -315,11 +377,27 @@ describe('probeStateDbSync', () => {
     probeStateDbSync(db, {
       pid: 42,
       platform: 'darwin',
+      exists: () => true,
       run: (executable, args) => {
         calls.push([executable, args]);
         return result;
       },
     });
+
+  it('is free without running lsof when there is no state.db, and skips a missing WAL', async () => {
+    const home = await tempHome();
+    const path = join(home, 'state.db');
+    const calls: unknown[][] = [];
+    const run: SyncRun = (executable, args) => {
+      calls.push([executable, args]);
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    expect(probeStateDbSync(path, { run, pid: 42, platform: 'darwin' })).toBe('free');
+    expect(calls).toEqual([]);
+    await writeFile(path, 'db');
+    expect(probeStateDbSync(path, { run, pid: 42, platform: 'darwin' })).toBe('free');
+    expect(calls).toEqual([['/usr/sbin/lsof', ['-t', '--', path]]]);
+  });
 
   it('applies the same policy as the async probe', () => {
     const calls: unknown[][] = [];
