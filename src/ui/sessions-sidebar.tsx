@@ -16,6 +16,8 @@ import { AttentionBadge, Spinner } from './attention.js';
 import { AboutDialog } from './about-dialog.js';
 import { readAbout } from './session-client.js';
 import { errorMessage } from './error-message.js';
+import { UpdateNotice } from './update-notice.js';
+import { updatesBridge, useUpdateState } from './update-state.js';
 export function SessionsSidebar({
   tree,
   hidden = [],
@@ -121,6 +123,8 @@ export function SessionsSidebar({
     };
   }, []);
   const close = () => setDialog(null);
+  const updateState = useUpdateState();
+  const installUpdate = () => void updatesBridge()?.install();
   const versionLabel = about ? `About Gloss, version ${about.version}` : 'About Gloss';
   return (
     <SidebarFrame
@@ -273,6 +277,7 @@ export function SessionsSidebar({
           >
             {about ? `v${about.version}` : 'v…'}
           </button>
+          {updateState && <UpdateNotice state={updateState} install={installUpdate} />}
         </div>
         <LanguageDefaultsDialog open={dialog === 'language'} onClose={close} />
         <HiddenProjectsDialog

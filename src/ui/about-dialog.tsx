@@ -1,6 +1,7 @@
 import { BrandMark } from './brand-mark.js';
 import type { AboutInfo } from '../runtime/application.js';
 import { PanelDialog } from './composer-dialogs.js';
+import { updatesBridge, useUpdateState, type UpdateState } from './update-state.js';
 const platformName = (p: string) =>
   p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : p === 'linux' ? 'Linux' : p;
 const archName = (a: string, p: string) =>
@@ -11,6 +12,22 @@ const archName = (a: string, p: string) =>
         ? 'Intel'
         : 'x64'
       : a;
+const updateResult = (state: UpdateState): string | null => {
+  switch (state.kind) {
+    case 'checking':
+      return 'Checking…';
+    case 'up-to-date':
+      return 'Gloss is up to date';
+    case 'available':
+      return `Version ${state.version} is available`;
+    case 'downloading':
+      return `Downloading ${Math.round(state.percent)}%`;
+    case 'error':
+      return state.message;
+    case 'idle':
+      return null;
+  }
+};
 export function AboutDialog({
   open,
   close,
@@ -22,6 +39,8 @@ export function AboutDialog({
   about: AboutInfo | null;
   error?: string | undefined;
 }) {
+  const updateState = useUpdateState();
+  const result = updateState && updateResult(updateState);
   return (
     <PanelDialog
       title="About Gloss"
@@ -45,6 +64,18 @@ export function AboutDialog({
           </dl>
         ) : (
           <p role="status">{error ?? 'Loading version…'}</p>
+        )}
+        {updateState && (
+          <div className="about-update">
+            <button
+              type="button"
+              disabled={updateState.kind === 'checking' || updateState.kind === 'downloading'}
+              onClick={() => void updatesBridge()?.check()}
+            >
+              Check for updates
+            </button>
+            {result && <p role="status">{result}</p>}
+          </div>
         )}
       </div>
       <div className="review-actions">

@@ -14,6 +14,7 @@ import {
 } from '../core/session-contracts.js';
 import { errorMessage } from './error-message.js';
 import { languageOptionLabel } from './language-controls.js';
+import type { UpdatesBridge } from './update-state.js';
 
 declare global {
   interface Window {
@@ -25,6 +26,7 @@ declare global {
         sessionId: string,
         relativePath: string,
       ): Promise<{ ok: true } | { error: string }>;
+      updates?: UpdatesBridge;
     };
   }
 }

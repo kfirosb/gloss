@@ -4566,3 +4566,46 @@ button.activity-agent-head {
     transition: none;
   }
 }
+.update-mark {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 6px !important;
+}
+.update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f7d57;
+}
+.update-progress,
+.update-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #7d8a80;
+  font-variant-numeric: tabular-nums;
+}
+.update-error {
+  color: light-dark(#a33a2c, var(--dk-fg-a33a2c));
+}
+.sidebar-footer .update-retry {
+  font-size: 11px;
+  padding: 3px 6px;
+  text-decoration: underline;
+}
+.about-update {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.about-update p {
+  margin: 0;
+  font-size: 12px;
+}
+.sessions-sidebar[data-collapsed='true'] .update-progress,
+.sessions-sidebar[data-collapsed='true'] .update-error > span:first-child {
+  display: none;
+}
