@@ -4,7 +4,11 @@ import {
   MAX_IMAGE_PREVIEW_BYTES,
   MAX_MEDIA_PREVIEW_BYTES,
   MAX_MEDIA_PREVIEW_LABEL,
+  MAX_STREAMED_PREVIEW_BYTES,
   MEDIA_MIME_TYPES,
+  isArchiveName,
+  previewLimitMessage,
+  streamedPreviewType,
 } from '../core/content-policy.js';
 import { opendir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,6 +18,7 @@ import type {
   FileLocation,
   FilePreview,
   FileReference,
+  StreamableFile,
 } from '../core/file-references.js';
 import { readReferencePrefix, readReferenceChunks, requireContained } from './file-content.js';
 import { imageMime } from './attachments.js';
@@ -76,13 +81,21 @@ export function createFileBrowser(
       size: info.size,
       version: `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`,
     };
+    const streamed = streamedPreviewType(relativePath);
+    // Video, audio and PDF are streamed by the player; their bytes are never inlined here.
+    if (streamed && streamed.kind !== 'svg')
+      return {
+        ...base,
+        kind: streamed.kind,
+        state: info.size > MAX_STREAMED_PREVIEW_BYTES[streamed.kind] ? 'large' : 'stream',
+      };
     const prefix = await readReferencePrefix(file, Math.min(TEXT_BYTES, info.size));
     signal.throwIfAborted();
     const mime = imageMime(prefix);
     if (mime) {
       // Content searches classify raster files without reading/encoding their payload.
       if (!includeImageData) return { ...base, state: 'image' };
-      if (info.size > MAX_IMAGE_PREVIEW_BYTES) return { ...base, state: 'large' };
+      if (info.size > MAX_IMAGE_PREVIEW_BYTES) return { ...base, state: 'large', kind: 'image' };
       const bytes = await readReferencePrefix(file, info.size);
       signal.throwIfAborted();
       return {
@@ -92,12 +105,23 @@ export function createFileBrowser(
       };
     }
     const truncated = info.size > prefix.length;
+    const binary = {
+      ...base,
+      state: 'binary',
+      kind: isArchiveName(relativePath) ? 'archive' : 'binary',
+    } as const;
     try {
-      if (prefix.includes(0)) return { ...base, state: 'binary' };
+      if (prefix.includes(0)) return binary;
       const text = new TextDecoder('utf-8', { fatal: true }).decode(prefix, { stream: truncated });
-      return { ...base, state: 'text', text, truncated };
+      return {
+        ...base,
+        state: 'text',
+        text,
+        truncated,
+        ...(streamed ? { kind: streamed.kind } : {}),
+      };
     } catch {
-      return { ...base, state: 'binary' };
+      return binary;
     }
   }
   return {
@@ -176,6 +200,37 @@ export function createFileBrowser(
         source: 'worktree',
         mime,
         size: info.size,
+      };
+    },
+    async streamable(
+      id: string,
+      relativePath: string,
+      signal: AbortSignal,
+    ): Promise<StreamableFile> {
+      const { canonicalRoot, canonical, info } = await lookup(id, relativePath, signal);
+      // The served type follows the name by extension only; responses carry nosniff, and SVG
+      // responses are sandboxed by the server, so a mislabelled file cannot run as a page.
+      const type = streamedPreviewType(relativePath);
+      if (!info.isFile() || !type)
+        throw new Error('Only video, audio, PDF and SVG files can be streamed');
+      if (info.size > MAX_STREAMED_PREVIEW_BYTES[type.kind])
+        throw new Error(previewLimitMessage(type.kind));
+      return {
+        kind: type.kind,
+        identity: `${info.dev}:${info.ino}`,
+        file: {
+          id: 'preview-stream',
+          sessionId: id,
+          index: 0,
+          kind: 'file',
+          name: path.basename(relativePath),
+          path: canonical,
+          originalPath: relativePath,
+          worktreePath: canonicalRoot,
+          source: 'worktree',
+          mime: type.mime,
+          size: info.size,
+        },
       };
     },
     async browse(

@@ -224,6 +224,14 @@ export class SessionClient {
       { signal },
     );
   }
+  /** A short-lived URL for one video, audio, PDF or SVG file that media elements can load without headers. */
+  streamLink(relativePath: string, signal: AbortSignal) {
+    return sessionRequest<{ url: string }>(this.base + '/files/stream-link', {
+      method: 'POST',
+      body: JSON.stringify({ path: relativePath }),
+      signal,
+    });
+  }
   async previewMedia(
     relativePath: string,
     signal: AbortSignal,
