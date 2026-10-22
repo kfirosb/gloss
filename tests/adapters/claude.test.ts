@@ -718,7 +718,7 @@ describe('Claude native peer inbox', () => {
     await writeFile(registryPath, JSON.stringify(registry));
     const runner: ProcessRunner = async function* (executable, args) {
       expect(executable).toBe('/usr/sbin/lsof');
-      expect(args).toEqual(['-Fpcfn', '+c', '0', '--', registry.messagingSocketPath]);
+      expect(args).toEqual(['-Fpcfn', '+c', '0', '-w', '--', registry.messagingSocketPath]);
       for (const line of ownerLines(
         { [registry.messagingSocketPath]: [{ pid: registry.pid, command: 'claude' }] },
         lsofPaths(args),
@@ -805,7 +805,7 @@ describe('Claude native peer inbox', () => {
         if (
           executable !== '/usr/sbin/lsof' ||
           JSON.stringify(args) !==
-            JSON.stringify(['-Fpcfn', '+c', '0', '--', join(h.dir, 'inbox.sock')])
+            JSON.stringify(['-Fpcfn', '+c', '0', '-w', '--', join(h.dir, 'inbox.sock')])
         )
           throw new Error('Wrong liveness query');
         for (const line of ownerLines(

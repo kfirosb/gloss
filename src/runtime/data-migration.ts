@@ -157,7 +157,7 @@ export function migrationBlockedMessage(result: MigrationResult, home: string): 
 }
 
 /**
- * Decides from one `lsof -t -- <db> [<db>-wal]` run, with the same stderr policy as every other lsof probe: exit 1 with
+ * Decides from one `lsof -w -t -- <db> [<db>-wal]` run, with the same stderr policy as every other lsof probe: exit 1 with
  * no pids is "free" only when stderr holds nothing but missing-path notices (a WAL can vanish between the check and the run). The
  * current process is ignored. Anything unexpected counts as in use: moving a live database is worse than a retry.
  */
@@ -188,7 +188,8 @@ const pathPresent = (path: string): boolean => {
  */
 function lsofArgs(path: string, exists: (path: string) => boolean): string[] | undefined {
   if (!exists(path)) return undefined;
-  return ['-t', '--', path, ...(exists(path + '-wal') ? [path + '-wal'] : [])];
+  // `-w` drops warnings (Linux desktops' "can't stat() fuse.portal file system") that would read as in use.
+  return ['-w', '-t', '--', path, ...(exists(path + '-wal') ? [path + '-wal'] : [])];
 }
 const pidLines = (lines: string[]) => lines.map((line) => line.trim()).filter(Boolean);
 

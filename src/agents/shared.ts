@@ -120,8 +120,9 @@ async function ownersOfBatch(
   signal: AbortSignal,
 ): Promise<Map<string, SocketOwner[]>> {
   // `+c 0` keeps the full command name; lsof otherwise truncates it to 9 characters, clipping `claude.exe`.
+  // `-w` drops warnings (Linux desktops' "can't stat() fuse.portal file system") that would fail the stderr policy.
   const result = await collectProcess(
-    runner(lsofPath(), ['-Fpcfn', '+c', '0', '--', ...paths], '', signal, {
+    runner(lsofPath(), ['-Fpcfn', '+c', '0', '-w', '--', ...paths], '', signal, {
       timeoutMs: OWNER_PROBE_TIMEOUT_MS,
       maxOutputBytes: Math.min(OWNER_OUTPUT_BYTES_PER_PATH * paths.length, OWNER_OUTPUT_MAX_BYTES),
     }),

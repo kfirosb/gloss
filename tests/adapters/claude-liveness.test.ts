@@ -5,7 +5,7 @@ import {
   pidExists,
   type SocketRecord,
 } from '../../src/agents/claude/liveness.js';
-import { lsofRunner, type LsofBehavior } from './lsof-fixture.js';
+import { lsofPaths, lsofRunner, type LsofBehavior } from './lsof-fixture.js';
 
 const socket = (pid: number) => `/tmp/cc-socks/${pid}.sock`;
 const record = (pid: number, path = socket(pid)): SocketRecord => ({
@@ -89,14 +89,14 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
     at(1500);
     await liveness.check(record(2));
     expect(calls).toHaveLength(2);
-    expect(calls[1]!.slice(4).sort()).toEqual([socket(1), socket(2)]);
+    expect(lsofPaths(calls[1]!).sort()).toEqual([socket(1), socket(2)]);
     at(3001);
     await liveness.check(record(1));
     expect(calls).toHaveLength(2);
     at(4501);
     await liveness.check(record(1));
     expect(calls).toHaveLength(3);
-    expect(calls[2]!.slice(4).sort()).toEqual([socket(1), socket(2)]);
+    expect(lsofPaths(calls[2]!).sort()).toEqual([socket(1), socket(2)]);
     at(4600);
     await liveness.check(record(2));
     expect(calls).toHaveLength(3);
@@ -109,7 +109,7 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
     await liveness.check(record(1));
     at(7000);
     await liveness.check(record(1));
-    expect(calls.at(-1)!.slice(4)).toEqual([socket(1)]);
+    expect(lsofPaths(calls.at(-1)!)).toEqual([socket(1)]);
   });
 
   it('rechecks at once when the PID or socket changes', async () => {
@@ -180,7 +180,7 @@ describe.runIf(process.platform === 'darwin')('Claude liveness prober', () => {
     const before = calls.length;
     at(3001);
     await liveness.checkMany([record(1), record(2), record(3)]);
-    expect(calls.slice(before).map((args) => args.slice(4).sort())).toEqual([
+    expect(calls.slice(before).map((args) => lsofPaths(args).sort())).toEqual([
       [socket(1), socket(2)],
       [bad],
     ]);

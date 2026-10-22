@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { observedOwners } from '../../src/agents/shared.js';
-import { lsofRunner } from './lsof-fixture.js';
+import { lsofPaths, lsofRunner } from './lsof-fixture.js';
 
 const a = '/tmp/cc-socks/1.sock';
 const b = '/tmp/cc-socks/2.sock';
@@ -11,7 +11,7 @@ describe.runIf(process.platform === 'darwin')('observedOwners', () => {
   it('runs one lsof for many paths', async () => {
     const { runner, calls } = lsofRunner({ [a]: [claude(1)], [b]: [claude(2)], [c]: [claude(3)] });
     const result = await observedOwners([a, b, c], runner);
-    expect(calls).toEqual([['-Fpcfn', '+c', '0', '--', a, b, c]]);
+    expect(calls).toEqual([['-Fpcfn', '+c', '0', '-w', '--', a, b, c]]);
     expect(result.get(a)).toEqual({ ok: true, owners: [claude(1)] });
     expect(result.get(b)).toEqual({ ok: true, owners: [claude(2)] });
     expect(result.get(c)).toEqual({ ok: true, owners: [claude(3)] });
@@ -65,7 +65,7 @@ describe.runIf(process.platform === 'darwin')('observedOwners', () => {
       call === 1 ? { exit: 2 } : undefined,
     );
     const result = await observedOwners(paths, runner);
-    expect(calls.map((args) => args.length - 4)).toEqual([128, 2]);
+    expect(calls.map((args) => lsofPaths(args).length)).toEqual([128, 2]);
     expect(result.get(paths[0]!)).toEqual({ ok: true, owners: [claude(1)] });
     expect(result.get(paths[127]!)).toEqual({ ok: true, owners: [claude(128)] });
     expect(result.get(paths[128]!)).toEqual({ ok: false });
@@ -75,7 +75,7 @@ describe.runIf(process.platform === 'darwin')('observedOwners', () => {
   it('dedupes paths', async () => {
     const { runner, calls } = lsofRunner({ [a]: [claude(1)] });
     await observedOwners([a, a], runner);
-    expect(calls).toEqual([['-Fpcfn', '+c', '0', '--', a]]);
+    expect(calls).toEqual([['-Fpcfn', '+c', '0', '-w', '--', a]]);
   });
 
   it('scales the output limit with the batch', async () => {
@@ -111,6 +111,6 @@ it('probes with the Linux lsof on Linux', () =>
   withPlatform('linux', async () => {
     const { runner, calls } = lsofRunner({ [a]: [claude(1)] });
     const result = await observedOwners([a], runner);
-    expect(calls).toEqual([['-Fpcfn', '+c', '0', '--', a]]);
+    expect(calls).toEqual([['-Fpcfn', '+c', '0', '-w', '--', a]]);
     expect(result.get(a)).toEqual({ ok: true, owners: [claude(1)] });
   }));

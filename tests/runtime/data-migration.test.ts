@@ -324,7 +324,7 @@ describe('probeStateDb', () => {
         platform: 'darwin',
       }),
     ).toBe('free');
-    expect(calls).toEqual([['/usr/sbin/lsof', '-t', '--', path]]);
+    expect(calls).toEqual([['/usr/sbin/lsof', '-w', '-t', '--', path]]);
   });
 
   it('asks the platform lsof once about the database and its WAL', async () => {
@@ -332,17 +332,19 @@ describe('probeStateDb', () => {
     await probe(fakeRunner([], 1, '', calls));
     await probe(fakeRunner([], 1, '', calls), 'linux');
     expect(calls).toEqual([
-      ['/usr/sbin/lsof', '-t', '--', db, db + '-wal'],
-      ['/usr/bin/lsof', '-t', '--', db, db + '-wal'],
+      ['/usr/sbin/lsof', '-w', '-t', '--', db, db + '-wal'],
+      ['/usr/bin/lsof', '-w', '-t', '--', db, db + '-wal'],
     ]);
   });
 
   it('is free when lsof finds no process and reports at most a missing path', async () => {
+    // `-w` keeps warnings such as Linux desktops' "can't stat() fuse.portal file system" off stderr.
+    expect(await probe(fakeRunner([], 1, ''))).toBe('free');
     expect(await probe(fakeRunner([], 1))).toBe('free');
     expect(await probe(fakeRunner([], 1, MISSING_WAL + '\n'))).toBe('free');
   });
 
-  it('is in use when lsof exits 1 with any other message', async () => {
+  it('is in use when lsof exits 1 with any other message, warnings included', async () => {
     expect(await probe(fakeRunner([], 1, 'lsof: WARNING: can not stat() fuse file system'))).toBe(
       'in-use',
     );
@@ -396,13 +398,13 @@ describe('probeStateDbSync', () => {
     expect(calls).toEqual([]);
     await writeFile(path, 'db');
     expect(probeStateDbSync(path, { run, pid: 42, platform: 'darwin' })).toBe('free');
-    expect(calls).toEqual([['/usr/sbin/lsof', ['-t', '--', path]]]);
+    expect(calls).toEqual([['/usr/sbin/lsof', ['-w', '-t', '--', path]]]);
   });
 
   it('applies the same policy as the async probe', () => {
     const calls: unknown[][] = [];
     expect(probe({ status: 1, stdout: '', stderr: MISSING_WAL + '\n' }, calls)).toBe('free');
-    expect(calls).toEqual([['/usr/sbin/lsof', ['-t', '--', db, db + '-wal']]]);
+    expect(calls).toEqual([['/usr/sbin/lsof', ['-w', '-t', '--', db, db + '-wal']]]);
     expect(probe({ status: 0, stdout: '42\n', stderr: '' })).toBe('free');
     expect(probe({ status: 0, stdout: '42\n977\n', stderr: '' })).toBe('in-use');
     expect(probe({ status: 1, stdout: '', stderr: 'lsof: unexpected' })).toBe('in-use');
