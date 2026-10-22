@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dataDir, legacyDataDir } from '../../src/runtime/data-dir.js';
@@ -93,6 +93,113 @@ describe('migrateDataDir', () => {
     expect(await migrateDataDir(harness().options(home))).toEqual({ kind: 'both-exist' });
     expect(await readdir(dataDir(home))).toEqual([]);
     expect((await readdir(old)).sort()).toEqual(['models', 'state.db', 'tmux']);
+  });
+
+  it('leaves an old folder holding only channel-helper files alone, as legacy-helpers', async () => {
+    const home = await tempHome();
+    const old = legacyDataDir(home);
+    await mkdir(join(old, 'claude-channels'), { recursive: true, mode: 0o700 });
+    await writeFile(join(old, 'claude-channels', 'g.json'), 'record');
+    await writeFile(join(old, 'claude-channel-ledger.db'), 'ledger');
+    await writeFile(join(old, 'claude-channel-ledger.db-journal'), 'journal');
+    await mkdir(dataDir(home));
+    await writeFile(join(dataDir(home), 'state.db'), 'new');
+    const h = harness();
+    expect(await migrateDataDir(h.options(home))).toEqual({ kind: 'legacy-helpers' });
+    expect(h.logs).toHaveLength(1);
+    expect(h.logs[0]).toMatch(/older Claude channel helpers/);
+    expect((await readdir(old)).sort()).toEqual([
+      'claude-channel-ledger.db',
+      'claude-channel-ledger.db-journal',
+      'claude-channels',
+    ]);
+    expect(await readFile(join(old, 'claude-channels', 'g.json'), 'utf8')).toBe('record');
+    expect(await readFile(join(dataDir(home), 'state.db'), 'utf8')).toBe('new');
+    expect(h.checked).toEqual([]);
+    expect(migrationBlockedMessage({ kind: 'legacy-helpers' }, home)).toBeUndefined();
+  });
+
+  it('still calls it both-exist when the old folder holds anything besides helper files', async () => {
+    const home = await tempHome();
+    const old = legacyDataDir(home);
+    await mkdir(join(old, 'claude-channels'), { recursive: true });
+    await writeFile(join(old, 'claude-channel-ledger.db'), 'ledger');
+    await writeFile(join(old, 'state.db'), 'old');
+    await mkdir(dataDir(home));
+    expect(await migrateDataDir(harness().options(home))).toEqual({ kind: 'both-exist' });
+  });
+
+  describe('channel helpers running across the move', () => {
+    const ledger = 'claude-channel-ledger.db';
+    const options = (home: string, ledgerUse: StateDbUse) => {
+      const h = harness();
+      return {
+        h,
+        options: {
+          ...h.options(home),
+          probe: async (path: string) => {
+            h.checked.push(path);
+            return path.endsWith(ledger) ? ledgerUse : 'free';
+          },
+        },
+      };
+    };
+
+    it('links the moved ledger at its old path so their writes by that path keep working', async () => {
+      const home = await tempHome();
+      const old = await seedLegacy(home);
+      await writeFile(join(old, ledger), 'ledger');
+      const { h, options: o } = options(home, 'in-use');
+      expect(await migrateDataDir(o)).toEqual({ kind: 'moved' });
+      const next = dataDir(home);
+      expect(h.checked).toEqual([join(old, 'state.db'), join(next, ledger)]);
+      expect(await readdir(old)).toEqual([ledger]);
+      const [linked, moved, folder] = await Promise.all([
+        lstat(join(old, ledger)),
+        lstat(join(next, ledger)),
+        lstat(old),
+      ]);
+      expect(linked.isSymbolicLink()).toBe(false);
+      expect([linked.dev, linked.ino]).toEqual([moved.dev, moved.ino]);
+      expect(folder.mode & 0o777).toBe(0o700);
+      expect(await readFile(join(next, 'state.db'), 'utf8')).toBe('db');
+      expect(h.logs.some((line) => /linked/i.test(line))).toBe(true);
+      // The next start sees only helper files in the old folder and leaves them alone.
+      expect(await migrateDataDir(o)).toEqual({ kind: 'legacy-helpers' });
+    });
+
+    it('recreates nothing when no helper holds the ledger', async () => {
+      const home = await tempHome();
+      const old = await seedLegacy(home);
+      await writeFile(join(old, ledger), 'ledger');
+      const { options: o } = options(home, 'free');
+      expect(await migrateDataDir(o)).toEqual({ kind: 'moved' });
+      expect(await exists(old)).toBe(false);
+    });
+
+    it('recreates nothing and asks nothing when there is no ledger', async () => {
+      const home = await tempHome();
+      const old = await seedLegacy(home);
+      const { h, options: o } = options(home, 'in-use');
+      expect(await migrateDataDir(o)).toEqual({ kind: 'moved' });
+      expect(await exists(old)).toBe(false);
+      expect(h.checked).toEqual([join(old, 'state.db')]);
+    });
+
+    it('still reports the move when linking fails, and logs why', async () => {
+      const home = await tempHome();
+      const old = await seedLegacy(home);
+      await writeFile(join(old, ledger), 'ledger');
+      const { h, options: o } = options(home, 'in-use');
+      const result = await migrateDataDir({
+        ...o,
+        link: async () => {
+          throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+        },
+      });
+      expect(result).toEqual({ kind: 'moved' });
+      expect(h.logs.some((line) => /could not link/i.test(line))).toBe(true);
+    });
   });
 
   it('refuses while state.db is open elsewhere', async () => {

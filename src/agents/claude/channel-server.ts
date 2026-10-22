@@ -1,14 +1,14 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
-import { dataDir } from '../../runtime/data-dir.js';
+import { existingDataDir } from '../../runtime/data-dir.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { uuid } from '../shared.js';
 import { enabledChannelServer, readParentCommandLine } from './channel-activation.js';
 import { createChannelRegistry } from './channel-registry.js';
-import { GLOSS_SERVER } from './channel-names.js';
+import { CHANNEL_LEDGER_FILE, CHANNEL_REGISTRY_DIR, GLOSS_SERVER } from './channel-names.js';
 import { ChannelStore } from './channel-store.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelKey, type ChannelRecord } from './channel-types.js';
 import { ensurePrivateDirectory } from '../../runtime/private-directory.js';
@@ -145,7 +145,8 @@ export async function startClaudeChannel(
     options.readParentCommandLine ?? (() => readParentCommandLine()),
   );
   if (!enabled) return startInertServer();
-  const stateDir = resolve(options.stateDir ?? dataDir());
+  // Never the new folder before the entry points have moved the old one there.
+  const stateDir = resolve(options.stateDir ?? existingDataDir());
   let registry: Registry | undefined;
   let record: ChannelRecord | undefined;
   let store: ChannelStore | undefined;
@@ -324,13 +325,13 @@ export async function startClaudeChannel(
     if (process.stdin.readableEnded || process.stdin.destroyed) throw new Error('Stdio closed');
     registry =
       options.registryFactory?.({ port, stateDir }) ??
-      createChannelRegistry({ registryDir: join(stateDir, 'claude-channels'), port });
+      createChannelRegistry({ registryDir: join(stateDir, CHANNEL_REGISTRY_DIR), port });
     await mcp.connect(new StdioServerTransport());
     record = await registry.registerChannel(port);
     if (closed) throw new Error('Stdio closed during registration');
     await ensurePrivateDirectory(stateDir, 'Unsafe channel state directory', { recursive: true });
     if (closed) throw new Error('Stdio closed during startup');
-    store = new ChannelStore(join(stateDir, 'claude-channel-ledger.db'));
+    store = new ChannelStore(join(stateDir, CHANNEL_LEDGER_FILE));
     store.registerGeneration(record.generation, record.target);
     finishStartup();
     return { close };

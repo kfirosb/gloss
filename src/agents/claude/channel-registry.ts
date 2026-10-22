@@ -11,7 +11,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { dataDir } from '../../runtime/data-dir.js';
+import { existingDataDir } from '../../runtime/data-dir.js';
+import { CHANNEL_REGISTRY_DIR } from './channel-names.js';
 import {
   claudeConfigDir,
   projectIdentity,
@@ -23,6 +24,11 @@ import {
 export type ChannelProcess = ProcessInfo;
 export interface ChannelRegistryOptions {
   registryDir?: string;
+  /**
+   * The old data folder's registry, read (never written) beside `registryDir` with the same private-directory and
+   * no-symlink checks: a helper from before the data-folder move can still register there.
+   */
+  legacyRegistryDir?: string;
   configDir?: string;
   port?: number;
   pid?: number;
@@ -60,7 +66,13 @@ interface NativeRecord {
  * successfully; failed startup closes the listener. A file alone is not activation.
  */
 export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
-  const registryDir = resolve(options.registryDir ?? join(dataDir(), 'claude-channels'));
+  const registryDir = resolve(options.registryDir ?? join(existingDataDir(), CHANNEL_REGISTRY_DIR));
+  const legacyRegistryDir =
+    options.legacyRegistryDir === undefined ? undefined : resolve(options.legacyRegistryDir);
+  const readDirs =
+    legacyRegistryDir === undefined || legacyRegistryDir === registryDir
+      ? [registryDir]
+      : [registryDir, legacyRegistryDir];
   const configDir = resolve(claudeConfigDir(options.configDir));
   const uid = () => options.uid ?? process.getuid?.();
   const supported = () => supportsProcessProbes(options.platform) && uid() !== undefined;
@@ -383,6 +395,38 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
       controller.abort();
     }
   }
+  /** The ready registrations for `target` in one registry directory; throws when the directory is unsafe. */
+  async function liveRecords(directory: string, target: Target, signal: AbortSignal) {
+    await checkedPath(dirname(directory), 0o700);
+    const candidates: ChannelRecord[] = [];
+    for (const name of await names(directory, true)) {
+      if (!name.endsWith('.json')) continue;
+      const generation = name.slice(0, -5);
+      if (!uuid.test(generation)) continue;
+      try {
+        const path = join(directory, name);
+        const record = await readJson(path, true);
+        if (!validRecord(record, generation) || !sameTarget(record.target, target)) continue;
+        const live = await binding(record.channelPid, signal, target);
+        if (
+          live.claudePid !== record.claudePid ||
+          live.claudeStartedAt !== record.claudeStartedAt ||
+          live.channelStartedAt !== record.channelStartedAt ||
+          live.transcriptPath !== record.transcriptPath
+        )
+          continue;
+        // Exclude failed-startup artifacts before counting competing owners.
+        if (!(await ready(record, signal))) continue;
+        const current = await readJson(path, true);
+        if (JSON.stringify(current) !== JSON.stringify(record)) continue;
+        candidates.push(record);
+      } catch {
+        /* Fail closed for stale, replaced, unsafe or malformed records. */
+      }
+    }
+    await checkedPath(directory, 0o700);
+    return candidates;
+  }
   return {
     async registerChannel(port = options.port): Promise<ChannelRecord> {
       if (!supported()) throw new Error('Claude channels are experimental and need macOS or Linux');
@@ -451,35 +495,15 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
       try {
         validateTarget(target, 'claude');
         if ((await projectIdentity(target.projectId)) !== target.projectId) return undefined;
-        await checkedPath(dirname(registryDir), 0o700);
-        const candidates: ChannelRecord[] = [];
         const signal = AbortSignal.timeout(10_000);
-        for (const name of await names(registryDir, true)) {
-          if (!name.endsWith('.json')) continue;
-          const generation = name.slice(0, -5);
-          if (!uuid.test(generation)) continue;
+        const candidates: ChannelRecord[] = [];
+        for (const directory of readDirs) {
           try {
-            const path = join(registryDir, name);
-            const record = await readJson(path, true);
-            if (!validRecord(record, generation) || !sameTarget(record.target, target)) continue;
-            const live = await binding(record.channelPid, signal, target);
-            if (
-              live.claudePid !== record.claudePid ||
-              live.claudeStartedAt !== record.claudeStartedAt ||
-              live.channelStartedAt !== record.channelStartedAt ||
-              live.transcriptPath !== record.transcriptPath
-            )
-              continue;
-            // Exclude failed-startup artifacts before counting competing owners.
-            if (!(await ready(record, signal))) continue;
-            const current = await readJson(path, true);
-            if (JSON.stringify(current) !== JSON.stringify(record)) continue;
-            candidates.push(record);
+            candidates.push(...(await liveRecords(directory, target, signal)));
           } catch {
-            /* Fail closed for stale, replaced, unsafe or malformed records. */
+            /* An absent or unsafe registry directory contributes nothing. */
           }
         }
-        await checkedPath(registryDir, 0o700);
         return !signal.aborted && candidates.length === 1 ? candidates[0] : undefined;
       } catch {
         return undefined;

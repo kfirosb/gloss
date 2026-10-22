@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { lstat, rename as renameFolder } from 'node:fs/promises';
+import { link as linkFile, lstat, mkdir, readdir, rename as renameFolder } from 'node:fs/promises';
 import { join } from 'node:path';
+import { CHANNEL_LEDGER_FILE, CHANNEL_REGISTRY_DIR } from '../agents/claude/channel-names.js';
 import { dataDir, legacyDataDir } from './data-dir.js';
 import { lsofDiagnosticsClean, lsofPath, supportsProcessProbes } from './platform-tools.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
@@ -11,6 +12,8 @@ export type MigrationResult =
   | { kind: 'already-new' }
   | { kind: 'fresh' }
   | { kind: 'both-exist' }
+  /** Both exist, but the old folder holds only Claude channel helpers' files: left alone, not a failed move. */
+  | { kind: 'legacy-helpers' }
   | { kind: 'in-use' }
   | { kind: 'lsof-missing' }
   | { kind: 'cross-device' };
@@ -37,20 +40,28 @@ const present = (path: string) =>
  * Moves `~/.language-assistant` to `~/.gloss` with one rename, or does nothing. It never copies, merges, overwrites
  * or deletes: when both folders exist the new one wins and the old one is left as it is. The move waits until no
  * other process has the old `state.db` open, so an older Gloss backend never loses its database mid-write. The tmux
- * server's socket and channel helpers' files are not checked; they keep their inodes through a rename. Nothing is
- * created on any outcome except `moved`.
+ * server's socket and channel helpers' registrations are not checked; they keep their inodes through a rename. Nothing
+ * is created on any outcome except `moved`, which may also link the channel ledger back at its old path (see
+ * `keepLedgerWritable`).
  */
 export async function migrateDataDir(options: {
   home: string;
   probe(path: string): Promise<StateDbUse>;
   log(message: string): void;
-  /** Tests inject a failing rename; production uses the filesystem's. */
+  /** Tests inject a failing rename or link; production uses the filesystem's. */
   rename?: (from: string, to: string) => Promise<void>;
+  link?: (existing: string, alias: string) => Promise<void>;
 }): Promise<MigrationResult> {
   const legacy = legacyDataDir(options.home);
   const next = dataDir(options.home);
   const [hasLegacy, hasNext] = await Promise.all([present(legacy), present(next)]);
-  const bothExist = (): MigrationResult => {
+  const bothExist = async (): Promise<MigrationResult> => {
+    if (await onlyHelperFiles(legacy)) {
+      options.log(
+        `${legacy} holds only files of older Claude channel helpers; using ${next} and leaving it untouched.`,
+      );
+      return { kind: 'legacy-helpers' };
+    }
     options.log(`Both ${legacy} and ${next} exist; using ${next} and leaving ${legacy} untouched.`);
     return { kind: 'both-exist' };
   };
@@ -72,7 +83,48 @@ export async function migrateDataDir(options: {
     throw error;
   }
   options.log(`Moved ${legacy} to ${next}.`);
+  await keepLedgerWritable({ ...options, legacy, next });
   return { kind: 'moved' };
+}
+
+/** What a channel helper started before the move can leave in, or bring back to, the old folder. */
+const HELPER_ENTRIES = new Set([
+  CHANNEL_REGISTRY_DIR,
+  ...['', '-journal', '-wal', '-shm'].map((suffix) => CHANNEL_LEDGER_FILE + suffix),
+]);
+const onlyHelperFiles = async (legacy: string) =>
+  (await readdir(legacy)).every((name) => HELPER_ENTRIES.has(name));
+
+/**
+ * A channel helper started before the move keeps its ledger open, but SQLite writes by path: each commit first checks
+ * that the path still names the open file, then creates `<ledger>-journal` beside it. With the folder gone every
+ * claim fails, so Gloss can no longer send into that Claude session. While some process holds the moved ledger, a
+ * private old folder with a hard link (never a symlink) to it keeps those writes landing in the one moved database.
+ * The link is best effort: failing it costs only those sessions' channel, never the move.
+ */
+async function keepLedgerWritable(options: {
+  legacy: string;
+  next: string;
+  probe(path: string): Promise<StateDbUse>;
+  log(message: string): void;
+  link?: (existing: string, alias: string) => Promise<void>;
+}): Promise<void> {
+  const ledger = join(options.next, CHANNEL_LEDGER_FILE);
+  const alias = join(options.legacy, CHANNEL_LEDGER_FILE);
+  // Runs after the move, so nothing here may throw.
+  try {
+    if (!(await present(ledger))) return;
+    // Unsure counts as held: an unneeded link only leaves a small folder, a missing one breaks running sessions.
+    if ((await options.probe(ledger)) === 'free') return;
+    await mkdir(options.legacy, { mode: 0o700 });
+    await (options.link ?? linkFile)(ledger, alias);
+  } catch (error) {
+    options.log(
+      `Could not link ${alias} for running Claude channel helpers (${String(errorCode(error) ?? error)}); those sessions need their channel reconnected.`,
+    );
+    return;
+  }
+  options.log(`Linked ${alias} to ${ledger} for Claude channel helpers that are still running.`);
 }
 
 /** The user-facing reason a migration stopped and the user must act outside Gloss, or undefined. */

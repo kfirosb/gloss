@@ -4,7 +4,7 @@ import { validateBackgroundOutputPath } from './background-output.js';
 import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
 import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { dataDir } from '../../runtime/data-dir.js';
+import { dataDir, legacyDataDir } from '../../runtime/data-dir.js';
 import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { supportsProcessProbes } from '../../runtime/platform-tools.js';
@@ -47,7 +47,7 @@ import {
   type ClaudeSessionRecord,
 } from './session-records.js';
 import { ChannelStore } from './channel-store.js';
-import { isChannelServer } from './channel-names.js';
+import { CHANNEL_LEDGER_FILE, CHANNEL_REGISTRY_DIR, isChannelServer } from './channel-names.js';
 import { CHANNEL_MAX_TEXT_CHARS, type ChannelReply } from './channel-types.js';
 import { SESSION_GONE_REASON, selectClaudeRoute } from './route.js';
 import {
@@ -515,13 +515,17 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
         options.channelRegistry ??
         createChannelRegistry({
           configDir: config,
-          registryDir: join(stateDir, 'claude-channels'),
+          registryDir: join(stateDir, CHANNEL_REGISTRY_DIR),
+          // Only with the real data folder: an injected one has no old counterpart.
+          ...(options.stateDir === undefined
+            ? { legacyRegistryDir: join(legacyDataDir(), CHANNEL_REGISTRY_DIR) }
+            : {}),
         });
       let ownedLedger: ChannelStore | undefined;
       const ledger = () => {
         if (!context?.panelSessionId) return undefined;
         if (options.channelLedger) return options.channelLedger();
-        const ledgerPath = join(stateDir, 'claude-channel-ledger.db');
+        const ledgerPath = join(stateDir, CHANNEL_LEDGER_FILE);
         if (!ownedLedger) {
           try {
             ownedLedger = new ChannelStore(ledgerPath, { readOnly: true });

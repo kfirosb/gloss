@@ -3,13 +3,17 @@ import { lstat, readdir, realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { dataDir } from './data-dir.js';
+import { existingDataDir, legacyDataDir } from './data-dir.js';
 import type { Target } from '../core/contracts.js';
 import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-types.js';
 import { createChannelRegistry } from '../agents/claude/channel-registry.js';
 import { claudeConfigDir, validateTarget } from '../agents/shared.js';
-import { GLOSS_SERVER, LEGACY_SERVER } from '../agents/claude/channel-names.js';
+import {
+  CHANNEL_REGISTRY_DIR,
+  GLOSS_SERVER,
+  LEGACY_SERVER,
+} from '../agents/claude/channel-names.js';
 import { shellQuote } from '../core/command-text.js';
 import { writeFileAtomic } from './atomic-file.js';
 import {
@@ -87,7 +91,8 @@ export function createClaudeChannelSetup(
   options: ChannelSetupOptions = {},
 ): NewSessionChannelSetupService {
   const home = options.homeDir ?? homedir();
-  const stateDir = resolve(options.stateDir ?? dataDir(home));
+  // `--prepare-claude-channel` runs before any move: it must not create the new folder beside the old one.
+  const stateDir = resolve(options.stateDir ?? existingDataDir(home));
   const setupDir = join(stateDir, 'claude-channel-setup');
   const configDir = resolve(claudeConfigDir(options.configDir, home));
   const userConfigPath = claudeUserConfigPath({ home, configDir: options.configDir }).path;
@@ -96,7 +101,14 @@ export function createClaudeChannelSetup(
   const managedDir = options.managedDir ?? defaultManagedDir(platform, library);
   const registry =
     options.registry ??
-    createChannelRegistry({ registryDir: join(stateDir, 'claude-channels'), configDir });
+    createChannelRegistry({
+      registryDir: join(stateDir, CHANNEL_REGISTRY_DIR),
+      // Only with the real data folder: an injected one has no old counterpart.
+      ...(options.stateDir === undefined
+        ? { legacyRegistryDir: join(legacyDataDir(home), CHANNEL_REGISTRY_DIR) }
+        : {}),
+      configDir,
+    });
   const now = options.now ?? Date.now;
   const seen = new Set<string>();
   const configPath = (project: string, session: string) =>

@@ -814,6 +814,65 @@ describe('experimental native Claude channel registry', () => {
     expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(record);
   });
 
+  describe('legacy registry directory (helpers started before the data folder moved)', () => {
+    const legacy = async (f: Awaited<ReturnType<typeof fixture>>) => {
+      const legacyRegistryDir = join(f.dir, 'legacy', 'claude-channels');
+      await mkdir(legacyRegistryDir, { recursive: true, mode: 0o700 });
+      return legacyRegistryDir;
+    };
+
+    it('finds a registration a legacy helper wrote into the recreated old folder', async () => {
+      const f = await fixture();
+      const legacyRegistryDir = await legacy(f);
+      await f.seed(f.record, join(legacyRegistryDir, `${generation}.json`));
+      const registry = createChannelRegistry({ ...f.options, legacyRegistryDir });
+      expect(await registry.resolveChannel(f.target)).toEqual(f.record);
+      expect(await readdir(f.registryDir)).toEqual([]);
+    });
+
+    it('still finds the current registration when the old folder is absent', async () => {
+      const f = await fixture();
+      await f.seed();
+      const legacyRegistryDir = join(f.dir, 'legacy', 'claude-channels');
+      const registry = createChannelRegistry({ ...f.options, legacyRegistryDir });
+      expect(await registry.resolveChannel(f.target)).toEqual(f.record);
+    });
+
+    it('ignores a symlinked legacy registry directory', async () => {
+      const f = await fixture();
+      const real = join(f.dir, 'elsewhere');
+      await mkdir(real, { mode: 0o700 });
+      await f.seed(f.record, join(real, `${generation}.json`));
+      await mkdir(join(f.dir, 'legacy'), { mode: 0o700 });
+      const legacyRegistryDir = join(f.dir, 'legacy', 'claude-channels');
+      await symlink(real, legacyRegistryDir);
+      const registry = createChannelRegistry({ ...f.options, legacyRegistryDir });
+      expect(await registry.resolveChannel(f.target)).toBeUndefined();
+      // The unsafe legacy directory never hides a registration in the current one.
+      const current = { ...f.record, generation: otherGeneration };
+      await f.seed(current, join(f.registryDir, `${otherGeneration}.json`));
+      expect(await registry.resolveChannel(f.target)).toEqual(current);
+    });
+
+    it('reads but never writes the legacy directory', async () => {
+      const f = await fixture();
+      const legacyRegistryDir = await legacy(f);
+      const record = await createChannelRegistry({
+        ...f.options,
+        legacyRegistryDir,
+      }).registerChannel();
+      expect(await readdir(f.registryDir)).toEqual([`${record.generation}.json`]);
+      expect(await readdir(legacyRegistryDir)).toEqual([]);
+    });
+
+    it('does not count one registration twice when both names are the same folder', async () => {
+      const f = await fixture();
+      await f.seed();
+      const registry = createChannelRegistry({ ...f.options, legacyRegistryDir: f.registryDir });
+      expect(await registry.resolveChannel(f.target)).toEqual(f.record);
+    });
+  });
+
   it('stays unsupported on a platform without verified probes', async () => {
     const f = await fixture();
     await f.seed();
