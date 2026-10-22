@@ -39,7 +39,17 @@ export interface DisplayPreferences {
   filesWindow?: FilesWindowGeometry;
 }
 const maxFolders = 500;
-const key = 'language-assistant:display:v1';
+const key = 'gloss:display:v1';
+const legacyKey = 'language-assistant:display:v1';
+/** Reads `key`; a value still stored under the pre-rename `legacyKey` is copied to `key` once and the legacy key is removed. */
+export function readMigratedKey(storage: Storage, key: string, legacyKey: string): string | null {
+  const current = storage.getItem(key);
+  const legacy = storage.getItem(legacyKey);
+  if (legacy === null) return current;
+  if (current === null) storage.setItem(key, legacy);
+  storage.removeItem(legacyKey);
+  return current ?? legacy;
+}
 const defaults = (): DisplayPreferences => ({
   version: 1,
   collapsed: false,
@@ -107,7 +117,8 @@ function validated(value: unknown): DisplayPreferences {
 }
 export function readDisplayPreferences(storage?: Storage): DisplayPreferences {
   try {
-    return validated(JSON.parse((storage ?? globalThis.localStorage)?.getItem(key) ?? 'null'));
+    const target = storage ?? globalThis.localStorage;
+    return validated(JSON.parse((target && readMigratedKey(target, key, legacyKey)) ?? 'null'));
   } catch {
     return defaults();
   }

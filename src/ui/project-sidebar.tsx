@@ -10,7 +10,7 @@ import {
 import { AttentionBadge, Spinner } from './attention.js';
 import { PopupMenu } from './popup-menu.js';
 import { ProjectMenu } from './project-menu.js';
-const PROJECT_DRAG_TYPE = 'application/x-language-assistant-project';
+const PROJECT_DRAG_TYPE = 'application/x-gloss-project';
 export interface ProjectActions {
   settings?: SidebarSettings | undefined;
   onToggleCollapse?(key: string): void;

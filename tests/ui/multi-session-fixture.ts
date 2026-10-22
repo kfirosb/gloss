@@ -62,7 +62,7 @@ export async function sessionFixture(context: BrowserContext) {
     if (p === '/api/about')
       return route.fulfill({
         json: {
-          name: 'language-assistant',
+          name: 'gloss',
           version: '0.0.0-test',
           platform: 'darwin',
           arch: 'arm64',

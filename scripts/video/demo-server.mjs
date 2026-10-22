@@ -371,7 +371,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/usage/refresh') return json(usage());
     if (p === '/api/about')
       return json({
-        name: 'language-assistant',
+        name: 'gloss',
         version: '0.19.0',
         platform: 'darwin',
         arch: 'arm64',

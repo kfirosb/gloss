@@ -101,7 +101,7 @@ describe('whisperCandidates', () => {
       whisperCandidates({}, undefined, join(repoRoot, 'dist', 'server', 'runtime', 'dictation')),
     ).toEqual([vendor]);
   });
-  it('omits the vendor candidate when no language-assistant package.json is found', () => {
+  it('omits the vendor candidate when no gloss package.json is found', () => {
     expect(whisperCandidates({}, '/App/Resources', '/')).toEqual([
       '/App/Resources/bin/whisper-server',
     ]);

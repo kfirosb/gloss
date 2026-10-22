@@ -29,13 +29,13 @@ describe.skipIf(!available)('typing into a real tmux pane at Send', () => {
     started.push({ tmux, home });
     const log = join(home, 'input.log');
     const tui = fileURLToPath(new URL('../fixtures/fake-claude-tui.mjs', import.meta.url));
-    const { panePid } = await tmux.newSession('la-type', home, [
+    const { panePid } = await tmux.newSession('gloss-type', home, [
       process.execPath,
       tui,
       log,
       ...(draft ? [draft] : []),
     ]);
-    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('❯');
+    await expect.poll(() => tmux.capturePane('gloss-type'), { timeout: 5000 }).toContain('❯');
     const terminal = glossTerminalFor(tmux, { id: 'type', panePid });
     const typingStarted: number[] = [];
     const send = () =>
@@ -60,12 +60,14 @@ describe.skipIf(!available)('typing into a real tmux pane at Send', () => {
     expect(typingStarted).toEqual([0]);
     await expect.poll(read, { timeout: 5000 }).toBe('\u0013' + PASTED);
     // The synthetic program puts the stash back on Enter, as Claude does.
-    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('❯ draft');
+    await expect.poll(() => tmux.capturePane('gloss-type'), { timeout: 5000 }).toContain('❯ draft');
   });
   it('with a stash and an empty box, presses Ctrl+S twice so the stash goes back before typing', async () => {
     const { tmux, send, read } = await draftPane('mine');
-    await tmux.pressStash('la-type');
-    await expect.poll(() => tmux.capturePane('la-type'), { timeout: 5000 }).toContain('› stashed');
+    await tmux.pressStash('gloss-type');
+    await expect
+      .poll(() => tmux.capturePane('gloss-type'), { timeout: 5000 })
+      .toContain('› stashed');
     expect(await send()).toEqual({ state: 'typed', nativeAfterRevision: 0 });
     await expect.poll(read, { timeout: 5000 }).toBe('\u0013' + '\u0013\u0013' + PASTED);
   });

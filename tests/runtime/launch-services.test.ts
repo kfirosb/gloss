@@ -80,7 +80,7 @@ it('extracts the first semantic version', () => {
   expect(parseVersion('nope')).toBeUndefined();
 });
 it('accepts folders of registered or discovered sessions, compared by real path', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'la-known-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'gloss-known-')));
   try {
     const real = join(root, 'project');
     await mkdir(real);
@@ -272,7 +272,7 @@ describe('identifies a Codex launch whose writer is the shared app-server daemon
       executable: '/t',
       socket: '/s',
       async listSessions() {
-        return launches.map((l) => ({ name: 'la-' + l.id, panePid: l.panePid }));
+        return launches.map((l) => ({ name: 'gloss-' + l.id, panePid: l.panePid }));
       },
       async hasSession() {
         return true;
@@ -436,7 +436,7 @@ describe('liveness of Codex threads Gloss launched', () => {
       executable: '/t',
       socket: '/s',
       async listSessions() {
-        return alive ? [{ name: 'la-L', panePid: 7 }] : [];
+        return alive ? [{ name: 'gloss-L', panePid: 7 }] : [];
       },
       async hasSession() {
         return alive;
@@ -498,7 +498,7 @@ it('ends only the live launches in a folder', async () => {
     { id: 'E', agent: 'codex', folder: '/wx', panePid: 5, state: 'running', createdAt: 5 },
   ];
   const sent: string[] = [];
-  const alive = new Set(['la-A', 'la-C', 'la-D', 'la-E']);
+  const alive = new Set(['gloss-A', 'gloss-C', 'gloss-D', 'gloss-E']);
   const tmux = {
     executable: '/t',
     socket: '/s',
@@ -553,7 +553,7 @@ it('ends only the live launches in a folder', async () => {
       ['D', 'ended'],
       ['E', 'running'],
     ]);
-    expect(alive).toEqual(new Set(['la-C', 'la-E']));
+    expect(alive).toEqual(new Set(['gloss-C', 'gloss-E']));
   } finally {
     services.launcher.close();
     services.attention.close();

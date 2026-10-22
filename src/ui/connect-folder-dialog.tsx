@@ -70,14 +70,14 @@ export function ConnectFolderDialog({
   async function browse() {
     let chosen: string | null | undefined;
     try {
-      chosen = await window.languageAssistant?.pickFolder();
+      chosen = await window.gloss?.pickFolder();
     } catch (e) {
       setError(errorMessage(e, 'Could not open the folder picker'));
       return;
     }
     if (chosen) await choose(chosen);
   }
-  const canBrowse = !!window.languageAssistant?.pickFolder;
+  const canBrowse = !!window.gloss?.pickFolder;
   const hits = search.state === 'done' ? search.result.hits : [];
   return (
     <PanelDialog

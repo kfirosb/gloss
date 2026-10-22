@@ -60,7 +60,7 @@ it('about reports version without machine details', async () => {
   expect((await request('about', 'GET', undefined, false)).status).toBe(401);
   const about = await (await request('about')).json();
   expect(about).toEqual({
-    name: 'language-assistant',
+    name: 'gloss',
     version: expect.stringMatching(/^\d+\.\d+\.\d+/),
     platform: process.platform,
     arch: process.arch,

@@ -143,11 +143,11 @@ describe('alert settings', () => {
       soundName: 'Ping',
     });
     s.setItem(
-      'language-assistant:alerts:v1',
+      'gloss:alerts:v1',
       JSON.stringify({ version: 1, message: true, sound: false, soundName: '../../etc' }),
     );
     expect(readAlertSettings(s).soundName).toBe('Glass');
-    s.setItem('language-assistant:alerts:v1', '{bad');
+    s.setItem('gloss:alerts:v1', '{bad');
     expect(readAlertSettings(s).message).toBe(true);
   });
   it('lists the fourteen Mac sounds', () => {

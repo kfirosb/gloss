@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { dataDir } from './data-dir.js';
 import { pathToFileURL } from 'node:url';
 import { INITIAL_LANGUAGE_DEFAULTS } from '../core/language-settings.js';
 import type { GlossTerminal } from '../agents/claude/tmux-delivery.js';
@@ -69,7 +69,7 @@ export async function launch(args: string[]) {
     import('../agents/codex/index.js'),
     import('../agents/source-sink.js'),
   ]);
-  const root = join(homedir(), '.language-assistant');
+  const root = dataDir();
   await mkdir(root, { recursive: true, mode: 0o700 });
   const store = new SqliteStore(join(root, 'state.db'));
   let localSink: ReturnType<typeof createHttpSourceSink> | undefined;

@@ -10,8 +10,8 @@ import { constants } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dataDir } from '../../runtime/data-dir.js';
 import {
   claudeConfigDir,
   projectIdentity,
@@ -60,9 +60,7 @@ interface NativeRecord {
  * successfully; failed startup closes the listener. A file alone is not activation.
  */
 export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
-  const registryDir = resolve(
-    options.registryDir ?? join(homedir(), '.language-assistant', 'claude-channels'),
-  );
+  const registryDir = resolve(options.registryDir ?? join(dataDir(), 'claude-channels'));
   const configDir = resolve(claudeConfigDir(options.configDir));
   const uid = () => options.uid ?? process.getuid?.();
   const supported = () => supportsProcessProbes(options.platform) && uid() !== undefined;

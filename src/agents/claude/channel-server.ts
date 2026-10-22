@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { dataDir } from '../../runtime/data-dir.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -145,7 +145,7 @@ export async function startClaudeChannel(
     options.readParentCommandLine ?? (() => readParentCommandLine()),
   );
   if (!enabled) return startInertServer();
-  const stateDir = resolve(options.stateDir ?? join(homedir(), '.language-assistant'));
+  const stateDir = resolve(options.stateDir ?? dataDir());
   let registry: Registry | undefined;
   let record: ChannelRecord | undefined;
   let store: ChannelStore | undefined;

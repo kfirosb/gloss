@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { dataDir } from './data-dir.js';
 import type { ImageAttachment } from '../core/contracts.js';
 import {
   MAX_UPLOAD_BASE64_CHARS,
@@ -9,7 +9,7 @@ import {
   MAX_UPLOAD_LABEL,
   MAX_ATTACHMENT_NAME_CHARS,
 } from '../core/content-policy.js';
-export const attachmentRoot = join(homedir(), '.language-assistant', 'attachments');
+export const attachmentRoot = join(dataDir(), 'attachments');
 export async function saveImage(
   input: { name: string; data: string },
   root = attachmentRoot,

@@ -135,7 +135,7 @@ async function setup(
     panels?: { id: string; target: Target }[];
   } = {},
 ) {
-  const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-launch-')));
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'gloss-launch-')));
   dirs.push(folder);
   const t = fakeTmux();
   const store = memoryStore(overrides.settings);
@@ -193,7 +193,7 @@ it('launches Claude with a preassigned identity and immediate panel registration
   });
   const record = await launcher.launch({ agent: 'claude', folder });
   const [name, session] = [...t.live][0]!;
-  expect(name).toBe('la-' + record.id);
+  expect(name).toBe('gloss-' + record.id);
   expect(session!.cwd).toBe(folder);
   expect(session!.argv).toEqual([
     '/bin/claude',
@@ -293,7 +293,7 @@ it('reconciles only missing sessions and emits their end transition once', async
   const b = await launcher.launch({ agent: 'claude', folder });
   const updates: LaunchRecord[][] = [];
   launcher.subscribe((r) => updates.push(r));
-  t.live.delete('la-' + b.id);
+  t.live.delete('gloss-' + b.id);
   await launcher.reconcile();
   await launcher.reconcile();
   expect(launcher.list().find((r) => r.id === a.id)!.state).toBe('running');
@@ -326,8 +326,8 @@ it('ends Claude with Ctrl+C twice and kills a session that survives', async () =
   const a = await launcher.launch({ agent: 'claude', folder });
   await launcher.end(a.id);
   expect(t.keys).toEqual([
-    ['la-' + a.id, ['C-c']],
-    ['la-' + a.id, ['C-c']],
+    ['gloss-' + a.id, ['C-c']],
+    ['gloss-' + a.id, ['C-c']],
   ]);
   const b = await launcher.launch({ agent: 'claude', folder });
   t.keys.length = 0;
@@ -336,7 +336,7 @@ it('ends Claude with Ctrl+C twice and kills a session that survives', async () =
   };
   const kill = vi.spyOn(t.tmux, 'killSession');
   await launcher.end(b.id);
-  expect(kill).toHaveBeenCalledWith('la-' + b.id);
+  expect(kill).toHaveBeenCalledWith('gloss-' + b.id);
   expect(t.live.size).toBe(0);
   expect(launcher.list().every((r) => r.state === 'ended')).toBe(true);
   expect(t.keys.flatMap(([, k]) => k)).toEqual(['C-c', 'C-c']);
@@ -356,7 +356,7 @@ it('does not revive a reconciled missing launch after registration completes', a
   const { launcher, folder, t, register } = await setup({ register: () => pending.promise });
   const record = await launcher.launch({ agent: 'codex', folder });
   await vi.waitFor(() => expect(register).toHaveBeenCalled());
-  t.live.delete('la-' + record.id);
+  t.live.delete('gloss-' + record.id);
   await launcher.reconcile();
   pending.resolve({ id: 'late-panel' });
   await tick();
@@ -521,7 +521,7 @@ it('reads launch settings saved before terminalView existed with the popup defau
   }
 });
 it('prepares distinct private MCP files for concurrent new sessions and never marks an existing session connecting', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'la-preflight-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'gloss-preflight-')));
   dirs.push(root);
   const project = join(root, 'project');
   await mkdir(project);
@@ -615,7 +615,7 @@ it('watches tmux so a session that exits on its own is ended, and stops watching
     await vi.advanceTimersByTimeAsync(3000);
     expect(list).toHaveBeenCalledTimes(1);
     expect(launcher.list()[0]!.state).toBe('running');
-    t.live.delete('la-' + record.id);
+    t.live.delete('gloss-' + record.id);
     await vi.advanceTimersByTimeAsync(3000);
     expect(launcher.list()[0]).toMatchObject({
       state: 'ended',
@@ -640,7 +640,7 @@ it('skips a watch tick while the previous reconcile is still running', async () 
     launcher.watch();
     await vi.advanceTimersByTimeAsync(9000);
     expect(list).toHaveBeenCalledTimes(1);
-    slow.resolve([{ name: 'la-' + record.id, panePid: record.panePid, currentCommand: 'zsh' }]);
+    slow.resolve([{ name: 'gloss-' + record.id, panePid: record.panePid, currentCommand: 'zsh' }]);
     await vi.advanceTimersByTimeAsync(3000);
     expect(list).toHaveBeenCalledTimes(2);
   } finally {
@@ -740,14 +740,14 @@ it('stops retrying an unidentified launch once it ends', async () => {
 it('adopts a launch back when its tmux session reappears after a listing gap, but never one ended on purpose', async () => {
   const { launcher, folder, t } = await setup();
   const a = await launcher.launch({ agent: 'claude', folder });
-  const entry = t.live.get('la-' + a.id)!;
-  t.live.delete('la-' + a.id);
+  const entry = t.live.get('gloss-' + a.id)!;
+  t.live.delete('gloss-' + a.id);
   await launcher.reconcile();
   expect(launcher.list()[0]).toMatchObject({
     state: 'ended',
     reason: 'Session is no longer running',
   });
-  t.live.set('la-' + a.id, entry);
+  t.live.set('gloss-' + a.id, entry);
   await launcher.reconcile();
   await tick();
   const revived = launcher.list()[0]!;
@@ -755,7 +755,7 @@ it('adopts a launch back when its tmux session reappears after a listing gap, bu
   expect(revived.reason).toBeUndefined();
   expect(revived.panePid).toBe(entry.panePid);
   await launcher.end(a.id);
-  t.live.set('la-' + a.id, entry);
+  t.live.set('gloss-' + a.id, entry);
   await launcher.reconcile();
   await tick();
   expect(launcher.list()[0]!.state).toBe('ended');
@@ -785,10 +785,10 @@ it('tracks a terminal as busy from the pane command and notifies subscribers whe
   const seen: (boolean | undefined)[] = [];
   launcher.subscribe((list) => seen.push(list[0]?.busy));
   const record = await launcher.launch({ agent: 'shell', folder });
-  t.live.get('la-' + record.id)!.currentCommand = 'node';
+  t.live.get('gloss-' + record.id)!.currentCommand = 'node';
   await launcher.reconcile();
   expect(launcher.list()[0]!.busy).toBe(true);
-  t.live.get('la-' + record.id)!.currentCommand = 'zsh';
+  t.live.get('gloss-' + record.id)!.currentCommand = 'zsh';
   await launcher.reconcile();
   expect(launcher.list()[0]!.busy).toBe(false);
   expect(seen).toEqual([false, true, false]);
@@ -801,8 +801,8 @@ it('ends a terminal with one Ctrl+C and an immediate kill, and deletes it on the
   };
   const kill = vi.spyOn(t.tmux, 'killSession');
   await launcher.end(record.id);
-  expect(t.keys).toEqual([['la-' + record.id, ['C-c']]]);
-  expect(kill).toHaveBeenCalledWith('la-' + record.id);
+  expect(t.keys).toEqual([['gloss-' + record.id, ['C-c']]]);
+  expect(kill).toHaveBeenCalledWith('gloss-' + record.id);
   expect(launcher.list()[0]).toMatchObject({ state: 'ended', reason: 'Ended by you' });
   await launcher.reconcile();
   expect(store.listLaunches()).toEqual([]);
@@ -816,7 +816,7 @@ it('adopts a terminal back as running after a restart and deletes one whose shel
     state: 'ended',
     reason: 'Session is no longer running',
   });
-  t.live.delete('la-' + gone.id);
+  t.live.delete('gloss-' + gone.id);
   await launcher.reconcile();
   expect(launcher.list().map((r) => [r.id, r.state])).toEqual([[alive.id, 'running']]);
   expect(launcher.list()[0]!.sessionRef).toBeUndefined();
@@ -874,19 +874,19 @@ it('run reuses the folder’s idle terminal, skips busy ones, and starts a secon
     typed: true,
     launch: { title: 'Terminal', originSessionId: 'panel-1' },
   });
-  expect(t.typed).toEqual([['la-' + first.launch.id, 'npm test']]);
+  expect(t.typed).toEqual([['gloss-' + first.launch.id, 'npm test']]);
   const again = await launcher.run({ folder, command: 'npm run typecheck' });
   expect(again).toMatchObject({ reused: true, launch: { id: first.launch.id } });
-  t.live.get('la-' + first.launch.id)!.currentCommand = 'node';
+  t.live.get('gloss-' + first.launch.id)!.currentCommand = 'node';
   const second = await launcher.run({ folder, command: 'git status', originSessionId: 'panel-2' });
   expect(second).toMatchObject({
     reused: false,
     typed: true,
     launch: { title: 'Terminal 2', originSessionId: 'panel-2' },
   });
-  expect(t.typed.at(-1)).toEqual(['la-' + second.launch.id, 'git status']);
+  expect(t.typed.at(-1)).toEqual(['gloss-' + second.launch.id, 'git status']);
   // A later run marks the reused terminal with the session that used it.
-  t.live.get('la-' + first.launch.id)!.currentCommand = 'zsh';
+  t.live.get('gloss-' + first.launch.id)!.currentCommand = 'zsh';
   await launcher.run({ folder, command: 'ls', originSessionId: 'panel-3' });
   expect(launcher.list().find((r) => r.id === first.launch.id)!.originSessionId).toBe('panel-3');
 });
@@ -898,7 +898,7 @@ it('run still types when the new shell is not ready in time, and reports typed: 
   };
   const result = await launcher.run({ folder, command: 'make' });
   expect(result.typed).toBe(false);
-  expect(t.typed).toEqual([['la-' + result.launch.id, 'make']]);
+  expect(t.typed).toEqual([['gloss-' + result.launch.id, 'make']]);
 });
 it('run validates the command and the folder', async () => {
   const { launcher, folder } = await setup();
@@ -992,7 +992,7 @@ it('run never picks a terminal that is being ended', async () => {
   const result = await launcher.run({ folder, command: 'ls' });
   expect(result.reused).toBe(false);
   expect(result.launch.id).not.toBe(first.id);
-  expect(t.typed).toEqual([['la-' + result.launch.id, 'ls']]);
+  expect(t.typed).toEqual([['gloss-' + result.launch.id, 'ls']]);
   killed.resolve();
   await ended;
 });
@@ -1008,7 +1008,7 @@ it('run reports typed: false with a defined launch when typing into a ready shel
 
 const RESUMED = '11111111-1111-4111-8111-111111111111';
 it('resumes an existing Claude session in tmux with the extra arguments and no channel flags, persisted', async () => {
-  const folder = await realpath(await mkdtemp(join(tmpdir(), 'la-resume-')));
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'gloss-resume-')));
   dirs.push(folder);
   const t = fakeTmux();
   const path = join(folder, 'state.db');
@@ -1157,11 +1157,11 @@ it('resume refuses while an ended launch of the session still has its pane, and 
     reason: 'Session is no longer running',
     createdAt: 1,
   });
-  t.live.set('la-ended-alive', { cwd: folder, argv: [], panePid: 5, currentCommand: 'claude' });
+  t.live.set('gloss-ended-alive', { cwd: folder, argv: [], panePid: 5, currentCommand: 'claude' });
   await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
     'This session already runs in Gloss',
   );
-  t.live.delete('la-ended-alive');
+  t.live.delete('gloss-ended-alive');
   const record = await launcher.resume(
     await launcher.prepareResume({ sessionRef: RESUMED, folder }),
   );

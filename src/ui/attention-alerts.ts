@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CatalogEntry } from '../core/session-catalog.js';
 import { hostPlatform, type HostPlatform } from './host-platform.js';
+import { readMigratedKey } from './display-preferences.js';
 
 /** The macOS system sounds; the desktop shell plays only these (see desktop/attention-alert.mjs). */
 export const ALERT_SOUNDS = [
@@ -39,7 +40,8 @@ export interface AlertSettings {
   sound: boolean;
   soundName: string;
 }
-const key = 'language-assistant:alerts:v1';
+const key = 'gloss:alerts:v1';
+const legacyKey = 'language-assistant:alerts:v1';
 const defaults = (platform: HostPlatform): AlertSettings => ({
   version: 1,
   message: true,
@@ -64,8 +66,9 @@ export function readAlertSettings(
   platform: HostPlatform = hostPlatform(),
 ): AlertSettings {
   try {
+    const target = storage ?? globalThis.localStorage;
     return validated(
-      JSON.parse((storage ?? globalThis.localStorage)?.getItem(key) ?? 'null'),
+      JSON.parse((target && readMigratedKey(target, key, legacyKey)) ?? 'null'),
       platform,
     );
   } catch {

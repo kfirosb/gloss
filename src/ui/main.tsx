@@ -481,7 +481,7 @@ function App() {
     (e) => e.open && (e.attention === 'response' || e.attention === 'approval'),
   ).length;
   useEffect(() => {
-    window.languageAssistant?.setAttentionCount?.(waitingCount);
+    window.gloss?.setAttentionCount?.(waitingCount);
   }, [waitingCount]);
   const alerts = useAttentionAlerts(catalog?.entries, selected);
   // Plain shell terminals: shown as a popup over the session, or filling the workspace (the terminalView setting).

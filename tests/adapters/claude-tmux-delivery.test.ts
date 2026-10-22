@@ -668,7 +668,7 @@ describe('typing into the terminal', () => {
       capture: () => screen.capture(),
       cursor: () => screen.cursor(),
       loadBuffer: (buffer, text) => tmux.loadBuffer(buffer, text),
-      pasteBuffer: (buffer) => tmux.pasteBuffer('la-one', buffer),
+      pasteBuffer: (buffer) => tmux.pasteBuffer('gloss-one', buffer),
       deleteBuffer: (buffer) => tmux.deleteBuffer(buffer),
       pressEnter: () => screen.pressEnter(),
     };

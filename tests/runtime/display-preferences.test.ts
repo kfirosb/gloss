@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { LAYOUT_SIZE_MAX, LAYOUT_SIZE_MIN } from '../../src/core/session-contracts.js';
 import {
@@ -6,16 +6,18 @@ import {
   DARK_STYLES,
   pruneDisplayPreferences,
   readDisplayPreferences,
+  readMigratedKey,
   writeDisplayPreferences,
   type DarkStyle,
   type Theme,
 } from '../../src/ui/display-preferences.js';
 const storage = (data: string | null = null) =>
   ({
-    getItem: () => data,
+    getItem: (k: string) => (k === 'gloss:display:v1' ? data : null),
     setItem: (_k: string, v: string) => {
       data = v;
     },
+    removeItem: () => undefined,
   }) as unknown as Storage;
 it('recovers from unavailable, corrupt and unknown-version preferences', () => {
   for (const s of [
@@ -106,7 +108,7 @@ it('loads previous-version preferences and keeps new per-folder fields', () => {
     },
   } as unknown as Storage;
   storage.set(
-    'language-assistant:display:v1',
+    'gloss:display:v1',
     JSON.stringify({
       version: 1,
       collapsed: true,
@@ -324,4 +326,40 @@ it('asks before Move to Gloss by default and keeps only a real opt-out', () => {
     expect(read.moveWithoutConfirmation).toBe(false);
     expect(read.collapsed).toBe(true);
   }
+});
+
+describe('readMigratedKey', () => {
+  const store = (initial: Record<string, string>) => {
+    const data = new Map(Object.entries(initial));
+    const storage = {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+      removeItem: (k: string) => void data.delete(k),
+    } as unknown as Storage;
+    return { data, storage };
+  };
+  it('moves the legacy value to the new key once', () => {
+    const { data, storage } = store({ 'language-assistant:display:v1': '{"a":1}' });
+    expect(readMigratedKey(storage, 'gloss:display:v1', 'language-assistant:display:v1')).toBe(
+      '{"a":1}',
+    );
+    expect(data.get('gloss:display:v1')).toBe('{"a":1}');
+    expect(data.has('language-assistant:display:v1')).toBe(false);
+  });
+  it('prefers an existing new key and leaves nothing legacy behind', () => {
+    const { data, storage } = store({
+      'gloss:display:v1': 'new',
+      'language-assistant:display:v1': 'old',
+    });
+    expect(readMigratedKey(storage, 'gloss:display:v1', 'language-assistant:display:v1')).toBe(
+      'new',
+    );
+    expect(data.get('gloss:display:v1')).toBe('new');
+    expect(data.has('language-assistant:display:v1')).toBe(false);
+  });
+  it('returns null when neither key exists', () => {
+    expect(
+      readMigratedKey(store({}).storage, 'gloss:display:v1', 'language-assistant:display:v1'),
+    ).toBeNull();
+  });
 });

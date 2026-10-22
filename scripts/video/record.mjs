@@ -50,7 +50,7 @@ const context = await browser.newContext({
 // Behave like the desktop window: focused, with the alert bridge present (sounds are not recorded).
 await context.addInitScript(() => {
   document.hasFocus = () => true;
-  window.languageAssistant = { pickFolder: async () => null, setAttentionCount() {}, alert() {} };
+  window.gloss = { pickFolder: async () => null, setAttentionCount() {}, alert() {} };
 });
 const videoStart = Date.now();
 const page = await context.newPage();

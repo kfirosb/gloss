@@ -17,7 +17,7 @@ import { languageOptionLabel } from './language-controls.js';
 
 declare global {
   interface Window {
-    languageAssistant?: {
+    gloss?: {
       pickFolder(): Promise<string | null>;
       setAttentionCount?(count: number): void;
       alert?(payload: { sound?: string; bounce: boolean }): void;
@@ -103,7 +103,7 @@ export function NewSessionDialog({
   const pick = async () => {
     setError('');
     try {
-      const chosen = await window.languageAssistant?.pickFolder();
+      const chosen = await window.gloss?.pickFolder();
       if (!chosen) return;
       const { folder: real } = await sessionRequest<{ folder: string }>('/api/launch-folders', {
         method: 'POST',
@@ -179,7 +179,7 @@ export function NewSessionDialog({
               ))}
             </select>
           )}
-          {window.languageAssistant && (
+          {window.gloss && (
             <button type="button" onClick={() => void pick()}>
               Choose…
             </button>
@@ -187,7 +187,7 @@ export function NewSessionDialog({
         </div>
         {all.length === 0 && (
           <p className="review-hint">
-            {window.languageAssistant
+            {window.gloss
               ? 'No project folders yet. Choose one to start.'
               : 'No project folders yet. Start Claude or Codex in a project from your terminal once, or choose a folder in the Gloss app.'}
           </p>

@@ -43,7 +43,7 @@ async function serve(context: any, first: CatalogSnapshot, next: CatalogSnapshot
 }
 const bridge = () => {
   (window as any).__alerts = [];
-  (window as any).languageAssistant = {
+  (window as any).gloss = {
     pickFolder: async () => null,
     setAttentionCount() {},
     alert(p: unknown) {
@@ -113,7 +113,7 @@ test('an approval request says Approval needed, and switching both settings off 
   );
   await page.evaluate(() =>
     localStorage.setItem(
-      'language-assistant:alerts:v1',
+      'gloss:alerts:v1',
       JSON.stringify({ version: 1, message: false, sound: false, soundName: 'Glass' }),
     ),
   );
@@ -140,9 +140,12 @@ test('Settings saves the alert switches and sound at once, and Try plays the cho
     .poll(() => page.evaluate(() => (window as any).__alerts))
     .toEqual([{ sound: 'Submarine', bounce: false }]);
   await dialog.getByRole('checkbox', { name: /Show a message/ }).uncheck();
-  expect(
-    await page.evaluate(() => JSON.parse(localStorage.getItem('language-assistant:alerts:v1')!)),
-  ).toEqual({ version: 1, message: false, sound: true, soundName: 'Submarine' });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('gloss:alerts:v1')!))).toEqual({
+    version: 1,
+    message: false,
+    sound: true,
+    soundName: 'Submarine',
+  });
   await page.reload();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(

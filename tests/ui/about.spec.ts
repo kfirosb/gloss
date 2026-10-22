@@ -6,7 +6,7 @@ test('version label opens About', async ({ page }) => {
   await page.route('**/events', (r) => r.fulfill({ contentType: 'text/event-stream', body: '' }));
   await page.route('**/api/about', (r) =>
     r.fulfill({
-      json: { name: 'language-assistant', version: '9.8.7', platform: 'darwin', arch: 'arm64' },
+      json: { name: 'gloss', version: '9.8.7', platform: 'darwin', arch: 'arm64' },
     }),
   );
   await page.goto('/#capability=test');

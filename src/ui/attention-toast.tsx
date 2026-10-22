@@ -48,7 +48,7 @@ export function useAttentionAlerts(
       settings.sound && now - lastSound.current >= SOUND_GAP_MS ? settings.soundName : undefined;
     if (sound) lastSound.current = now;
     if (sound || settings.message)
-      window.languageAssistant?.alert?.({ ...(sound ? { sound } : {}), bounce: settings.message });
+      window.gloss?.alert?.({ ...(sound ? { sound } : {}), bounce: settings.message });
     if (settings.message)
       setBanners((old) =>
         [

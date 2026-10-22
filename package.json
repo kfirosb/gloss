@@ -1,5 +1,5 @@
 {
-  "name": "language-assistant",
+  "name": "gloss",
   "version": "0.21.0",
   "private": true,
   "description": "Work with Codex and Claude Code in your own language",

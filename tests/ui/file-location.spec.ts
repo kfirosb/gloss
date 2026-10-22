@@ -53,7 +53,7 @@ test('the desktop build reveals files and folders through the bridge', async ({ 
     const calls: [string, string][] = [];
     Object.assign(window, {
       __reveals: calls,
-      languageAssistant: {
+      gloss: {
         pickFolder: async () => null,
         revealPath: async (sessionId: string, relativePath: string) => {
           calls.push([sessionId, relativePath]);

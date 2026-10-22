@@ -3,8 +3,8 @@ import { parseClaudeActivity } from './activity.js';
 import { validateBackgroundOutputPath } from './background-output.js';
 import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
 import { readdir, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { dataDir } from '../../runtime/data-dir.js';
 import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { supportsProcessProbes } from '../../runtime/platform-tools.js';
@@ -510,7 +510,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       /** Reads the transcript for terminal confirmation only, where a queued prompt also counts. */
       const parseTyped = (record: JsonRecord, offset: number) =>
         parseTypedEvidence(record, offset, target.sessionRef);
-      const stateDir = options.stateDir ?? join(homedir(), '.language-assistant');
+      const stateDir = options.stateDir ?? dataDir();
       const channelRegistry =
         options.channelRegistry ??
         createChannelRegistry({

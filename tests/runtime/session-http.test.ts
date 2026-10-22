@@ -463,7 +463,7 @@ it('authenticates read-only browsing APIs and preserves reference allocation', a
   const preview = await (await request('sessions/A/files/preview?path=package.json')).json();
   expect(preview).toMatchObject({ state: 'text', relativePath: 'package.json' });
   expect(preview.path).toBeUndefined();
-  expect(preview.text).toContain('language-assistant');
+  expect(preview.text).toContain('gloss');
   expect((await request('sessions/A/files/preview?path=../outside')).status).toBe(400);
   expect(
     await (

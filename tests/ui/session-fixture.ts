@@ -8,7 +8,7 @@ export async function preferFullAssistant(
 ) {
   await target.addInitScript((ids: string[]) => {
     try {
-      const key = 'language-assistant:display:v1';
+      const key = 'gloss:display:v1';
       if (!localStorage.getItem(key))
         localStorage.setItem(
           key,
@@ -63,7 +63,7 @@ export async function mockSidebarDefaults(
   await target.route('**/api/about', (route) =>
     route.fulfill({
       json: {
-        name: 'language-assistant',
+        name: 'gloss',
         version: '0.0.0-test',
         platform: 'darwin',
         arch: 'arm64',

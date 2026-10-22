@@ -292,10 +292,7 @@ test('the collapsed rail icon of the selected folder only expands the sidebar', 
   await serve(context, catalogFor(f, { B: { worktreePath: '/wt/feature' } }));
   await page.addInitScript(() => {
     sessionStorage.setItem('selected-session', 'B');
-    localStorage.setItem(
-      'language-assistant:display:v1',
-      JSON.stringify({ version: 1, collapsed: true }),
-    );
+    localStorage.setItem('gloss:display:v1', JSON.stringify({ version: 1, collapsed: true }));
   });
   await page.goto('/#capability=test');
   await expect(page.getByRole('tablist', { name: 'Sessions in feature' })).toBeVisible();

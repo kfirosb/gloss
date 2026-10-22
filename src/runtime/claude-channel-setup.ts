@@ -3,6 +3,7 @@ import { lstat, readdir, realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { dataDir } from './data-dir.js';
 import type { Target } from '../core/contracts.js';
 import { CLAUDE_SETUP_PROMPT } from '../core/session-contracts.js';
 import type { ChannelRecord, ChannelStatus } from '../agents/claude/channel-types.js';
@@ -86,7 +87,7 @@ export function createClaudeChannelSetup(
   options: ChannelSetupOptions = {},
 ): NewSessionChannelSetupService {
   const home = options.homeDir ?? homedir();
-  const stateDir = resolve(options.stateDir ?? join(home, '.language-assistant'));
+  const stateDir = resolve(options.stateDir ?? dataDir(home));
   const setupDir = join(stateDir, 'claude-channel-setup');
   const configDir = resolve(claudeConfigDir(options.configDir, home));
   const userConfigPath = claudeUserConfigPath({ home, configDir: options.configDir }).path;

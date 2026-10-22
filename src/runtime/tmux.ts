@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { dataDir } from './data-dir.js';
 import {
   collectProcess,
   runProcess,
@@ -20,7 +20,7 @@ export class TmuxUnavailable extends Error {
     );
   }
 }
-export const sessionNameFor = (launchId: string) => 'la-' + launchId;
+export const sessionNameFor = (launchId: string) => 'gloss-' + launchId;
 /** On macOS Homebrew first, then the app's bundled tmux; on Linux the bundled, tested tmux first and the
  * distribution's as fallback. The desktop shell passes the bundled path in LANGUAGE_ASSISTANT_TMUX because
  * process.resourcesPath may be unset in the ELECTRON_RUN_AS_NODE server child. */
@@ -136,7 +136,10 @@ const sessionAbsent = (outcome: ProcessOutcome) =>
     outcome.code === 1 &&
     /^can't find session: .+\s*$/.test(outcome.diagnostics));
 
-const NAME = /^la-[A-Za-z0-9-]{1,64}$/;
+// `la-` is the prefix sessions had before the rename to Gloss; they may still be running after an update.
+const NAME = /^(?:gloss|la)-[A-Za-z0-9-]{1,64}$/;
+/** True for a tmux session Gloss owns, under either the current or the pre-rename prefix. */
+export const isGlossSessionName = (name: string): boolean => NAME.test(name);
 const BUFFER = /^gloss-[A-Za-z0-9-]{1,100}$/;
 const CURSOR = /^(\d+) (\d+) ([01])$/;
 /** Highest pane row Gloss asks tmux to capture; no pane is taller. */
@@ -154,7 +157,7 @@ export async function createTmux(
 ): Promise<Tmux> {
   const runner = options.runner ?? runProcess;
   const executable = options.executable ?? (await locateTmux(undefined, runner));
-  const dir = join(options.stateDir ?? join(homedir(), '.language-assistant'), 'tmux');
+  const dir = join(options.stateDir ?? dataDir(), 'tmux');
   await ensureSocketDirectory(dir);
   const socket = join(dir, 'socket');
   // -u: always UTF-8. An app opened from the Dock or Finder has no LANG, and tmux would then print the listing's
@@ -251,7 +254,7 @@ export async function createTmux(
       }
       return result.lines
         .map((line) => line.split('\t'))
-        .filter(([n, p]) => n && NAME.test(n) && Number(p) > 1)
+        .filter(([n, p]) => n && isGlossSessionName(n) && Number(p) > 1)
         .map(([name, pid, command]) => ({
           name: name!,
           panePid: Number(pid),

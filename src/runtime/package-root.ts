@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** The `name` in this repository's package.json; identifies the package root when walking up from a module. */
-export const PACKAGE_NAME = 'language-assistant';
+export const PACKAGE_NAME = 'gloss';
 /** Walks up from `start` (at most `maxLevels` directories) to the directory whose package.json is named PACKAGE_NAME; source runs from src/runtime and the build from dist/server/runtime. */
 export function packageRoot(start: string, maxLevels = 6): string | undefined {
   let dir = start;

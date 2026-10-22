@@ -215,13 +215,11 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
                 </option>
               ))}
             </select>
-            {window.languageAssistant?.alert && (
+            {window.gloss?.alert && (
               <button
                 type="button"
                 disabled={!alerts.sound}
-                onClick={() =>
-                  window.languageAssistant?.alert?.({ sound: alerts.soundName, bounce: false })
-                }
+                onClick={() => window.gloss?.alert?.({ sound: alerts.soundName, bounce: false })}
               >
                 Try sound
               </button>

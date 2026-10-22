@@ -100,7 +100,7 @@ const view = (page: Page, name: string) => switcher(page).getByRole('radio', { n
 const terminal = (page: Page) => page.locator('.pane-live .live-terminal');
 const storedView = (page: Page) =>
   page.evaluate(() => {
-    const saved = JSON.parse(localStorage.getItem('language-assistant:display:v1') ?? '{}') as {
+    const saved = JSON.parse(localStorage.getItem('gloss:display:v1') ?? '{}') as {
       liveViews?: Record<string, { view: string }>;
     };
     return saved.liveViews?.['L-panel']?.view;
@@ -229,7 +229,7 @@ test('approval switches to Split with a red outline and restores Translated when
 }) => {
   const { setActivity } = await withLaunch(page, 'approval-required', 'auto');
   await page.addInitScript(() => {
-    const key = 'language-assistant:display:v1';
+    const key = 'gloss:display:v1';
     const saved = JSON.parse(localStorage.getItem(key) ?? '{"version":1}') as object;
     const liveViews = { 'L-panel': { view: 'translated', conversation: 'translated', split: 50 } };
     localStorage.setItem(key, JSON.stringify({ ...saved, liveViews }));
@@ -329,7 +329,7 @@ test('a remembered terminal view without a launch shows its conversation side', 
 }) => {
   await page.addInitScript(() =>
     localStorage.setItem(
-      'language-assistant:display:v1',
+      'gloss:display:v1',
       JSON.stringify({
         version: 1,
         liveViews: { basic: { view: 'terminal', conversation: 'original', split: 50 } },

@@ -117,7 +117,7 @@ it('streams output, forwards input and resize, and kills the attach client on cl
   const { bridge, connect, pty, resizes, spawned } = await setup();
   const ws = connect(`/api/launches/L1/terminal?ticket=${bridge.issueTicket('L1').ticket}`);
   await opened(ws);
-  expect(spawned[0]).toEqual(['tmux', 'attach', 'la-L1']);
+  expect(spawned[0]).toEqual(['tmux', 'attach', 'gloss-L1']);
   const got = new Promise<string>((r) => ws.once('message', (d) => r(String(d))));
   pty.emit('hello');
   expect(await got).toBe('hello');
@@ -160,7 +160,7 @@ it('routes wheel scrolling to tmux and leaves history browsing before forwarding
   ws.send(JSON.stringify({ type: 'input', data: 'b' }));
   ws.send(JSON.stringify({ type: 'scroll', lines: 2, col: 1, row: 1 }));
   await new Promise((r) => setTimeout(r, 50));
-  expect(events).toEqual(['scroll la-L1 -3 4,2', 'exit la-L1', 'scroll la-L1 2 1,1']);
+  expect(events).toEqual(['scroll gloss-L1 -3 4,2', 'exit gloss-L1', 'scroll gloss-L1 2 1,1']);
   expect(pty.writes).toEqual(['a', 'b']);
 });
 it('rejects reused, expired, wrong-launch and missing tickets without spawning', async () => {
@@ -279,7 +279,7 @@ describe.skipIf(!available)('with real tmux and node-pty', () => {
     const state = await realpath(await mkdtemp(join(tmpdir(), 'la-bridge-')));
     const tmux = await createTmux({ stateDir: state });
     try {
-      await tmux.newSession('la-R1', state, ['sh', '-c', 'yes | head -c 5000000; sleep 30']);
+      await tmux.newSession('gloss-R1', state, ['sh', '-c', 'yes | head -c 5000000; sleep 30']);
       const bridge = createTerminalBridge({
         tmux: async () => tmux,
         launches: () => [
@@ -303,21 +303,23 @@ describe.skipIf(!available)('with real tmux and node-pty', () => {
         ws.once('error', rej);
       });
       expect(
-        (await ps()).split('\n').some((l) => l.includes('attach-session') && l.includes('la-R1')),
+        (await ps())
+          .split('\n')
+          .some((l) => l.includes('attach-session') && l.includes('gloss-R1')),
       ).toBe(true);
       ws.close();
-      expect(await tmux.hasSession('la-R1')).toBe(true);
+      expect(await tmux.hasSession('gloss-R1')).toBe(true);
       const deadline = Date.now() + 2000;
       let remaining = true;
       while (Date.now() < deadline) {
         remaining = (await ps())
           .split('\n')
-          .some((l) => l.includes('attach-session') && l.includes('la-R1'));
+          .some((l) => l.includes('attach-session') && l.includes('gloss-R1'));
         if (!remaining) break;
         await new Promise((r) => setTimeout(r, 100));
       }
       expect(remaining).toBe(false);
-      expect(await tmux.hasSession('la-R1')).toBe(true);
+      expect(await tmux.hasSession('gloss-R1')).toBe(true);
     } finally {
       await new Promise<void>((r) =>
         execFile(tmux.executable, ['-S', tmux.socket, 'kill-server'], () => r()),

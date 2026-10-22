@@ -40,7 +40,7 @@ async function serve(context: any, f: any) {
   });
   await context.route('**/api/about', (r: any) =>
     r.fulfill({
-      json: { name: 'language-assistant', version: '9.8.7', platform: 'darwin', arch: 'arm64' },
+      json: { name: 'gloss', version: '9.8.7', platform: 'darwin', arch: 'arm64' },
     }),
   );
   return () => settings;
@@ -120,7 +120,7 @@ test('compact is the default and an explicit full choice is kept', async ({ page
   await serve(context, f);
   await page.addInitScript(() =>
     localStorage.setItem(
-      'language-assistant:display:v1',
+      'gloss:display:v1',
       JSON.stringify({
         version: 1,
         collapsed: false,

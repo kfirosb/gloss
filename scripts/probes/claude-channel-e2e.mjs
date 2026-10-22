@@ -118,7 +118,7 @@ async function evidence(config) {
   const session = await panel(config); const snapshot = await api(config, `/api/sessions/${session.id}/snapshot`);
   const channel = await record(config);
   const transcript = (await readFile(channel.transcriptPath, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const inbound = transcript.filter(row => row.type === 'user' && row.origin?.kind === 'channel' && row.origin?.server === 'language-assistant');
+  const inbound = transcript.filter(row => row.type === 'user' && row.origin?.kind === 'channel' && ['gloss', 'language-assistant'].includes(row.origin?.server));
   const db = new DatabaseSync(join(config.stateDir, 'claude-channel-ledger.db'), { readOnly: true });
   db.exec('PRAGMA busy_timeout=5000');
   let requests;

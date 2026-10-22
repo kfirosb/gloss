@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { dataDir } from '../../src/runtime/data-dir.js';
 import { fileURLToPath } from 'node:url';
 import { createDictationEngine, locateWhisper } from '../../src/runtime/dictation/engine.js';
 import { modelsDirectory } from '../../src/runtime/dictation/services.js';
@@ -15,7 +15,7 @@ import {
 } from '../../src/core/dictation-contracts.js';
 
 const binary = locateWhisper();
-const modelDir = modelsDirectory(join(homedir(), '.language-assistant'));
+const modelDir = modelsDirectory(dataDir());
 const fixture = fileURLToPath(new URL('../fixtures/dictation-he.wav', import.meta.url));
 const ready = !!binary && existsSync(join(modelDir, MODEL_FILE)) && existsSync(fixture);
 describe.skipIf(!ready)('dictation with the real engine', () => {

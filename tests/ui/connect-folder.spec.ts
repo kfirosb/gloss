@@ -77,7 +77,7 @@ test('in the Mac app, unavailable search points at Browse folders and a failing 
   await mockSession(page, () => snapshot);
   await page.route('**/events', (r) => r.fulfill({ contentType: 'text/event-stream', body: '' }));
   await page.addInitScript(() => {
-    (window as any).languageAssistant = {
+    (window as any).gloss = {
       pickFolder: () => Promise.reject(new Error('Picker failed')),
     };
   });

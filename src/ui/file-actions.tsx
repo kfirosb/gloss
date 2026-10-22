@@ -6,12 +6,12 @@ import type { SessionClient } from './session-client.js';
 
 const NOTE_MS = 2500;
 /** Opening the computer's file manager needs the desktop app's bridge; the browser build hides the action. */
-export const canRevealFiles = () => !!window.languageAssistant?.revealPath;
+export const canRevealFiles = () => !!window.gloss?.revealPath;
 export const revealLabel = (platform: HostPlatform = hostPlatform()) =>
   platform === 'darwin' ? 'Open in Finder' : 'Open in file manager';
 /** Reveals a file or opens a folder; the desktop shell resolves the path inside the session folder. */
 async function revealEntry(client: SessionClient, relativePath: string): Promise<string> {
-  const result = await window.languageAssistant?.revealPath?.(client.sessionId, relativePath);
+  const result = await window.gloss?.revealPath?.(client.sessionId, relativePath);
   return result && 'error' in result ? `Could not open: ${result.error}` : '';
 }
 /** Copies the entry's absolute path, as the server resolved it inside the session folder. */

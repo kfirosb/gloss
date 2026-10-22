@@ -380,7 +380,7 @@ test('an off-screen saved window opens fully inside the viewport', async ({ page
   await mockFiles(page);
   await page.addInitScript(() => {
     localStorage.setItem(
-      'language-assistant:display:v1',
+      'gloss:display:v1',
       JSON.stringify({
         version: 1,
         collapsed: false,

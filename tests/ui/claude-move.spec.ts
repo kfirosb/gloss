@@ -493,7 +493,7 @@ test('“Move session here” for a working session offers Move when it finishes
   expect(move.posts).toEqual([{ action: 'when-idle', ...PROCESS }]);
 });
 
-const DISPLAY_KEY = 'language-assistant:display:v1';
+const DISPLAY_KEY = 'gloss:display:v1';
 const storedNoConfirm = (page: Page) =>
   page.evaluate((key) => {
     const saved: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');

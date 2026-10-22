@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createTmux,
   ensureSocketDirectory,
+  isGlossSessionName,
   locateTmux,
   MAX_PANE_ROW,
   sessionNameFor,
@@ -176,7 +177,33 @@ it('rejects unsafe socket directories', async () => {
   await ensureSocketDirectory(join(d, 'fresh'));
 });
 it('names sessions', () => {
-  expect(sessionNameFor('abc')).toBe('la-abc');
+  expect(sessionNameFor('abc')).toBe('gloss-abc');
+});
+it('recognises both the current and the pre-rename session prefix', () => {
+  expect(isGlossSessionName('gloss-abc')).toBe(true);
+  expect(isGlossSessionName('la-abc')).toBe(true);
+  expect(isGlossSessionName('x-abc')).toBe(false);
+});
+it('accepts both prefixes in commands and lists both as Gloss sessions', async () => {
+  const calls: string[][] = [];
+  const tmux = await createTmux({
+    stateDir: await temp(),
+    executable: '/stub/tmux',
+    runner: async function* (_exe, args) {
+      calls.push(args);
+      if (args.includes('list-sessions'))
+        for (const line of ['la-old\t123\tzsh', 'gloss-new\t456\tzsh', 'x-other\t789\tzsh'])
+          yield { type: 'line', line };
+      yield {
+        type: 'exit',
+        outcome: { code: 0, signal: null, reason: 'exited', diagnostics: '' },
+      };
+    },
+  });
+  expect((await tmux.listSessions()).map((s) => s.name)).toEqual(['la-old', 'gloss-new']);
+  await expect(tmux.hasSession('la-abc')).resolves.toBeDefined();
+  await expect(tmux.hasSession('gloss-abc')).resolves.toBeDefined();
+  await expect(tmux.hasSession('x-abc')).rejects.toThrow('Invalid tmux session name');
 });
 describe.skipIf(!available)('with real tmux on a private socket', () => {
   it('creates, captures, resizes and kills a session in a path with spaces and Hebrew', async () => {

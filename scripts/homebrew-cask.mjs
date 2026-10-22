@@ -68,6 +68,8 @@ export function renderCask({ version, sha256 }) {
   app "Gloss.app"
 
   zap trash: [
+    "~/.gloss",
+    "~/Library/Application Support/gloss",
     "~/.language-assistant",
     "~/Library/Application Support/language-assistant",
     "~/Library/Preferences/io.github.kfirosb.gloss.plist",
