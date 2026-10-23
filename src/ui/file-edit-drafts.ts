@@ -21,7 +21,7 @@ const warnOnUnload = (event: BeforeUnloadEvent) => {
 };
 function syncUnloadGuard() {
   // The desktop window would silently refuse to close; only the browser build shows its own prompt.
-  if (typeof window === 'undefined' || window.languageAssistant) return;
+  if (typeof window === 'undefined' || window.gloss) return;
   if (drafts.size) window.addEventListener('beforeunload', warnOnUnload);
   else window.removeEventListener('beforeunload', warnOnUnload);
 }
