@@ -31,7 +31,7 @@ import { MIGRATIONS } from './migrations.js';
 import { MAX_FILE_REVIEW_CACHE_ROWS } from '../core/content-policy.js';
 import { fileReviewCacheKey, type FileReviewKey } from '../core/file-review-contracts.js';
 import { summaryCacheKey, type SummaryKey } from '../core/summary-contracts.js';
-import { isDeliveryTransport, orderAgentMessages } from '../core/contracts.js';
+import { isComposerDraftId, isDeliveryTransport, orderAgentMessages } from '../core/contracts.js';
 import type { SeenStore } from '../core/session-catalog.js';
 import {
   INITIAL_LANGUAGE_DEFAULTS,
@@ -646,8 +646,10 @@ export class SqliteStore
     const deliveryRows = this.database
       .prepare(
         `
-      SELECT DISTINCT deliveries.* FROM deliveries
+      SELECT DISTINCT deliveries.*, sent.language AS written_language, sent.localized_text AS written_text
+      FROM deliveries
       JOIN drafts ON drafts.id = deliveries.draft_id
+      LEFT JOIN drafts AS sent ON sent.id = deliveries.draft_id AND sent.revision = deliveries.revision
       WHERE drafts.conversation_id = ? ORDER BY deliveries.rowid
     `,
       )
@@ -690,6 +692,7 @@ export class SqliteStore
             text: String(message.text),
             complete: Boolean(message.complete),
             ...(typeof message.timestamp === 'string' ? { timestamp: message.timestamp } : {}),
+            ...(typeof message.client_id === 'string' ? { clientId: message.client_id } : {}),
             ...(typeof message.translated_text === 'string'
               ? { translatedText: message.translated_text }
               : {}),
@@ -738,6 +741,11 @@ export class SqliteStore
           ? { nativeMessageId: item.native_message_id }
           : {}),
         ...(optionalString(item.reason) !== undefined && { reason: String(item.reason) }),
+        ...(isComposerDraftId(String(item.draft_id)) &&
+        typeof item.written_language === 'string' &&
+        typeof item.written_text === 'string'
+          ? { written: { language: item.written_language, text: item.written_text } }
+          : {}),
       })),
       language: String(row.language),
       languageSessionId: String(row.language_session_id),
@@ -808,10 +816,10 @@ export class SqliteStore
         .get(snapshot.id) as Row;
       let nextPosition = Number(currentMaximum.position) + 1;
       const source = this.database.prepare(`
-        INSERT INTO source_messages (conversation_id, source_id, revision, role, text, complete, position, translated_text, translation_status, translation_language, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO source_messages (conversation_id, source_id, revision, role, text, complete, position, translated_text, translation_status, translation_language, timestamp, client_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(conversation_id, source_id) DO UPDATE SET
-          revision=excluded.revision, role=excluded.role, text=excluded.text, complete=excluded.complete, translated_text=excluded.translated_text, translation_status=excluded.translation_status, translation_language=excluded.translation_language, timestamp=excluded.timestamp
+          revision=excluded.revision, role=excluded.role, text=excluded.text, complete=excluded.complete, translated_text=excluded.translated_text, translation_status=excluded.translation_status, translation_language=excluded.translation_language, timestamp=excluded.timestamp, client_id=excluded.client_id
         WHERE excluded.revision >= source_messages.revision
       `);
       const seen = new Set<string>();
@@ -830,6 +838,7 @@ export class SqliteStore
           message.translationStatus ?? null,
           message.translationLanguage ?? null,
           message.timestamp ?? null,
+          message.clientId ?? null,
         );
       }
 

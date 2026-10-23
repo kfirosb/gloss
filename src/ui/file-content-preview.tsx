@@ -1,4 +1,10 @@
-import { MAX_IMAGE_PREVIEW_LABEL, MAX_MEDIA_PREVIEW_BYTES } from '../core/content-policy.js';
+import {
+  MAX_MEDIA_PREVIEW_BYTES,
+  UNPREVIEWED_MESSAGES,
+  isStreamedPreviewKind,
+  previewLimitMessage,
+  type StreamedPreviewKind,
+} from '../core/content-policy.js';
 import { useMemo, useState, useEffect, useContext, type ReactNode } from 'react';
 import type { FilePreview } from '../core/file-references.js';
 import { FileLinkContext, localFilePath, isLocalFileLink } from './file-links.js';
@@ -245,6 +251,50 @@ function HtmlPreview({
     </>
   );
 }
+/** Plays or shows one file from a short-lived server link, so large media is never inlined. */
+function StreamedPreview({
+  kind,
+  path,
+  name,
+  client,
+}: {
+  kind: StreamedPreviewKind;
+  path: string;
+  name: string;
+  client: SessionClient;
+}) {
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    setUrl('');
+    setError('');
+    void client
+      .streamLink(path, controller.signal)
+      .then(({ url }) => {
+        if (!controller.signal.aborted) setUrl(url);
+      })
+      .catch((failure) => {
+        if (!controller.signal.aborted) setError(errorMessage(failure, 'Preview unavailable'));
+      });
+    return () => controller.abort();
+  }, [client, path]);
+  const unplayable = () =>
+    setError('The built-in player cannot play this file. You can still attach it.');
+  if (error) return <p role="status">Preview unavailable: {error}</p>;
+  if (!url) return <p role="status">Loading preview…</p>;
+  if (kind === 'video')
+    return <video controls preload="metadata" src={url} aria-label={name} onError={unplayable} />;
+  if (kind === 'audio')
+    return <audio controls preload="metadata" src={url} aria-label={name} onError={unplayable} />;
+  if (kind === 'pdf') return <iframe title="PDF preview" src={url} referrerPolicy="no-referrer" />;
+  return <img src={url} alt={name} onError={() => setError('The image could not be shown.')} />;
+}
+function unavailableMessage(preview: FilePreview) {
+  if (preview.state === 'large')
+    return previewLimitMessage(isStreamedPreviewKind(preview.kind) ? preview.kind : 'image');
+  return UNPREVIEWED_MESSAGES[preview.kind === 'archive' ? 'archive' : 'binary'];
+}
 export function FileContentPreview({
   preview,
   client,
@@ -254,8 +304,10 @@ export function FileContentPreview({
 }) {
   const files = useContext(FileLinkContext);
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
-  const format = fileFormat(preview.name);
-  const rendered = preview.state === 'text' && (format === 'markdown' || format === 'html');
+  const svg = preview.state === 'text' && preview.kind === 'svg';
+  const format = svg ? 'svg' : fileFormat(preview.name);
+  const rendered =
+    preview.state === 'text' && (format === 'markdown' || format === 'html' || format === 'svg');
   return (
     <>
       {rendered && (
@@ -280,12 +332,31 @@ export function FileContentPreview({
       )}
       <div
         className={
-          'preview-content file-format-' + (rendered && mode === 'preview' ? format : 'source')
+          'preview-content file-format-' +
+          (preview.state === 'stream'
+            ? 'stream'
+            : rendered && mode === 'preview'
+              ? format
+              : 'source')
         }
       >
-        {preview.state === 'text' ? (
+        {preview.state === 'stream' && isStreamedPreviewKind(preview.kind) ? (
+          <StreamedPreview
+            kind={preview.kind}
+            path={preview.relativePath}
+            name={preview.name}
+            client={client}
+          />
+        ) : preview.state === 'text' ? (
           rendered && mode === 'preview' ? (
-            format === 'markdown' ? (
+            format === 'svg' ? (
+              <StreamedPreview
+                kind="svg"
+                path={preview.relativePath}
+                name={preview.name}
+                client={client}
+              />
+            ) : format === 'markdown' ? (
               <FileLinkContext.Provider
                 value={
                   files
@@ -304,11 +375,7 @@ export function FileContentPreview({
         ) : preview.state === 'image' ? (
           <img src={preview.dataUrl} alt={preview.name} />
         ) : (
-          <p role="status">
-            {preview.state === 'large'
-              ? `Image exceeds the ${MAX_IMAGE_PREVIEW_LABEL} preview limit.`
-              : 'Preview unavailable for this file type. You can still attach the file.'}
-          </p>
+          <p role="status">{unavailableMessage(preview)}</p>
         )}
       </div>
       {preview.truncated && (

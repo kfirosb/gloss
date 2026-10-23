@@ -4,7 +4,10 @@ import {
   IMAGE_LIMIT_MESSAGE,
   MAX_ATTACHMENTS,
   MAX_IMAGES,
+  type StreamedPreviewKind,
+  type UnpreviewedKind,
 } from './content-policy.js';
+import type { EditableFile, SavedFile } from './file-edits.js';
 
 export interface FileReference {
   id: string;
@@ -34,7 +37,12 @@ export interface FilePreview {
   relativePath: string;
   size: number;
   version?: string;
-  state: 'text' | 'image' | 'binary' | 'large';
+  state: 'text' | 'image' | 'binary' | 'large' | 'stream';
+  /**
+   * For 'stream' and 'large', the kind to show; for 'binary', why it is not previewed;
+   * 'svg' on a 'text' preview means the source can also be shown as an image.
+   */
+  kind?: StreamedPreviewKind | UnpreviewedKind | 'image';
   text?: string;
   dataUrl?: string;
   truncated?: boolean;
@@ -49,13 +57,33 @@ export interface BrowserSearch {
   limited: boolean;
   guidance: string;
 }
+export interface StreamableFile {
+  file: FileReference;
+  kind: StreamedPreviewKind;
+  identity: string;
+}
 export interface FileRegistry {
+  /** Opens a text file for editing; see src/runtime/file-editor.ts for the write scoping. */
+  readEditable(sessionId: string, relativePath: string): Promise<EditableFile>;
+  saveFile(
+    sessionId: string,
+    relativePath: string,
+    text: unknown,
+    baseVersion: unknown,
+  ): Promise<SavedFile>;
+  createFile(sessionId: string, relativePath: string, text: unknown): Promise<SavedFile>;
   reviewText(
     sessionId: string,
     relativePath: string,
     signal: AbortSignal,
   ): Promise<{ text: string; version: string }>;
   media(sessionId: string, relativePath: string, signal: AbortSignal): Promise<FileReference>;
+  /**
+   * Resolves a video, audio, PDF or SVG file inside the session's folder for a streamed preview,
+   * enforcing that kind's size limit. `identity` names the file (device and inode) so a later
+   * request can confirm it still reaches the same file.
+   */
+  streamable(sessionId: string, relativePath: string, signal: AbortSignal): Promise<StreamableFile>;
   browse(
     sessionId: string,
     relativePath: string,
@@ -105,11 +133,21 @@ export function selectFileReferences(
     throw new Error(IMAGE_LIMIT_MESSAGE);
   return selected;
 }
+/** "Image 3" or "File 2": how the References block and the message text both name an attachment. */
+export function attachmentLabel(file: Pick<FileReference, 'kind' | 'index'>): string {
+  return `${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`;
+}
+/** The reference written into message text for an attachment, e.g. "@Image 3". */
+export function attachmentMention(file: Pick<FileReference, 'kind' | 'index'>): string {
+  return '@' + attachmentLabel(file);
+}
+/** Source of a pattern matching any attachment reference in text; never the prefix of a longer number. */
+export const ATTACHMENT_MENTION_SOURCE = '@(?:Image|File) [1-9]\\d*(?!\\d)';
 export function attachmentManifest(files: FileReference[]): string {
   if (!files.length) return '';
   const lines = files.map(
     (file) =>
-      `${file.kind === 'image' ? 'Image' : 'File'} ${file.index}: name=${JSON.stringify(file.name)} path=${JSON.stringify(file.path)} worktree=${JSON.stringify(file.worktreePath)}`,
+      `${attachmentLabel(file)}: name=${JSON.stringify(file.name)} path=${JSON.stringify(file.path)} worktree=${JSON.stringify(file.worktreePath)}`,
   );
   return [
     'References:',

@@ -529,7 +529,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     },
     /**
      * Whether a helper that may still be running opened its ledger by `path`: a registration with that `ledgerPath`,
-     * or one without it (written before 0.22, so the old folder's ledger), whose channel process exists. Any doubt
+     * or one without it (written before 0.23, so the old folder's ledger), whose channel process exists. Any doubt
      * (an unreadable or unsafe directory, an unreadable record) answers true; only a missing directory counts as empty.
      */
     async ledgerInUse(path: string): Promise<boolean> {

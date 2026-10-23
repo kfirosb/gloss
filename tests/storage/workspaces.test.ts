@@ -122,7 +122,13 @@ describe('session workspaces', () => {
     const reopened = new SqliteStore(path);
     try {
       expect(reopened.load('session-a')?.composerDraft).toBeUndefined();
-      expect(reopened.load('session-a')?.deliveries).toEqual(saved.deliveries);
+      // The composer draft row stays with its delivery, which reads what the user wrote from it.
+      expect(reopened.load('session-a')?.deliveries).toEqual(
+        saved.deliveries.map((delivery) => ({
+          ...delivery,
+          written: { language: 'he', text: saved.composerDraft!.localizedText },
+        })),
+      );
       expect(reopened.readWorkspace('session-a')).toEqual({
         sessionId: 'session-a',
         revision: 2,

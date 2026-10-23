@@ -10,6 +10,7 @@ import {
 import React, {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useState,
   useRef,
   useId,
@@ -17,17 +18,25 @@ import React, {
   type ReactNode,
 } from 'react';
 
-import type { AgentMessage, Delivery } from '../core/contracts.js';
+import type { AgentMessage, Delivery, WrittenText } from '../core/contracts.js';
+import { writtenOriginals } from '../core/user-originals.js';
 import type { Action } from '../runtime/protocol.js';
 import { recentMessages } from './history.js';
 import { useHistoryScroll } from './history-scroll.js';
 import { ImageAttachments, ReferenceImages, ImageSessionContext } from './image-attachments.js';
 import { FileBrowser, FILE_DRAG_TYPE } from './file-browser.js';
 import { FilesWindow } from './files-window.js';
+import { useFileEditGuard } from './use-file-edit-guard.js';
+import { fileEditedNote } from '../core/file-edits.js';
 import { FilePicker, type FilePickerHandle } from './file-picker.js';
 import { InventoryPicker, detectInvocation, type InvocationMention } from './inventory-picker.js';
 import type { CardReference } from './attachment-cards.js';
-import type { FileReference } from '../core/file-references.js';
+import { attachmentLabel, isFileReference, type FileReference } from '../core/file-references.js';
+import {
+  insertAttachmentMentions,
+  removeAttachmentMention,
+  type TextRange,
+} from './attachment-mentions.js';
 import { MovableWorkspace } from './movable-workspace.js';
 import {
   DEFAULT_LIVE_LAYOUT,
@@ -117,6 +126,7 @@ import { errorMessage } from './error-message.js';
 function Message({
   message,
   original,
+  written,
   replyLanguage,
   assist,
   client,
@@ -124,6 +134,8 @@ function Message({
 }: {
   message: AgentMessage;
   original: boolean;
+  /** What the user wrote for this user message, when it is matched to its composer delivery. */
+  written?: WrittenText | undefined;
   replyLanguage: string;
   assist: string;
   client: SessionClient;
@@ -133,8 +145,20 @@ function Message({
   const current = (message.translationLanguage ?? replyLanguage) === replyLanguage;
   const status =
     message.translationStatus === 'complete' && !current ? undefined : message.translationStatus;
+  const user = message.role === 'user';
+  const ownText = !original && user ? written : undefined;
+  // User messages are never translated now; a translation saved before that still shows, never a pending or failed one.
+  const userTranslation =
+    !original && user && !ownText && status === 'complete' ? message.translatedText : undefined;
   const body = original ? (
     <RichText language="auto" text={message.text} />
+  ) : ownText ? (
+    <RichText language={ownText.language} text={ownText.text} />
+  ) : user ? (
+    <RichText
+      language={userTranslation === undefined ? 'auto' : replyLanguage}
+      text={userTranslation ?? message.text}
+    />
   ) : (
     <RichText
       language={status === 'complete' ? replyLanguage : 'auto'}
@@ -149,19 +173,30 @@ function Message({
       }
     />
   );
+  const translationStatus = original
+    ? 'original'
+    : ownText
+      ? 'written'
+      : user
+        ? userTranslation === undefined
+          ? 'none'
+          : 'complete'
+        : (status ?? 'none');
   return (
     <article
       data-source-id={message.sourceId}
       data-sequence={message.revision}
-      data-translation-status={original ? 'original' : (status ?? 'none')}
+      data-translation-status={translationStatus}
       className={'message ' + message.role}
     >
       <small>
-        {message.role === 'assistant'
+        {!user
           ? !original && status === 'complete'
             ? 'Coding agent · translated'
             : 'Coding agent · original'
-          : 'Coding agent · original user message'}
+          : ownText
+            ? 'You · as you wrote it'
+            : 'Coding agent · original user message'}
       </small>
       <SummarizableResponse
         client={client}
@@ -182,9 +217,9 @@ function Message({
             Translate
           </button>
         )}
-      {!original && (
+      {!original && (!user || translationStatus !== 'none') && (
         <details>
-          <summary>Original</summary>
+          <summary>{ownText ? 'Sent to the agent' : 'Original'}</summary>
           <pre dir="ltr">{message.text}</pre>
         </details>
       )}
@@ -418,6 +453,15 @@ export function SessionWorkspace({
 
   const snapshot = workspace.envelope?.snapshot ?? initial.snapshot;
   const languageSettings = snapshot.languageSettings ?? legacyLanguageSettings(snapshot.language);
+  const translationFollowsView = languageSettings.translateOnlyWhileReading === true;
+  const serverEpoch = workspace.envelope?.epoch ?? initial.epoch;
+  // Reported only while translation follows the view; a restarted server (new epoch) starts without it.
+  useEffect(() => {
+    if (!translationFollowsView) return;
+    void call({ type: 'conversation-view', view: liveView }).catch(() => {
+      /* Best effort: until a report lands the server translates nothing on its own, and Translate still works. */
+    });
+  }, [translationFollowsView, liveView, serverEpoch]);
   const text = data.composer;
   const [error, setError] = useState('');
   const [liveHistory, setLiveHistory] = useState(false);
@@ -585,24 +629,26 @@ export function SessionWorkspace({
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setPreviewOpen(true);
   };
-  const closePreview = () => {
-    setPreviewOpen(false);
-    // A reopened popup starts without the last attach's outcome.
-    setPreview((current) => current && { ...current, attached: '' });
-    setAttachError('');
-    const opener = filesOpener.current;
-    filesOpener.current = null;
-    (opener?.isConnected ? opener : filesToggle.current)?.focus();
-  };
+  const closePreview = () =>
+    editGuard.leave('Discard and close', () => {
+      setPreviewOpen(false);
+      // A reopened popup starts without the last attach's outcome.
+      setPreview((current) => current && { ...current, attached: '' });
+      setAttachError('');
+      const opener = filesOpener.current;
+      filesOpener.current = null;
+      (opener?.isConnected ? opener : filesToggle.current)?.focus();
+    });
   /** `returnFocus` is false for the Files button, which keeps its own focus. */
-  const closeFiles = (returnFocus = true) => {
-    setFilesOpen(false);
-    setPreviewOpen(false);
-    setPreview(null);
-    setAttachError('');
-    filesOpener.current = null;
-    if (returnFocus) filesToggle.current?.focus();
-  };
+  const closeFiles = (returnFocus = true) =>
+    editGuard.leave('Discard and close', () => {
+      setFilesOpen(false);
+      setPreviewOpen(false);
+      setPreview(null);
+      setAttachError('');
+      filesOpener.current = null;
+      if (returnFocus) filesToggle.current?.focus();
+    });
   const [revealedFile, setRevealedFile] = useState('');
   // Attach failures from the preview pane, kept apart from the workspace-wide error.
   const [attachError, setAttachError] = useState('');
@@ -610,7 +656,16 @@ export function SessionWorkspace({
     path: string;
     token: typeof mention;
     attached?: string;
+    /** Opens in the editor: a file the user just created. */
+    edit?: boolean;
   } | null>(null);
+  // Only an open popup can hold an editor with unsaved edits.
+  const editGuard = useFileEditGuard(client.sessionId, previewOpen ? preview?.path : undefined);
+  /** "Tell the agent" after a save: an English note in the composer, sent only if the user sends it. */
+  const tellAgentAboutEdit = (path: string) =>
+    setComposerText(
+      (value) => (value.trim() ? value.replace(/\s*$/, '') + '\n' : '') + fileEditedNote(path),
+    );
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -618,12 +673,17 @@ export function SessionWorkspace({
       mounted.current = false;
     };
   }, []);
-  const openPreview = (path: string, token: typeof mention = null) => {
-    setError('');
-    setAttachError('');
-    showPreview();
-    setPreview({ path, token });
-    setMention(null);
+  const openPreview = (path: string, token: typeof mention = null, edit = false) => {
+    const open = () => {
+      setError('');
+      setAttachError('');
+      showPreview();
+      setPreview({ path, token, edit });
+      setMention(null);
+    };
+    // Choosing the file that is already open keeps its editor; another file asks about unsaved edits first.
+    if (previewOpen && preview?.path === path) open();
+    else editGuard.leave('Discard and open', open);
   };
   const openFileLink = (href: string, basePath = '') => {
     try {
@@ -649,25 +709,14 @@ export function SessionWorkspace({
         throw new Error('Attachment does not belong to this session');
       await addReference(file);
       workspace.update((data) => {
-        const reference = `@${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`;
-        if (new RegExp(reference + '(?![0-9])').test(data.composer)) return;
-        if (
+        const end = data.composer.length;
+        const range =
           token &&
           data.composer.slice(token.start, token.end) === '@' + token.query &&
           !/[^\s]/.test(data.composer[token.end] ?? '')
-        )
-          data.composer =
-            data.composer.slice(0, token.start) +
-            REFERENCE_MARK +
-            reference +
-            ' ' +
-            data.composer.slice(token.end);
-        else
-          data.composer +=
-            (data.composer && !/\s$/.test(data.composer) ? ' ' : '') +
-            REFERENCE_MARK +
-            reference +
-            ' ';
+            ? token
+            : { start: end, end };
+        data.composer = insertAttachmentMentions(data.composer, range, [file]).text;
       });
       if (mounted.current) {
         setMention(null);
@@ -675,7 +724,7 @@ export function SessionWorkspace({
           current?.path === path
             ? {
                 ...current,
-                attached: `Attached as ${file.kind === 'image' ? 'Image' : 'File'} ${file.index}`,
+                attached: `Attached as ${attachmentLabel(file)}`,
               }
             : current,
         );
@@ -688,7 +737,36 @@ export function SessionWorkspace({
       if (mounted.current) setUploading(false);
     }
   };
-  const addImages = async (files: File[]) => {
+  /** Where references for new attachments go: the caret (a paste replaces the selection), else the end. */
+  const composerTarget = (replaceSelection: boolean): { text: string } & TextRange => {
+    const value = workspace.record.data.composer;
+    const input = textarea.current;
+    if (!input || input.value !== value)
+      return { text: value, start: value.length, end: value.length };
+    const end = input.selectionEnd;
+    return { text: value, start: replaceSelection ? input.selectionStart : end, end };
+  };
+  /**
+   * Uploads finish after the user may have typed on; the references then go to the end of the text instead of
+   * a stale caret, and the caret is left where the user is typing.
+   */
+  const insertMentions = (
+    files: readonly FileReference[],
+    target: ReturnType<typeof composerTarget>,
+  ) =>
+    workspace.update((data) => {
+      const unchanged = data.composer === target.text;
+      const end = data.composer.length;
+      const result = insertAttachmentMentions(
+        data.composer,
+        unchanged ? target : { start: end, end },
+        files,
+      );
+      if (result.text === data.composer) return;
+      data.composer = result.text;
+      if (unchanged) pendingCaret.current = result.caret;
+    });
+  const addImages = async (files: File[], replaceSelection = false) => {
     if (uploadLock.current) {
       setError('Wait for the current files to finish attaching');
       return;
@@ -697,6 +775,8 @@ export function SessionWorkspace({
       setError(ATTACHMENT_LIMIT_MESSAGE);
       return;
     }
+    const target = composerTarget(replaceSelection);
+    const attached: FileReference[] = [];
     uploadLock.current = true;
     setUploading(true);
     setError('');
@@ -715,18 +795,25 @@ export function SessionWorkspace({
           mime: file.type,
         });
         await addReference(image);
+        attached.push(image);
       }
     } catch (e) {
       setError(errorMessage(e, 'File upload failed; existing attachments preserved'));
     } finally {
+      // Files attached before a failure keep their references.
+      if (attached.length) insertMentions(attached, target);
       uploadLock.current = false;
       setUploading(false);
     }
   };
-  const removeImage = (id: string) =>
+  const removeImage = (id: string) => {
+    const removed = images.find((file) => file.id === id);
     workspace.update((data) => {
       data.attachmentIds = data.attachmentIds.filter((value) => value !== id);
+      if (removed && !('status' in removed) && isFileReference(removed))
+        data.composer = removeAttachmentMention(data.composer, removed);
     });
+  };
   const composerDelivery =
     composerAttempt &&
     snapshot.deliveries.find((d) => d.draftId === `composer-${composerAttempt.requestId}`);
@@ -1040,6 +1127,10 @@ export function SessionWorkspace({
   const latestReply =
     [...ordered].reverse().find((message) => message.role === 'assistant') ?? ordered.at(-1);
   const visibleMessages = liveHistory ? ordered : latestReply ? [latestReply] : [];
+  const userOriginals = useMemo(
+    () => writtenOriginals(snapshot.codingMessages, snapshot.deliveries, snapshot.target),
+    [snapshot.codingMessages, snapshot.deliveries, snapshot.target],
+  );
   const indexedDiscussion = snapshot.discussion.map((m, index) => ({ ...m, index }));
   const visibleDiscussion = assistantHistory ? indexedDiscussion : indexedDiscussion.slice(-1);
   const beforeEarlierMessages = useHistoryScroll(
@@ -1255,12 +1346,13 @@ export function SessionWorkspace({
         <Message
           key={m.sourceId}
           message={m}
+          written={userOriginals.get(m.sourceId)}
           client={client}
           replyLanguage={languageSettings.reply}
           assist={languageSettings.assist}
           original={
-            m.role === 'assistant' &&
-            (conversationView === 'original' || !needsReplyTranslation(languageSettings))
+            conversationView === 'original' ||
+            (m.role === 'assistant' && !needsReplyTranslation(languageSettings))
           }
           onTranslate={() =>
             void call({ type: 'translate-message', sourceId: m.sourceId }).catch((e) =>
@@ -1537,7 +1629,7 @@ export function SessionWorkspace({
               );
               if (files.length) {
                 e.preventDefault();
-                void addImages(files);
+                void addImages(files, true);
               }
             }}
             id="composer"
@@ -1664,6 +1756,7 @@ export function SessionWorkspace({
       client={client}
       revealedFile={revealedFile}
       onPreview={(path) => openPreview(path)}
+      onCreated={(path) => openPreview(path, null, true)}
       column={{
         side: preferences.filesSide,
         sideButton: filesSideToggle,
@@ -1836,6 +1929,12 @@ export function SessionWorkspace({
               onAttach={() => void attachPath(preview.path, preview.token, true)}
               geometry={preferences.filesWindow}
               onGeometry={(next) => setPreferences((value) => ({ ...value, filesWindow: next }))}
+              edit={{
+                startEditing: !!preview.edit,
+                onDirtyChange: editGuard.onDirtyChange,
+                onTellAgent: tellAgentAboutEdit,
+                leavePrompt: editGuard.leavePrompt,
+              }}
             />
           )}
         </ImageSessionContext.Provider>

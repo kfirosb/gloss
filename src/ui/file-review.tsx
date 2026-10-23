@@ -9,6 +9,7 @@ import {
 } from '../core/language-settings.js';
 import { RichText } from './rich-text.js';
 import { errorMessage } from './error-message.js';
+import { isSecretFileName } from '../core/file-edits.js';
 type Mode = 'summary' | 'translation';
 function SavedMark() {
   return (
@@ -38,7 +39,7 @@ export function FileReview({
   const { relativePath, version, state } = preview;
   useEffect(() => {
     // Only text previews show the chips, so other files need no status request.
-    if (!version || state !== 'text') return;
+    if (!version || state !== 'text' || isSecretFileName(relativePath)) return;
     const controller = new AbortController();
     client
       .fileReviewStatus(relativePath, version, controller.signal)
@@ -87,7 +88,9 @@ export function FileReview({
     }
   };
   const code = mode === 'summary' ? languageSettings.assist : languageSettings.reply;
-  if (preview.state !== 'text' || !preview.text?.trim()) return <>{children}</>;
+  // Environment and key files keep their content local: no TL;DR or translation is offered.
+  if (preview.state !== 'text' || !preview.text?.trim() || isSecretFileName(preview.relativePath))
+    return <>{children}</>;
   return (
     <>
       <div className="file-review-controls" aria-label="File review tools">

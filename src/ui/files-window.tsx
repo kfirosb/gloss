@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import type { LanguageSettings } from '../core/language-settings.js';
-import { FilePreviewPane } from './file-browser.js';
+import { FilePreviewPane, type FileEditControls } from './file-browser.js';
 import {
   clampFilesWindow,
   defaultFilesWindow,
@@ -140,6 +140,7 @@ export function FilesWindow({
   onAttach,
   geometry,
   onGeometry,
+  edit,
 }: {
   client: SessionClient;
   languageSettings: LanguageSettings;
@@ -151,6 +152,7 @@ export function FilesWindow({
   onAttach(): void;
   geometry: FilesWindowGeometry | undefined;
   onGeometry(next: FilesWindowGeometry): void;
+  edit: FileEditControls;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
@@ -233,7 +235,9 @@ export function FilesWindow({
         </button>
       </div>
       <div className="files-window-preview">
+        {/* Keyed by path: another file starts with its own preview and editor state. */}
         <FilePreviewPane
+          key={path}
           client={client}
           languageSettings={languageSettings}
           path={path}
@@ -241,6 +245,7 @@ export function FilesWindow({
           attachError={attachError}
           attached={attached}
           onAttach={onAttach}
+          edit={edit}
         />
       </div>
       {!expanded && (

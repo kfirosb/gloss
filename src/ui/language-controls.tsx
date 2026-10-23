@@ -7,6 +7,7 @@ import {
   languageShortCode,
   needsReplyTranslation,
   needsSendTranslation,
+  type LanguageField,
   type LanguageOverride,
   type LanguageSettings,
 } from '../core/language-settings.js';
@@ -39,7 +40,7 @@ export type SessionLanguage = {
   override: LanguageOverride;
   effective: LanguageSettings;
 };
-const labels: Record<keyof LanguageSettings, [string, string]> = {
+const labels: Record<LanguageField, [string, string]> = {
   write: ['I write in', 'Sets the composer direction'],
   send: ['Send to the agent in', 'What the coding session receives'],
   reply: ['Show agent replies in', 'English shows the original text, no translation'],
@@ -56,7 +57,7 @@ function Fields({
   idPrefix,
 }: {
   value: LanguageSettings;
-  onChange(field: keyof LanguageSettings, code: string): void;
+  onChange(field: LanguageField, code: string): void;
   idPrefix: string;
 }) {
   return (
@@ -81,12 +82,39 @@ function Fields({
     </>
   );
 }
+const READING_ONLY_LABEL = 'Translate only while reading translated';
+const READING_ONLY_HINT =
+  'Replies are translated only while the Translated or Split view is open; others stay in English until you press Translate';
+/** The "translate only while reading" switch, shared by the defaults dialog and the session menu. */
+function ReadingOnlyField({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange(checked: boolean): void;
+}) {
+  return (
+    <div className="language-field">
+      <label>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />{' '}
+        {READING_ONLY_LABEL}
+      </label>
+      <small>{READING_ONLY_HINT}</small>
+    </div>
+  );
+}
 export function translationSummary(s: LanguageSettings) {
   const out = needsSendTranslation(s),
     back = needsReplyTranslation(s);
+  // Reply translation then follows the Live Conversation view instead of running for every reply.
+  const viewDependent = back && s.translateOnlyWhileReading === true;
+  const replies = !back
+    ? 'shown as is, formatted'
+    : `translated to ${languageName(s.reply)}${viewDependent ? ' while the Translated or Split view is open' : ''}`;
   return {
     on: out || back,
-    text: `You type ${languageName(s.write)} → ${out ? 'translated to' : 'sent as is in'} ${languageName(s.send)}. Agent replies → ${back ? 'translated to ' + languageName(s.reply) : 'shown as is, formatted'}.`,
+    viewDependent,
+    text: `You type ${languageName(s.write)} → ${out ? 'translated to' : 'sent as is in'} ${languageName(s.send)}. Agent replies → ${replies}.`,
   };
 }
 export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClose(): void }) {
@@ -129,11 +157,17 @@ export function LanguageDefaultsDialog({ open, onClose }: { open: boolean; onClo
           <h3 id={id + 'languages'}>Languages</h3>
           <p>Every new session starts with these. You can change them per session later.</p>
           {value && (
-            <Fields
-              idPrefix={id}
-              value={value}
-              onChange={(f, c) => setValue({ ...value, [f]: c })}
-            />
+            <>
+              <Fields
+                idPrefix={id}
+                value={value}
+                onChange={(f, c) => setValue({ ...value, [f]: c })}
+              />
+              <ReadingOnlyField
+                checked={value.translateOnlyWhileReading === true}
+                onChange={(checked) => setValue({ ...value, translateOnlyWhileReading: checked })}
+              />
+            </>
           )}
         </section>
         {launch && <LaunchSettingsFields value={launch} onChange={setLaunch} />}
@@ -262,12 +296,12 @@ export function SessionLanguageControl({
   const summary = translationSummary(settings);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const latest = useRef<LanguageOverride | null>(null);
-  const change = (field: keyof LanguageSettings, code: string) => {
+  const change = (patch: LanguageOverride) => {
     queue.current = queue.current.then(async () => {
       try {
         setError('');
         const base = latest.current ?? (await client.language()).override;
-        const next = { ...base, [field]: code };
+        const next = { ...base, ...patch };
         const result = await client.setLanguage(next);
         latest.current = result.override ?? next;
       } catch (e) {
@@ -290,8 +324,15 @@ export function SessionLanguageControl({
   };
   return (
     <div className="session-language" ref={root} dir="ltr">
-      <span className={'translation-indicator' + (summary.on ? ' on' : '')}>
-        {summary.on ? 'Translation on' : 'No translation'}
+      <span
+        className={'translation-indicator' + (summary.on ? ' on' : '')}
+        title={summary.viewDependent ? READING_ONLY_HINT : undefined}
+      >
+        {summary.on
+          ? summary.viewDependent
+            ? 'Translation on while reading'
+            : 'Translation on'
+          : 'No translation'}
       </span>
       <button
         type="button"
@@ -313,7 +354,11 @@ export function SessionLanguageControl({
         >
           <h3 id={id + 'title'}>Languages for this session</h3>
           <p>Applies to this session only.</p>
-          <Fields idPrefix={id} value={settings} onChange={(f, c) => change(f, c)} />
+          <Fields idPrefix={id} value={settings} onChange={(f, c) => change({ [f]: c })} />
+          <ReadingOnlyField
+            checked={settings.translateOnlyWhileReading === true}
+            onChange={(checked) => change({ translateOnlyWhileReading: checked })}
+          />
           <p className="language-flow">{summary.text}</p>
           {error && <p role="alert">{error}</p>}
           <div className="language-actions">

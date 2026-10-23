@@ -23,6 +23,7 @@ import { attachmentRoot, loadImage, imageMime } from './attachments.js';
 import { readReferencePrefix, requireContained, validateFileReference } from './file-content.js';
 import { searchFiles } from './file-search.js';
 import { createFileBrowser } from './file-browser.js';
+import { createFileEditor } from './file-editor.js';
 export interface RuntimeFileRegistry extends FileRegistry {
   importLegacyWorkspace(sessionId: string, ids: string[]): Promise<void>;
 }
@@ -111,6 +112,7 @@ export function createFileRegistry(options: {
   };
   const registry: RuntimeFileRegistry = {
     ...createFileBrowser((id) => session(id).canonicalRoot, nestedWorktrees),
+    ...createFileEditor((id) => session(id).canonicalRoot),
     async upload(id, input) {
       await restore(id);
       if (

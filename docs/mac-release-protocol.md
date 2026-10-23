@@ -156,7 +156,7 @@ gh release create v<version> --draft --verify-tag --title "Gloss <version>" --no
   Gloss-<version>-x86_64.AppImage Gloss-<version>-x86_64.AppImage.sha256
 ```
 
-Check the uploaded asset list against that expected set (`gh release view v<version> --json assets`), then publish in one step with `gh release edit v<version> --draft=false`. Never publish a release with assets missing: a published release reaches every 0.22+ user within a week, because Gloss checks for updates at most every 7 days.
+Check the uploaded asset list against that expected set (`gh release view v<version> --json assets`), then publish in one step with `gh release edit v<version> --draft=false`. Never publish a release with assets missing: a published release reaches every 0.23+ user within a week, because Gloss checks for updates at most every 7 days.
 
 Describe the result as a **local DMG release**. Do not claim it was uploaded. Builds are Developer ID signed and notarized; say which `spctl` result each DMG's app gave, and if a build is only signed or only ad-hoc signed say so and do not deliver it as a release. The current app requires macOS 13+ on Apple Silicon (`-arm64.dmg`) or Intel (`-x64.dmg`), and users need their own installed/authenticated Codex or Claude CLI. File search requires ripgrep. Recheck these requirements for later releases.
 
@@ -173,7 +173,7 @@ git commit -am 'Update gloss to <version>'
 git push
 ```
 
-`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. The cask does not declare `auto_updates true`: with it `brew upgrade` skips Gloss, and Homebrew users on 0.21.x and earlier (which have no in-app updater) would never get a newer version. Consider adding it in a later release, once most users run 0.22 or newer. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
+`brew audit --online` downloads the DMG for this Mac's architecture and verifies its pinned checksum; the other architecture's checksum is only checked against the `.sha256` asset by the script. The cask does not declare `auto_updates true`: with it `brew upgrade` skips Gloss, and Homebrew users on 0.21.x and earlier (which have no in-app updater) would never get a newer version. Consider adding it in a later release, once most users run 0.23 or newer. Pushing the tap publishes the version to every `brew upgrade`, so do it only when the release itself is meant to be public. The cask template is `renderCask` in `scripts/homebrew-cask.mjs`; change requirements, caveats or the zap list there, not in the tap. To try the cask without touching the installed app, install it into a scratch folder: `brew install --cask --appdir=<scratch dir> kfirosb/tap/gloss`, then `brew uninstall --cask gloss`.
 
 ## 8. Replace the installed app only when requested
 

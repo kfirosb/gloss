@@ -215,7 +215,8 @@ test('discussion cleanup preserves new files and review preserves reference iden
   });
   await expect(page.locator('.composer .attachment-card')).toHaveCount(2);
   release!();
-  await expect(input).toHaveValue('');
+  // The reference added during the discussion edited the text, so the composer keeps it as unsent work.
+  await expect(input).toHaveValue('Discuss first \u200E@File 2 ');
   await expect(page.locator('.composer .attachment-card')).toHaveCount(1);
   await expect(page.locator('.composer .attachment-card')).toContainText('File 2');
   await page.getByRole('button', { name: 'Add to answer', exact: true }).click();

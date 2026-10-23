@@ -61,6 +61,23 @@ describe('portable workflow', () => {
     });
     await app.workflow.close();
   });
+  it('records what the user wrote on a composer delivery, never on a prepared instruction', async () => {
+    const app = await createTestWorkflow();
+    app.language.translationReply = 'Check the build';
+    const write = app.workflow.snapshot().languageSettings?.write;
+    await app.workflow.sendComposer('own-words', 'בדוק את הבנייה');
+    const draft = await app.workflow.prepare();
+    await app.workflow.send(draft.id, draft.revision);
+    const [composer, prepared] = app.workflow.snapshot().deliveries;
+    expect(composer).toMatchObject({
+      draftId: 'composer-own-words',
+      englishText: 'Check the build',
+      written: { language: write, text: 'בדוק את הבנייה' },
+    });
+    expect(prepared).not.toHaveProperty('written');
+    expect(app.store.load('conversation-1')?.deliveries[0]?.written).toEqual(composer?.written);
+    await app.workflow.close();
+  });
   it('removes only the confirmed sent draft and persists its removal', async () => {
     const app = await createTestWorkflow();
     const draft = await app.workflow.prepare();

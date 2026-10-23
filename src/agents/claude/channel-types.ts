@@ -21,7 +21,7 @@ export type ChannelRecord = {
   port: number;
   token: string;
   /**
-   * The path the helper opened its ledger by. Helpers before 0.22 never wrote it and always used the old data
+   * The path the helper opened its ledger by. Helpers before 0.23 never wrote it and always used the old data
    * folder's ledger; Gloss keeps that folder's ledger link while any such helper lives.
    */
   ledgerPath?: string;

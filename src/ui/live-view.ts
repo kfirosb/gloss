@@ -1,12 +1,6 @@
-export type LiveView = 'translated' | 'original' | 'split' | 'terminal' | 'activity';
+import type { LiveView } from '../core/language-settings.js';
+export { LIVE_VIEWS, type LiveView } from '../core/language-settings.js';
 export type ConversationView = 'translated' | 'original';
-export const LIVE_VIEWS: readonly LiveView[] = [
-  'translated',
-  'original',
-  'split',
-  'terminal',
-  'activity',
-];
 export const CONVERSATION_VIEWS: readonly ConversationView[] = ['translated', 'original'];
 export const LIVE_VIEW_LABELS: Record<LiveView, string> = {
   translated: 'Translated',

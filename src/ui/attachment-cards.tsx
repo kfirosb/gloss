@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { Attachment } from '../core/contracts.js';
+import { attachmentKindLabel } from '../core/content-policy.js';
 import type { FileContentStatus, SessionClient } from './session-client.js';
 import { errorMessage } from './error-message.js';
 export const ImageSessionContext = createContext<SessionClient | null>(null);
@@ -95,6 +96,7 @@ function ReferenceCard({
   const image = file.mime.startsWith('image/');
   const label = ('kind' in file ? file.kind === 'image' : image) ? 'Image' : 'File';
   const number = 'index' in file ? file.index : undefined;
+  const kindLabel = label === 'File' ? attachmentKindLabel(file.name) : undefined;
   return (
     <figure
       className={'attachment-card' + (image && onRemove ? ' image-thumb' : '')}
@@ -104,6 +106,7 @@ function ReferenceCard({
       {image && client && <Preview file={file} client={client} />}
       <figcaption>
         {label} {number ?? '—'}
+        {kindLabel && <span className="attachment-kind"> · {kindLabel}</span>}
       </figcaption>
       <strong>{file.name}</strong>
       {originalPath && <span className="reference-path">{originalPath}</span>}

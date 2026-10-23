@@ -48,12 +48,17 @@ export async function readReferencePrefix(file: FileReference, length = 16): Pro
 }
 // Stream a finite snapshot of the file's size with constant per-read memory. An
 // expanding file cannot keep a download or context extraction running forever.
-export async function* readReferenceChunks(file: FileReference): AsyncGenerator<Buffer> {
+// `range` (inclusive byte offsets) limits the read to part of that snapshot.
+export async function* readReferenceChunks(
+  file: FileReference,
+  range?: { start: number; end: number },
+): AsyncGenerator<Buffer> {
   const { handle, info } = await openReference(file);
   try {
-    let position = 0;
-    while (position < info.size) {
-      const chunk = Buffer.alloc(Math.min(65536, info.size - position));
+    let position = range?.start ?? 0;
+    const limit = range ? Math.min(range.end + 1, info.size) : info.size;
+    while (position < limit) {
+      const chunk = Buffer.alloc(Math.min(65536, limit - position));
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
       if (!bytesRead) throw new Error('Referenced file changed while reading');
       position += bytesRead;

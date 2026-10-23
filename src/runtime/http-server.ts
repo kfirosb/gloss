@@ -1,4 +1,4 @@
-import { MAX_UPLOAD_REQUEST_BYTES } from '../core/content-policy.js';
+import { MAX_FILE_EDIT_REQUEST_BYTES, MAX_UPLOAD_REQUEST_BYTES } from '../core/content-policy.js';
 import { parseMoveRequest } from './claude-move.js';
 import { MAX_RUN_COMMAND_LENGTH } from '../core/command-text.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -17,6 +17,13 @@ import { isLoopbackHost, isLoopbackOrigin, LOOPBACK_HOST } from './loopback.js';
 import { createAsyncCache } from '../core/async-cache.js';
 import { recordOf } from '../core/json-record.js';
 import { readOutputWindow, tailOutput } from './output-tail.js';
+import {
+  createMediaLinks,
+  MEDIA_LINK_PREFIX,
+  serveMediaLink,
+  type MediaLinks,
+} from './media-links.js';
+import { FileEditConflict } from './file-editor.js';
 
 const respond = (res: ServerResponse, status: number, value: unknown) => {
   res.statusCode = status;
@@ -96,6 +103,44 @@ async function attachmentRoute(
   }
   return false;
 }
+/**
+ * Editing and creating text files in the session folder. The registry scopes every path (see file-editor.ts);
+ * this route only reads the untrusted body and maps refusals the UI can act on to 409.
+ * Request and response bodies carry file contents, so nothing here is logged.
+ */
+async function fileEditRoute(
+  files: NonNullable<Application['files']>,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+  route: string,
+  url: URL,
+) {
+  const editable = route === 'files/editable' && req.method === 'GET';
+  const save = route === 'files/edit' && req.method === 'PUT';
+  const create = route === 'files/create' && req.method === 'POST';
+  if (!editable && !save && !create) return false;
+  res.setHeader('cache-control', 'no-store');
+  try {
+    if (editable) {
+      respond(res, 200, await files.readEditable(id, url.searchParams.get('path') ?? ''));
+      return true;
+    }
+    const body = recordOf(await readBody(req, MAX_FILE_EDIT_REQUEST_BYTES));
+    if (!body || typeof body.path !== 'string') throw new Error('Invalid file edit request');
+    respond(
+      res,
+      200,
+      save
+        ? await files.saveFile(id, body.path, body.text, body.baseVersion)
+        : await files.createFile(id, body.path, body.text),
+    );
+  } catch (error) {
+    if (!(error instanceof FileEditConflict)) throw error;
+    respond(res, 409, { error: error.message, code: error.code });
+  }
+  return true;
+}
 // Saved records carry the repository's project key (git common dir) so worktrees group under their repository.
 const projectMetadataCache = createAsyncCache<string, ProjectMetadata>({ ttlMs: 30_000 });
 function cachedProjectMetadata(path: string) {
@@ -114,6 +159,7 @@ async function sessionRoute(
   res: ServerResponse,
   path: string,
   url: URL,
+  mediaLinks: MediaLinks,
 ) {
   if (path !== '/api/sessions' && !path.startsWith('/api/sessions/')) return false;
   if (!app.sessions) {
@@ -269,6 +315,7 @@ async function sessionRoute(
     respond(res, 200, { id: imageId, name, mime, size });
     return true;
   }
+  if (app.files && (await fileEditRoute(app.files, req, res, id, route, url))) return true;
   if (app.files) {
     const fileMetadata = /^files\/([^/]+)\/metadata$/.exec(route);
     if (fileMetadata && req.method === 'GET') {
@@ -352,6 +399,18 @@ async function sessionRoute(
       } finally {
         res.off('close', cancel);
       }
+      return true;
+    }
+    if (route === 'files/stream-link' && req.method === 'POST') {
+      const body = recordOf(await readBody(req, 8192));
+      const relativePath = typeof body?.path === 'string' ? body.path : '';
+      const { file, identity } = await app.files.streamable(
+        id,
+        relativePath,
+        AbortSignal.timeout(10_000),
+      );
+      res.setHeader('cache-control', 'no-store');
+      respond(res, 200, mediaLinks.issue(id, relativePath, identity, file.name));
       return true;
     }
     if (
@@ -656,6 +715,33 @@ async function launchFolderRoute(
   respond(res, 200, { folder: real });
   return true;
 }
+/** Media links authenticate by their token alone; see media-links.ts for the boundary. */
+async function mediaLinkRoute(
+  app: Application,
+  links: MediaLinks,
+  req: IncomingMessage,
+  res: ServerResponse,
+  path: string,
+) {
+  if (!path.startsWith(MEDIA_LINK_PREFIX)) return false;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    respond(res, 405, { error: 'Method not allowed', code: 'bad-request' });
+    return true;
+  }
+  const link = links.use(path);
+  if (!link || !app.files) {
+    respond(res, 404, { error: 'Media link expired; reopen the preview', code: 'not-found' });
+    return true;
+  }
+  try {
+    await serveMediaLink(app.files, link, req, res);
+  } catch {
+    if (res.headersSent || res.destroyed) res.destroy();
+    // File-system errors name absolute paths; the page only needs to know to reopen.
+    else respond(res, 404, { error: 'Media unavailable; reopen the preview', code: 'not-found' });
+  }
+  return true;
+}
 async function staticRoute(req: IncomingMessage, res: ServerResponse, path: string) {
   if (req.method !== 'GET' || path.startsWith('/api/')) return false;
   if (path.includes('..')) {
@@ -683,6 +769,7 @@ export async function startServer(
   application: Application,
   options: { port?: number; host?: string } = {},
 ) {
+  const mediaLinks = createMediaLinks();
   const server = createServer(async (req, res) => {
     try {
       const host = req.headers.host ?? '';
@@ -693,6 +780,7 @@ export async function startServer(
         return respond(res, 403, { error: 'Origin is not allowed', code: 'origin-rejected' });
       const url = new URL(req.url ?? '/', 'http://' + host);
       if (await staticRoute(req, res, url.pathname)) return;
+      if (await mediaLinkRoute(application, mediaLinks, req, res, url.pathname)) return;
       if (req.headers.authorization !== 'Bearer ' + application.capability)
         return respond(res, 401, { error: 'Unauthorized', code: 'unauthorized' });
       if (
@@ -819,7 +907,7 @@ export async function startServer(
       if (await projectRoute(application, req, res, url.pathname, url)) return;
       if (await launchFolderRoute(application, req, res, url.pathname)) return;
       if (await launchRoute(application, req, res, url.pathname)) return;
-      if (await sessionRoute(application, req, res, url.pathname, url)) return;
+      if (await sessionRoute(application, req, res, url.pathname, url, mediaLinks)) return;
       if (
         url.pathname.startsWith('/api/') &&
         (await attachmentRoute(application, req, res, url.pathname.slice('/api/'.length)))
@@ -898,6 +986,7 @@ export async function startServer(
           application.capability,
         close: () =>
           new Promise((done) => {
+            mediaLinks.clear();
             server.close(() => done());
             server.closeAllConnections();
           }),

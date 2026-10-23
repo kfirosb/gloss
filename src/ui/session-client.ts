@@ -12,6 +12,12 @@ import type { Action } from '../runtime/protocol.js';
 import type { OutputTailEvent, OutputWindow } from '../runtime/output-tail.js';
 import type { ActivityEvent } from '../core/activity-contracts.js';
 import { recordOf } from '../core/json-record.js';
+import {
+  FILE_EDIT_CONFLICT_CODES,
+  type EditableFile,
+  type FileEditConflictCode,
+  type SavedFile,
+} from '../core/file-edits.js';
 
 import {
   WorkspaceConflict,
@@ -50,6 +56,26 @@ export async function sessionRequest<T>(url: string, init: RequestInit = {}): Pr
     throw new WorkspaceConflict(body.current);
   if (!response.ok) throw new Error(body.error ?? 'Request failed');
   return body as T;
+}
+/** A save or create the server refused because of what is on disk now; the UI offers a way forward. */
+export class FileEditConflictError extends Error {
+  constructor(
+    message: string,
+    readonly code: FileEditConflictCode,
+  ) {
+    super(message);
+  }
+}
+/** Sends a file edit; file text travels only in the request body and is never put in a URL. */
+async function fileEditRequest(url: string, init: RequestInit): Promise<SavedFile> {
+  const response = await fetch(url, { ...init, headers: authHeaders() });
+  const body = recordOf(await response.json().catch(() => null));
+  const code = FILE_EDIT_CONFLICT_CODES.find((candidate) => candidate === body?.code);
+  const message = typeof body?.error === 'string' ? body.error : 'Saving failed';
+  if (response.status === 409 && code) throw new FileEditConflictError(message, code);
+  if (!response.ok || typeof body?.version !== 'string' || typeof body.relativePath !== 'string')
+    throw new Error(message);
+  return { relativePath: body.relativePath, version: body.version };
 }
 /** Tells the server the user has looked at responses up to `sequence` for this session. */
 export const markSessionSeen = (sessionId: string, sequence: number) =>
@@ -218,11 +244,40 @@ export class SessionClient {
       this.base + '/files/locate?path=' + encodeURIComponent(relativePath),
     );
   }
+  /** The full text and version of a file the user is about to edit. */
+  readEditableFile(relativePath: string, signal: AbortSignal) {
+    return sessionRequest<EditableFile>(
+      this.base + '/files/editable?path=' + encodeURIComponent(relativePath),
+      { signal },
+    );
+  }
+  /** Saves only if the file still matches `baseVersion`; otherwise throws FileEditConflictError. */
+  saveFile(relativePath: string, text: string, baseVersion: string) {
+    return fileEditRequest(this.base + '/files/edit', {
+      method: 'PUT',
+      body: JSON.stringify({ path: relativePath, text, baseVersion }),
+    });
+  }
+  /** Creates a new file (and missing folders); never replaces an existing one. */
+  createFile(relativePath: string, text = '') {
+    return fileEditRequest(this.base + '/files/create', {
+      method: 'POST',
+      body: JSON.stringify({ path: relativePath, text }),
+    });
+  }
   previewFile(relativePath: string, signal: AbortSignal) {
     return sessionRequest<FilePreview>(
       this.base + '/files/preview?path=' + encodeURIComponent(relativePath),
       { signal },
     );
+  }
+  /** A short-lived URL for one video, audio, PDF or SVG file that media elements can load without headers. */
+  streamLink(relativePath: string, signal: AbortSignal) {
+    return sessionRequest<{ url: string }>(this.base + '/files/stream-link', {
+      method: 'POST',
+      body: JSON.stringify({ path: relativePath }),
+      signal,
+    });
   }
   async previewMedia(
     relativePath: string,

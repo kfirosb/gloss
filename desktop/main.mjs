@@ -246,6 +246,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
+      // Enables Chromium's built-in PDF viewer for the Files preview; no other plugins exist.
+      plugins: true,
       preload: join(appRoot, 'desktop/preload.cjs'),
     },
   });

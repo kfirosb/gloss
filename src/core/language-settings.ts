@@ -4,6 +4,11 @@ export interface LanguageSettings {
   send: LanguageCode;
   reply: LanguageCode;
   assist: LanguageCode;
+  /**
+   * Replies are translated automatically only while the session's Live Conversation shows them translated
+   * (`showsTranslatedReplies`); others stay in English until the user presses Translate. Absent means off.
+   */
+  translateOnlyWhileReading?: boolean;
 }
 export type LanguageOverride = Partial<LanguageSettings>;
 export const LANGUAGE_FIELDS = [
@@ -12,6 +17,7 @@ export const LANGUAGE_FIELDS = [
   'reply',
   'assist',
 ] as const satisfies readonly (keyof LanguageSettings)[];
+export type LanguageField = (typeof LANGUAGE_FIELDS)[number];
 export interface LanguageEntry {
   code: LanguageCode;
   name: string;
@@ -61,6 +67,15 @@ const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
   return value as Record<string, unknown>;
 };
+/** Copies the optional reading flag when present; anything but a boolean is invalid. */
+function readingFlag(
+  input: Record<string, unknown>,
+): Pick<LanguageSettings, 'translateOnlyWhileReading'> {
+  const flag = input.translateOnlyWhileReading;
+  if (flag === undefined) return {};
+  if (typeof flag !== 'boolean') throw invalid();
+  return { translateOnlyWhileReading: flag };
+}
 export function validateLanguageSettings(value: unknown): LanguageSettings {
   const input = record(value);
   const result = {} as LanguageSettings;
@@ -68,7 +83,7 @@ export function validateLanguageSettings(value: unknown): LanguageSettings {
     if (!isSupportedLanguage(input[field])) throw invalid();
     result[field] = input[field] as LanguageCode;
   }
-  return result;
+  return { ...result, ...readingFlag(input) };
 }
 export function validateLanguageOverride(value: unknown): LanguageOverride {
   const input = record(value);
@@ -78,7 +93,7 @@ export function validateLanguageOverride(value: unknown): LanguageOverride {
     if (!isSupportedLanguage(input[field])) throw invalid();
     result[field] = input[field] as LanguageCode;
   }
-  return result;
+  return { ...result, ...readingFlag(input) };
 }
 export interface LanguageSettingsStore {
   readLanguageDefaults(): LanguageSettings;
@@ -95,6 +110,23 @@ export function legacyLanguageSettings(language: string): LanguageSettings {
   return { write: code, send: 'en', reply: code, assist: code };
 }
 export const needsReplyTranslation = (s: LanguageSettings) => s.reply !== 'en';
+/** The tabs of a session's Live Conversation; the UI reports the selected one so translation can follow it. */
+export type LiveView = 'translated' | 'original' | 'split' | 'terminal' | 'activity';
+export const LIVE_VIEWS: readonly LiveView[] = [
+  'translated',
+  'original',
+  'split',
+  'terminal',
+  'activity',
+];
+export const isLiveView = (value: unknown): value is LiveView =>
+  LIVE_VIEWS.some((view) => view === value);
+/** Views whose reader sees translated replies: Split shows the conversation beside the terminal. */
+export const showsTranslatedReplies = (view: LiveView | undefined) =>
+  view === 'translated' || view === 'split';
+/** Whether a reply arriving now is translated without the user asking; an unreported view is not being read. */
+export const autoTranslatesReplies = (s: LanguageSettings, view: LiveView | undefined) =>
+  needsReplyTranslation(s) && (!s.translateOnlyWhileReading || showsTranslatedReplies(view));
 export const needsSendTranslation = (s: LanguageSettings) => s.write !== s.send;
 export const languageName = (value: string) => resolveLanguage(value)?.name ?? 'English';
 export const languageDirection = (value: string): 'rtl' | 'ltr' =>
