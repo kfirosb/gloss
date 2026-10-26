@@ -1,6 +1,6 @@
 {
   "name": "gloss",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": true,
   "description": "Work with Codex and Claude Code in your own language",
   "homepage": "https://github.com/kfirosb/gloss",
