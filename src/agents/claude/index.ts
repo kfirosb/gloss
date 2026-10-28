@@ -23,6 +23,7 @@ import {
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
 import type { OpenSessionScan } from '../../core/session-catalog.js';
 import {
+  belongsToProject,
   claudeConfigDir,
   projectIdentity,
   Transcript,
@@ -494,7 +495,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       const targets: Target[] = [];
       for (const r of await readSessionRecords(config)) {
         try {
-          if ((await projectIdentity(r.cwd)) === project)
+          if (await belongsToProject(project, r.cwd))
             targets.push({ agent: 'claude', sessionRef: r.sessionId, projectId: project });
         } catch {
           /* missing project */

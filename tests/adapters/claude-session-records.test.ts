@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  projectSessionRecords,
   readSessionRecord,
   readSessionRecords,
   sessionRecordPath,
@@ -117,4 +118,26 @@ it('reads one process with ps in UTC and the C locale, and rejects anything but 
 
 it('quotes a folder for a shown shell command', () => {
   expect(shellQuote("/Users/me/it's here")).toBe(`'/Users/me/it'"'"'s here'`);
+});
+
+it('keeps a session that Claude moved into one of its worktrees, not one in another folder', async () => {
+  const dir = await config();
+  const project = join(dir, 'project');
+  const worktree = join(project, '.claude', 'worktrees', 'fix');
+  const sibling = join(dir, 'project-other');
+  await mkdir(worktree, { recursive: true });
+  await mkdir(sibling);
+  await writeFile(sessionRecordPath(dir, 4242), JSON.stringify({ ...base, cwd: worktree }));
+  await writeFile(
+    sessionRecordPath(dir, 4243),
+    JSON.stringify({ ...base, pid: 4243, cwd: sibling }),
+  );
+  await writeFile(sessionRecordPath(dir, 4244), JSON.stringify({ ...base, pid: 4244, cwd: dir }));
+  await mkdir(join(project, 'src'));
+  await writeFile(
+    sessionRecordPath(dir, 4245),
+    JSON.stringify({ ...base, pid: 4245, cwd: join(project, 'src') }),
+  );
+  const found = await projectSessionRecords(dir, base.sessionId, project);
+  expect(found.map((record) => record.pid)).toEqual([4242]);
 });
