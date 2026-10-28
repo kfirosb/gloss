@@ -21,7 +21,8 @@ export function nextStashStep(start: StashStart, presses: 1 | 2, now: ReadableWi
   // Without the marker only an empty box with no stash may look unchanged: Ctrl+S on it does nothing.
   return presses === 1 && !start.stashed && start.emptyAtPrompt ? 'paste' : 'wait';
 }
-export const INPUT_UNREADABLE_REASON = 'Gloss couldn’t read the terminal’s input; nothing was sent';
+export const INPUT_UNREADABLE_REASON =
+  'Gloss doesn’t recognise what’s drawn under Claude’s input box (a popup or menu may be open); nothing was sent';
 export const INPUT_NOT_READY_REASON =
   'The terminal’s input wasn’t ready for the message; nothing was sent';
 /** The input window changed between the cursor check and the paste: the user may be typing in the terminal. */

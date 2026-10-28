@@ -56,6 +56,7 @@ import {
   NARROW_READINGS,
   STASH_FIXTURE_VERSIONS,
   STASH_READINGS,
+  STATUSLINE_FIXTURE_VERSIONS,
   fixtureTerminal,
   readCursor,
   readRecord,
@@ -686,6 +687,58 @@ describe('typing into the terminal', () => {
     expect(tmuxCalls).toEqual([]);
     expect(log.calls).toEqual(['capture', 'cursor']);
   });
+  describe.each(STATUSLINE_FIXTURE_VERSIONS)(
+    'under a custom status line on Claude %s',
+    (version) => {
+      it('stashes, pastes and presses Enter on an empty box under a status line', async () => {
+        const { terminal, log } = fixtureTerminal(version, 'statusline-empty', {
+          afterStash: ['statusline-empty-after'],
+          pastedState: 'statusline-typed',
+        });
+        const result = await send(terminal, 'hello', () => void log.calls.push('typing'));
+        expect(result).toEqual({ state: 'typed', nativeAfterRevision: 1234 });
+        expect(keysAndTyping(log.calls)).toEqual([
+          'key:C-s',
+          'typing',
+          'paste:gloss-delivery-1',
+          'enter',
+        ]);
+        expect(log.loaded).toEqual(['hello']);
+      });
+      it('refuses when a status row changes on every read', async () => {
+        const { terminal, log } = fixtureTerminal(version, 'statusline-empty', {
+          afterStash: ['statusline-empty-after'],
+          pastedState: 'statusline-typed',
+        });
+        const captureRows = terminal.captureRows.bind(terminal);
+        let reads = 0;
+        terminal.captureRows = async (start, end) => {
+          reads += 1;
+          const rows = (await captureRows(start, end)).split('\n');
+          const status = rows.findIndex((row) => row.includes('Context'));
+          if (status >= 0) rows[status] = `${rows[status]} ${reads}`;
+          return rows.join('\n');
+        };
+        const result = await send(terminal, 'hello');
+        expect(result).toEqual({
+          state: 'failed',
+          reason: INPUT_NOT_READY_REASON,
+          openTerminal: true,
+        });
+        expect(log.calls.some((call) => call.startsWith('paste:'))).toBe(false);
+      });
+      it('names what it saw when the rows under the box are a popup', async () => {
+        const { terminal, log } = fixtureTerminal(version, 'statusline-at-popup');
+        const result = await send(terminal, 'hello');
+        expect(result).toEqual({
+          state: 'failed',
+          reason: INPUT_UNREADABLE_REASON,
+          openTerminal: true,
+        });
+        expect(log.calls).not.toContain('key:C-s');
+      });
+    },
+  );
 });
 
 const user = (
