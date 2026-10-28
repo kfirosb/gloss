@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import * as pty from 'node-pty';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type RawData } from 'ws';
 import { isLoopbackOrigin, rejectUpgrade } from './loopback.js';
 import type { LaunchRecord } from './session-launcher.js';
 import { isTerminalWheel } from '../core/terminal-wheel.js';
@@ -136,6 +136,16 @@ export function createTerminalBridge(options: {
         let proc: PtyProcess | undefined;
         // A malformed or oversized client frame makes ws emit 'error'; without a listener that crashes the process.
         ws.on('error', () => ws.terminate());
+        // The view sends its size the moment the socket opens, while tmux is still being asked which session to
+        // attach. Frames that arrive before the attach client exists wait here and are handled, in order, once it does.
+        // The wait is bounded like the rate limiter's burst: a client that floods before then is dropped.
+        let handle: ((raw: RawData) => void) | undefined;
+        const waiting: RawData[] = [];
+        ws.on('message', (raw) => {
+          if (handle) handle(raw);
+          else if (waiting.length < RATE_BURST) waiting.push(raw);
+          else ws.terminate();
+        });
         ws.on('close', () => {
           closed = true;
           proc?.kill();
@@ -185,7 +195,7 @@ export function createTerminalBridge(options: {
         let tokens = RATE_BURST;
         let last = now();
         let dropped = 0;
-        ws.on('message', (raw) => {
+        handle = (raw) => {
           const t = now();
           tokens = Math.min(RATE_BURST, tokens + ((t - last) * RATE_PER_SECOND) / 1000);
           last = t;
@@ -223,7 +233,8 @@ export function createTerminalBridge(options: {
             pty.resize?.(cols, rows);
             void tmux.resizeWindow(name, cols, rows).catch(() => undefined);
           }
-        });
+        };
+        for (const raw of waiting.splice(0)) handle(raw);
       });
     },
     close() {
