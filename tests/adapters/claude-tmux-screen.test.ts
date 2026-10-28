@@ -174,7 +174,18 @@ describe('Claude input box (synthetic)', () => {
     expect(readInputWindow(window(rule, '❯ ', rule, footer, right('  /mobile')), 1, 2)).toEqual({
       readable: false,
     });
-    // A moved right side with a row under it that is not blank: neither a footer nor a status row.
+    // A footer of three rows, or a moved right side with something under it.
+    expect(
+      readInputWindow(
+        window(rule, '❯ ', rule, footer, right('◐ medium'), right('› stashed')),
+        1,
+        2,
+      ),
+    ).toEqual({ readable: false });
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, footer, right('› stashed'), '  more'), 1, 2),
+    ).toEqual({ readable: false });
+    // A popup-shaped row under a moved right side is not blank either.
     expect(
       readInputWindow(window(rule, '❯ ', rule, footer, right('› stashed'), '    + more'), 1, 2),
     ).toEqual({ readable: false });
