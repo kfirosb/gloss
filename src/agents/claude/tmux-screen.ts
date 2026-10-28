@@ -1,3 +1,5 @@
+import { MAX_PANE_ROW } from '../../runtime/tmux.js';
+
 /** One cell of a `capture-pane -e` line: its character and how it is drawn. */
 export interface ScreenCell {
   char: string;
@@ -208,29 +210,26 @@ export function readInputBox(lines: readonly ScreenLine[]): InputBox {
 /** Rows read above the cursor: for a one-row box, the box's top rule (every captured empty and typed screen). */
 export const INPUT_ROWS_ABOVE_CURSOR = 1;
 /**
- * Rows read below the cursor: the box's bottom rule, Claude's footer (one or two rows), and one more row that shows
- * nothing continues under the footer. In every stash capture on 2.1.296 and 2.1.302 the rule is at cursor + 1 and
- * the footer at cursor + 2; at 200 columns cursor + 3 is blank, and on panes of 80, 60 and 40 columns Claude moves
- * the footer's right side to cursor + 3 and leaves cursor + 4 blank (the `narrow-*` captures). An `@` popup takes the
- * footer's place, and a `/` menu runs on to the pane's bottom.
- */
-export const INPUT_ROWS_BELOW_CURSOR = 4;
-/**
  * The rows around Claude's input box, anchored at the cursor: Claude draws the box right below the conversation, so
- * on a short conversation the pane's last rows are blank. tmux clamps `end` to the pane.
+ * on a short conversation the pane's last rows are blank. The window runs to the pane's bottom because a user's
+ * `statusLine` setting draws any number of rows between the bottom rule and Claude's own footer row (the
+ * `statusline-*` captures), and on a narrow pane Claude moves the footer's right side one row further down (the
+ * `narrow-*` captures). tmux clamps `end` to the pane.
  */
 export const inputWindowRows = (cursorY: number) => ({
   start: Math.max(0, cursorY - INPUT_ROWS_ABOVE_CURSOR),
-  end: cursorY + INPUT_ROWS_BELOW_CURSOR,
+  end: MAX_PANE_ROW,
 });
 /** Claude 2.1.296-2.1.302 show `› stashed` on the footer while its one stash slot holds text (stash fixtures). */
 const STASH_MARKER = /›\s*stashed\b/u;
 /**
- * Claude's normal footer row, told by its shape and never by its words (they change with the permission mode and
- * the notices): indented two cells, then a character that does not open a popup row. An `@` popup row is indented
- * four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`. A new popup shape needs a capture and an entry here.
+ * A row of Claude's footer, told by its shape and never by its words (they change with the permission mode and the
+ * notices): indented two cells, then a character that does not open a popup row. The row may be Claude's own footer
+ * or a row of the user's status line, which is drawn the same way (the `statusline-*` captures). An `@` popup row is
+ * indented four cells (`    + README.md`) and a `/` menu row starts `  ❯ /`. Accepted risk: a popup row that is
+ * indented two cells and starts with another character would pass; a new popup shape needs a capture and an entry here.
  */
-const isFooterRow = (text: string) => /^ {2}[^\s❯+]/u.test(text);
+const isFooterRow = (text: string) => /^ {2}[^\s❯+/]/u.test(text);
 /** Claude ends the footer's right side this many cells before the pane's edge (every stash capture). */
 const FOOTER_RIGHT_MARGIN_CELLS = 2;
 /**
@@ -253,21 +252,25 @@ export interface ReadableWindow {
   /** A one-row normal box that reads empty, with the cursor right after `❯`: a paste lands alone. */
   emptyAtPrompt: boolean;
 }
-/** Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's normal footer (a popup). */
+/** Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's footer, with or without a status line (a popup or menu). */
 export type InputWindow = { readable: false } | ReadableWindow;
 /**
- * The footer's rows under the bottom rule at `rule`: one row followed by a blank one, or a row and its right side
- * moved down followed by a blank one. A row missing from the capture (the pane ends there) counts as blank.
- * Undefined for anything else: a popup, a menu, a footer of three rows.
+ * The footer's rows under the bottom rule at `rule`: every consecutive footer-shaped row (a status line's rows, then
+ * Claude's own) up to the first blank row, which may be a row the capture lacks because the pane ends there, or up
+ * to a right side moved down onto its own row followed by a blank one. Undefined for anything not footer-shaped
+ * before the first blank row: a popup, a menu, or no footer at all.
  */
 function footerRows(lines: readonly ScreenLine[], rule: number): string[] | undefined {
   const bottomRule = lines[rule] ?? [];
-  const first = lines[rule + 1] ?? [];
-  if (!isRule(bottomRule) || !isFooterRow(lineText(first))) return undefined;
-  const second = lines[rule + 2];
-  if (isBlankRow(second)) return [lineText(first)];
-  if (second && isFooterContinuation(second, bottomRule) && isBlankRow(lines[rule + 3]))
-    return [lineText(first), lineText(second)];
+  if (!isRule(bottomRule)) return undefined;
+  const rows: string[] = [];
+  let next = rule + 1;
+  while (isFooterRow(lineText(lines[next] ?? []))) rows.push(lineText(lines[next++] ?? []));
+  if (rows.length === 0) return undefined;
+  const stop = lines[next];
+  if (isBlankRow(stop)) return rows;
+  if (stop && isFooterContinuation(stop, bottomRule) && isBlankRow(lines[next + 1]))
+    return [...rows, lineText(stop)];
   return undefined;
 }
 /**

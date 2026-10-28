@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyScreen, markersFor } from '../../src/runtime/attention-markers.js';
 import {
-  INPUT_ROWS_BELOW_CURSOR,
   inputWindowRows,
   parseStyledScreen,
   readInputBox,
@@ -9,12 +8,17 @@ import {
   screenText,
   type ScreenLine,
 } from '../../src/agents/claude/tmux-screen.js';
+import { MAX_PANE_ROW } from '../../src/runtime/tmux.js';
 import {
   FIXTURE_VERSIONS,
   NARROW_ONE_ROW_FOOTERS,
   NARROW_READINGS,
   STASH_FIXTURE_VERSIONS,
   STASH_READINGS,
+  STATUSLINE_FIXTURE_VERSIONS,
+  STATUSLINE_READINGS,
+  STATUSLINE_UNREADABLE,
+  STATUS_LINE_ROWS,
   readCursor,
   readScreen,
   readWindow,
@@ -139,7 +143,7 @@ describe('Claude input box (synthetic)', () => {
       emptyAtPrompt: false,
     });
   });
-  it('cannot read a window whose rows under the cursor are not a rule and then the normal footer', () => {
+  it('cannot read a window whose rows under the cursor are not a rule and then a footer', () => {
     // No bottom rule right under the cursor: no rule at all, or a box that continues below the cursor.
     expect(readInputWindow(window(rule, '❯ ', '', ''), 1, 2)).toEqual({ readable: false });
     expect(readInputWindow(window(rule, '❯ ', '  more', rule), 1, 2)).toEqual({ readable: false });
@@ -156,8 +160,11 @@ describe('Claude input box (synthetic)', () => {
     ).toEqual({ readable: false });
     expect(readInputWindow(window(rule, '❯ ', rule, ''), 1, 2)).toEqual({ readable: false });
     // A row under the footer that is not its right side moved down: not right-aligned, or shaped like a popup row.
+    // A second row shaped like a footer row is a status line, not a moved right side.
     expect(readInputWindow(window(rule, '❯ ', rule, footer, '  › stashed'), 1, 2)).toEqual({
-      readable: false,
+      readable: true,
+      stashed: true,
+      emptyAtPrompt: true,
     });
     expect(
       readInputWindow(window(rule, '❯ ', rule, footer, right('    + README.md')), 1, 2),
@@ -167,16 +174,9 @@ describe('Claude input box (synthetic)', () => {
     expect(readInputWindow(window(rule, '❯ ', rule, footer, right('  /mobile')), 1, 2)).toEqual({
       readable: false,
     });
-    // A footer of three rows, or a moved right side with something under it.
+    // A moved right side with a row under it that is not blank: neither a footer nor a status row.
     expect(
-      readInputWindow(
-        window(rule, '❯ ', rule, footer, right('◐ medium'), right('› stashed')),
-        1,
-        2,
-      ),
-    ).toEqual({ readable: false });
-    expect(
-      readInputWindow(window(rule, '❯ ', rule, footer, right('› stashed'), '  more'), 1, 2),
+      readInputWindow(window(rule, '❯ ', rule, footer, right('› stashed'), '    + more'), 1, 2),
     ).toEqual({ readable: false });
   });
   it("reads the footer's right side moved to the row under it, as Claude draws it on a narrow pane", () => {
@@ -205,9 +205,69 @@ describe('Claude input box (synthetic)', () => {
       readInputWindow(parsed([rule, '❯ ', rule, footer, right('› stashed')].join('\n')), 1, 2),
     ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
   });
-  it('anchors the window one row above the cursor, never above the pane', () => {
-    expect(inputWindowRows(6)).toEqual({ start: 5, end: 6 + INPUT_ROWS_BELOW_CURSOR });
-    expect(inputWindowRows(0)).toEqual({ start: 0, end: INPUT_ROWS_BELOW_CURSOR });
+  it("anchors the window one row above the cursor, never above the pane, and runs it to the pane's bottom", () => {
+    expect(inputWindowRows(6)).toEqual({ start: 5, end: MAX_PANE_ROW });
+    expect(inputWindowRows(0)).toEqual({ start: 0, end: MAX_PANE_ROW });
+  });
+  const status = [
+    '  [Opus] | project git:(main)',
+    '  Context 7% | Usage 28%',
+    '  1 CLAUDE.md | 10 MCPs | 11 hooks',
+  ];
+  it('reads Claude’s footer under a custom status line of several rows', () => {
+    expect(readInputWindow(window(rule, '❯ ', rule, ...status, footer), 1, 2)).toEqual({
+      readable: true,
+      stashed: false,
+      emptyAtPrompt: true,
+    });
+    expect(
+      readInputWindow(window(rule, '❯ ', rule, ...status, '  ⏵⏵ auto mode on · › stashed'), 1, 2),
+    ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
+    expect(readInputWindow(window(rule, '❯ hello', rule, ...status, footer), 1, 7)).toMatchObject({
+      readable: true,
+      emptyAtPrompt: false,
+    });
+    // Narrow pane: Claude’s own footer still moves its right side to the row under it, below the status rows.
+    expect(
+      readInputWindow(
+        window(rule, '❯ ', rule, ...status, footer, right('◐ medium · › stashed')),
+        1,
+        2,
+      ),
+    ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
+  });
+  it('still cannot read a popup or menu row anywhere under the rule, or more rows than a footer can have', () => {
+    expect(
+      readInputWindow(window(rule, '❯ @READ', rule, '    + README.md', ...status), 1, 7),
+    ).toEqual({ readable: false });
+    expect(
+      readInputWindow(
+        window(rule, '❯ /mo', rule, ...status, '  ❯ /model   Set the AI model'),
+        1,
+        5,
+      ),
+    ).toEqual({ readable: false });
+    expect(readInputWindow(window(rule, '❯ ', rule, '  /Users/me/project', footer), 1, 2)).toEqual({
+      readable: false,
+    });
+  });
+  it('reads a status line of any height, down to the pane’s last row', () => {
+    const tall = Array.from({ length: 12 }, (_, i) => `  status row ${i + 1}`);
+    expect(readInputWindow(window(rule, '❯ ', rule, ...tall, footer), 1, 2)).toEqual({
+      readable: true,
+      stashed: false,
+      emptyAtPrompt: true,
+    });
+    // Nothing captured under the footer: the pane ends there.
+    expect(
+      readInputWindow(parsed([rule, '❯ ', rule, ...tall, '  › stashed'].join('\n')), 1, 2),
+    ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
+  });
+  it('does not read a status row drawn as a rule as the box', () => {
+    // A status line that draws its own rule: the last two rules on screen no longer frame the prompt.
+    expect(
+      readInputBox(parsed(`${rule}\n❯ \n${rule}\n  Context 7%\n${rule}\n${footer}\n`)),
+    ).toEqual({ state: 'other-mode' });
   });
 });
 
@@ -305,6 +365,27 @@ describe.each(STASH_FIXTURE_VERSIONS)(
         );
         expect(rows[y + 4]?.trim(), state).toBe('');
       }
+    });
+  },
+);
+
+describe.each(STATUSLINE_FIXTURE_VERSIONS)(
+  'captured Claude %s screens with a custom status line',
+  (version) => {
+    const read = (state: string) => {
+      const w = readWindow(version, state);
+      return readInputWindow(parsed(w.text), w.cursorRow, w.cursorColumn);
+    };
+    it.each(Object.entries(STATUSLINE_READINGS))('reads %s', (state, expected) => {
+      expect(read(state)).toEqual({ readable: true, ...expected });
+    });
+    it.each(STATUSLINE_UNREADABLE)('cannot read %s', (state) => {
+      expect(read(state)).toEqual({ readable: false });
+    });
+    it('sees every status row inside the window it reads', () => {
+      const w = readWindow(version, 'statusline-empty');
+      const text = screenText(parsed(w.text));
+      for (const row of STATUS_LINE_ROWS) expect(text).toContain(row);
     });
   },
 );
