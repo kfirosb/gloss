@@ -15,8 +15,10 @@
 // narrowest width, to show what Claude cuts from a footer too long for the pane (`narrow-<width>-…`).
 // The `statusline` mode sends no message to the model either: it starts Claude with a three-row custom `statusLine`
 // (STATUS_LINE_ROWS) and captures the rows it draws between the box's bottom rule and Claude's footer: an empty box,
-// the box after Ctrl+S with no stash, typed text, a stash and the @ popup (`statusline-…`). No `/` menu capture: it
-// lists the account's synced skills and plugins.
+// the box after Ctrl+S with no stash, typed text, a stash, the `?` shortcuts panel, the empty box with a stash at each
+// NARROW_WIDTHS width (`statusline-narrow-<width>-stash-empty`) and the @ popup (`statusline-…`). No `/` menu capture:
+// it lists the account's synced skills and plugins. The `statusline-padding` mode is the same status line without its
+// `padding: 0` setting, as most users write it: an empty box and a stash (`statusline-padding-…`).
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -54,8 +56,11 @@ const SECOND_DRAFT = 'second draft';
 // Long enough that Haiku is still answering through the working captures (it counts to 150 in about 2 s).
 const STASH_BUSY_PROMPT = 'Count from 1 to 1000, one number per line.';
 const STASH_MESSAGE = 'Reply with the single word OK.';
-// Rows below the cursor saved in each .window.ansi; Gloss reads at most this many (INPUT_ROWS_BELOW_CURSOR).
+// Rows below the cursor saved in each .window.ansi for the fixtures; Gloss itself reads to the pane's bottom
+// (inputWindowRows).
 const WINDOW_BELOW = 24;
+// The pane's width at start, in cells.
+const PANE_WIDTH = 200;
 // Narrow mode: pane widths, widest first, and how many Shift+Tab presses cycle through the permission modes.
 const NARROW_WIDTHS = [80, 60, 40];
 const MODE_PRESSES = 3;
@@ -65,6 +70,7 @@ const STATUS_LINE_ROWS = [
   'Context 7% | Usage 28%',
   '1 CLAUDE.md | 10 MCPs | 11 hooks',
 ];
+// Does not escape embedded single quotes; STATUS_LINE_ROWS contain none.
 const shellQuote = (text) => `'${text}'`;
 // A 1x1 red PNG for the manifest's image reference.
 const RED_PNG = Buffer.from(
@@ -77,14 +83,16 @@ const [version, homeArgument, mode] = process.argv.slice(2);
 if (
   !/^\d+\.\d+\.\d+$/.test(version ?? '') ||
   !homeArgument ||
-  (mode && !['long', 'stash', 'narrow', 'statusline'].includes(mode))
+  (mode && !['long', 'stash', 'narrow', 'statusline', 'statusline-padding'].includes(mode))
 )
   throw new Error(
-    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash|narrow|statusline]',
+    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash|narrow|statusline|statusline-padding]',
   );
 const long = mode === 'long';
 const narrow = mode === 'narrow';
-const statusline = mode === 'statusline';
+const statuslinePadding = mode === 'statusline-padding';
+// Both statusline modes start Claude with the custom status line.
+const statusline = mode === 'statusline' || statuslinePadding;
 // Narrow and statusline modes drive the stash keys too.
 const stash = mode === 'stash' || narrow || statusline;
 const home = await realpath(homeArgument);
@@ -97,11 +105,13 @@ const project = join(
   home,
   (long
     ? 'project-long-'
-    : statusline
-      ? 'project-statusline-'
-      : stash
-        ? 'project-stash-'
-        : 'project-') + version.replaceAll('.', '-'),
+    : statuslinePadding
+      ? 'project-statusline-padding-'
+      : statusline
+        ? 'project-statusline-'
+        : stash
+          ? 'project-stash-'
+          : 'project-') + version.replaceAll('.', '-'),
 );
 const out = join(process.cwd(), 'tests', 'fixtures', 'tmux-screens');
 const prefix = `claude-${version}`;
@@ -524,10 +534,39 @@ async function captureStatusline() {
   await saveStash('statusline-typed');
   await timedStash('statusline', (s) => stashShown(s) && !promptLine(s).includes(STASH_DRAFT));
   await saveStash('statusline-stashed');
+  await keys('?');
+  await until((s) => /for shell mode/.test(s), 'shortcuts panel', 10_000);
+  await saveStash('statusline-shortcuts');
+  await keys('Escape');
+  await until((s) => inputBox(s) && !/for shell mode/.test(s), 'shortcuts panel closed', 10_000);
+  await emptyBox();
+  await ensureStash();
+  for (const width of NARROW_WIDTHS) {
+    await t('resize-window', '-t', '=cap', '-x', String(width));
+    await sleep(700);
+    await emptyBox();
+    await saveStash(`statusline-narrow-${width}-stash-empty`);
+  }
+  // Back to the starting width, so the popup capture matches the one taken before the narrow states existed.
+  await t('resize-window', '-t', '=cap', '-x', String(PANE_WIDTH));
+  await sleep(700);
+  await emptyBox();
   await literal('@READ');
   await until((s) => below(s, /README\.md/), 'popup', 10_000);
   await saveStash('statusline-at-popup');
   await emptyBox();
+  console.log(JSON.stringify({ version, summary, latencies }, null, 2));
+}
+async function captureStatuslinePadding() {
+  await until((s) => s.includes(STATUS_LINE_ROWS[2]), 'status line drawn', 30_000);
+  await saveStash('statusline-padding-empty');
+  await literal(STASH_DRAFT);
+  await until((s) => promptLine(s).includes(STASH_DRAFT), 'draft typed', 10_000);
+  await timedStash(
+    'statusline-padding',
+    (s) => stashShown(s) && !promptLine(s).includes(STASH_DRAFT),
+  );
+  await saveStash('statusline-padding-stashed');
   console.log(JSON.stringify({ version, summary, latencies }, null, 2));
 }
 async function captureScreens() {
@@ -587,7 +626,7 @@ await t(
   '-s',
   'cap',
   '-x',
-  '200',
+  String(PANE_WIDTH),
   '-y',
   '50',
   '-c',
@@ -613,7 +652,7 @@ await t(
           statusLine: {
             type: 'command',
             command: `printf '%s\\n' ${STATUS_LINE_ROWS.map(shellQuote).join(' ')}`,
-            padding: 0,
+            ...(statuslinePadding ? {} : { padding: 0 }),
           },
         }),
       ]
@@ -633,11 +672,13 @@ try {
     ? captureLong()
     : narrow
       ? captureNarrow()
-      : statusline
-        ? captureStatusline()
-        : stash
-          ? captureStash()
-          : captureScreens());
+      : statuslinePadding
+        ? captureStatuslinePadding()
+        : statusline
+          ? captureStatusline()
+          : stash
+            ? captureStash()
+            : captureScreens());
 } finally {
   const records = await transcriptRecords();
   if (records.length && !narrow && !statusline)

@@ -128,8 +128,27 @@ export const STATUSLINE_READINGS = {
   'statusline-typed': { stashed: false, emptyAtPrompt: false },
   'statusline-stashed': { stashed: true, emptyAtPrompt: true },
 } as const;
-/** `statusline` states whose popup replaces the footer: not a plain input box, so no reading applies. */
-export const STATUSLINE_UNREADABLE: readonly string[] = ['statusline-at-popup'];
+/**
+ * `statusline` states whose popup or panel replaces the status and footer rows: not a plain input box, so no reading
+ * applies. The `?` shortcuts panel has a `  / for commands` row, shaped like a menu row.
+ */
+export const STATUSLINE_UNREADABLE: readonly string[] = [
+  'statusline-at-popup',
+  'statusline-shortcuts',
+];
+/**
+ * The `statusline` mode's empty box with a stash at each narrow width (`statusline-narrow-<width>-stash-empty`): at 80
+ * the right side stays on the first status row; at 60 and 40 Claude moves it under its own mode row, the last footer
+ * row. Every one reads the stash and an empty box.
+ */
+export const STATUSLINE_NARROW_STATES: readonly string[] = [80, 60, 40].map(
+  (width) => `statusline-narrow-${width}-stash-empty`,
+);
+/** The `statusline-padding` mode's states (the same status line without `padding: 0`): rows still indented two cells. */
+export const STATUSLINE_PADDING_READINGS = {
+  'statusline-padding-empty': { stashed: false, emptyAtPrompt: true },
+  'statusline-padding-stashed': { stashed: true, emptyAtPrompt: true },
+} as const;
 /**
  * The rows Gloss reads around the cursor of a captured screen: the real `-S/-E` capture (`window`, the default), or
  * the same rows cut from the full capture (`screen`), which is what fixtureTerminal serves.
