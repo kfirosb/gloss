@@ -128,8 +128,8 @@ export const STATUSLINE_READINGS = {
   'statusline-typed': { stashed: false, emptyAtPrompt: false },
   'statusline-stashed': { stashed: true, emptyAtPrompt: true },
 } as const;
-/** `statusline` states whose popup or menu replaces the footer: not a plain input box, so no reading applies. */
-export const STATUSLINE_UNREADABLE: readonly string[] = ['statusline-at-popup', 'statusline-slash'];
+/** `statusline` states whose popup replaces the footer: not a plain input box, so no reading applies. */
+export const STATUSLINE_UNREADABLE: readonly string[] = ['statusline-at-popup'];
 /**
  * The rows Gloss reads around the cursor of a captured screen: the real `-S/-E` capture (`window`, the default), or
  * the same rows cut from the full capture (`screen`), which is what fixtureTerminal serves.

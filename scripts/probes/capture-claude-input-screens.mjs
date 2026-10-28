@@ -15,7 +15,8 @@
 // narrowest width, to show what Claude cuts from a footer too long for the pane (`narrow-<width>-…`).
 // The `statusline` mode sends no message to the model either: it starts Claude with a three-row custom `statusLine`
 // (STATUS_LINE_ROWS) and captures the rows it draws between the box's bottom rule and Claude's footer: an empty box,
-// the box after Ctrl+S with no stash, typed text, a stash, the @ popup and the / menu (`statusline-…`).
+// the box after Ctrl+S with no stash, typed text, a stash and the @ popup (`statusline-…`). No `/` menu capture: it
+// lists the account's synced skills and plugins.
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -526,10 +527,6 @@ async function captureStatusline() {
   await literal('@READ');
   await until((s) => below(s, /README\.md/), 'popup', 10_000);
   await saveStash('statusline-at-popup');
-  await emptyBox();
-  await literal('/mo');
-  await until((s) => below(s, /\/model/), 'slash menu', 10_000);
-  await saveStash('statusline-slash');
   await emptyBox();
   console.log(JSON.stringify({ version, summary, latencies }, null, 2));
 }
