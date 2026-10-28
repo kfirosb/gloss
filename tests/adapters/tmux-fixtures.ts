@@ -113,6 +113,23 @@ export const STASH_READINGS = {
   'stash-restored': { stashed: false, emptyAtPrompt: false },
   'stash-ctrl-y': { stashed: true, emptyAtPrompt: true },
 } as const;
+/** Versions with the custom status line captures (the capture script's `statusline` mode). */
+export const STATUSLINE_FIXTURE_VERSIONS = ['2.1.312'] as const;
+/** The rows the `statusline` mode's status line command printed; keep them identical to its constant. */
+export const STATUS_LINE_ROWS = [
+  '[Opus] | project git:(main)',
+  'Context 7% | Usage 28%',
+  '1 CLAUDE.md | 10 MCPs | 11 hooks',
+] as const;
+/** What Gloss must read in the `statusline` mode's states with a single right answer (status rows under the box). */
+export const STATUSLINE_READINGS = {
+  'statusline-empty': { stashed: false, emptyAtPrompt: true },
+  'statusline-empty-after': { stashed: false, emptyAtPrompt: true },
+  'statusline-typed': { stashed: false, emptyAtPrompt: false },
+  'statusline-stashed': { stashed: true, emptyAtPrompt: true },
+} as const;
+/** `statusline` states whose popup or menu replaces the footer: not a plain input box, so no reading applies. */
+export const STATUSLINE_UNREADABLE: readonly string[] = ['statusline-at-popup', 'statusline-slash'];
 /**
  * The rows Gloss reads around the cursor of a captured screen: the real `-S/-E` capture (`window`, the default), or
  * the same rows cut from the full capture (`screen`), which is what fixtureTerminal serves.

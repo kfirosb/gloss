@@ -13,6 +13,9 @@
 // The `narrow` mode sends no message to the model: with a stash present it narrows the pane to each NARROW_WIDTHS
 // width and captures an empty box, a box with text and the Ctrl+Y hint, then each permission mode (Shift+Tab) at the
 // narrowest width, to show what Claude cuts from a footer too long for the pane (`narrow-<width>-…`).
+// The `statusline` mode sends no message to the model either: it starts Claude with a three-row custom `statusLine`
+// (STATUS_LINE_ROWS) and captures the rows it draws between the box's bottom rule and Claude's footer: an empty box,
+// the box after Ctrl+S with no stash, typed text, a stash, the @ popup and the / menu (`statusline-…`).
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -55,6 +58,13 @@ const WINDOW_BELOW = 24;
 // Narrow mode: pane widths, widest first, and how many Shift+Tab presses cycle through the permission modes.
 const NARROW_WIDTHS = [80, 60, 40];
 const MODE_PRESSES = 3;
+// Statusline mode (tests/adapters/tmux-fixtures.ts, STATUS_LINE_ROWS): the rows the custom status line prints.
+const STATUS_LINE_ROWS = [
+  '[Opus] | project git:(main)',
+  'Context 7% | Usage 28%',
+  '1 CLAUDE.md | 10 MCPs | 11 hooks',
+];
+const shellQuote = (text) => `'${text}'`;
 // A 1x1 red PNG for the manifest's image reference.
 const RED_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
@@ -66,15 +76,16 @@ const [version, homeArgument, mode] = process.argv.slice(2);
 if (
   !/^\d+\.\d+\.\d+$/.test(version ?? '') ||
   !homeArgument ||
-  (mode && mode !== 'long' && mode !== 'stash' && mode !== 'narrow')
+  (mode && !['long', 'stash', 'narrow', 'statusline'].includes(mode))
 )
   throw new Error(
-    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash|narrow]',
+    'Usage: capture-claude-input-screens.mjs <claude version> <fake home under /private/var> [long|stash|narrow|statusline]',
   );
 const long = mode === 'long';
 const narrow = mode === 'narrow';
-// Narrow mode drives the stash keys too, in the stash mode's (already trusted) project.
-const stash = mode === 'stash' || narrow;
+const statusline = mode === 'statusline';
+// Narrow and statusline modes drive the stash keys too.
+const stash = mode === 'stash' || narrow || statusline;
 const home = await realpath(homeArgument);
 if (!home.startsWith('/private/var/'))
   throw new Error('The fake home must resolve under /private/var');
@@ -83,7 +94,13 @@ const tmux = '/opt/homebrew/bin/tmux';
 const base = ['-u', '-S', join(home, 'cap.sock'), '-f', '/dev/null'];
 const project = join(
   home,
-  (long ? 'project-long-' : stash ? 'project-stash-' : 'project-') + version.replaceAll('.', '-'),
+  (long
+    ? 'project-long-'
+    : statusline
+      ? 'project-statusline-'
+      : stash
+        ? 'project-stash-'
+        : 'project-') + version.replaceAll('.', '-'),
 );
 const out = join(process.cwd(), 'tests', 'fixtures', 'tmux-screens');
 const prefix = `claude-${version}`;
@@ -494,6 +511,28 @@ async function captureNarrow() {
   console.log(JSON.stringify({ version, summary }, null, 2));
   await writeFile(join(home, `narrow-summary-${version}.json`), JSON.stringify(summary, null, 2));
 }
+async function captureStatusline() {
+  // The setting may take a render to apply; if the rows never show, the whole capture is meaningless, so fail.
+  await until((s) => s.includes(STATUS_LINE_ROWS[2]), 'status line drawn', 30_000);
+  await saveStash('statusline-empty');
+  await keys('C-s');
+  await sleep(700);
+  await saveStash('statusline-empty-after');
+  await literal(STASH_DRAFT);
+  await until((s) => promptLine(s).includes(STASH_DRAFT), 'draft typed', 10_000);
+  await saveStash('statusline-typed');
+  await timedStash('statusline', (s) => stashShown(s) && !promptLine(s).includes(STASH_DRAFT));
+  await saveStash('statusline-stashed');
+  await literal('@READ');
+  await until((s) => below(s, /README\.md/), 'popup', 10_000);
+  await saveStash('statusline-at-popup');
+  await emptyBox();
+  await literal('/mo');
+  await until((s) => below(s, /\/model/), 'slash menu', 10_000);
+  await saveStash('statusline-slash');
+  await emptyBox();
+  console.log(JSON.stringify({ version, summary, latencies }, null, 2));
+}
 async function captureScreens() {
   await checkPanePid();
   await save('empty');
@@ -570,6 +609,18 @@ await t(
   '--strict-mcp-config',
   '--mcp-config',
   '{"mcpServers":{}}',
+  ...(statusline
+    ? [
+        '--settings',
+        JSON.stringify({
+          statusLine: {
+            type: 'command',
+            command: `printf '%s\\n' ${STATUS_LINE_ROWS.map(shellQuote).join(' ')}`,
+            padding: 0,
+          },
+        }),
+      ]
+    : []),
 );
 try {
   const first = await until((s) => idle(s) || /Yes, I trust this folder/.test(s), 'startup');
@@ -585,12 +636,14 @@ try {
     ? captureLong()
     : narrow
       ? captureNarrow()
-      : stash
-        ? captureStash()
-        : captureScreens());
+      : statusline
+        ? captureStatusline()
+        : stash
+          ? captureStash()
+          : captureScreens());
 } finally {
   const records = await transcriptRecords();
-  if (records.length && !narrow)
+  if (records.length && !narrow && !statusline)
     await writeFile(
       join(out, `claude-typed-${long ? 'long-' : stash ? 'stash-' : ''}${version}.jsonl`),
       scrubbedTranscript(records),
