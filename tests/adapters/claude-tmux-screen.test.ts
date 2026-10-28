@@ -16,6 +16,8 @@ import {
   STASH_FIXTURE_VERSIONS,
   STASH_READINGS,
   STATUSLINE_FIXTURE_VERSIONS,
+  STATUSLINE_NARROW_STATES,
+  STATUSLINE_PADDING_READINGS,
   STATUSLINE_READINGS,
   STATUSLINE_UNREADABLE,
   STATUS_LINE_ROWS,
@@ -174,7 +176,9 @@ describe('Claude input box (synthetic)', () => {
     expect(readInputWindow(window(rule, '❯ ', rule, footer, right('  /mobile')), 1, 2)).toEqual({
       readable: false,
     });
-    // A footer of three rows, or a moved right side with something under it.
+    // Two right-aligned rows, or a moved right side with a footer-shaped row under it: Claude moves its right side
+    // under its mode row, the last footer row, with or without a status line (`narrow-*` and
+    // `statusline-narrow-60/40-stash-empty`), so nothing but a blank row follows it.
     expect(
       readInputWindow(
         window(rule, '❯ ', rule, footer, right('◐ medium'), right('› stashed')),
@@ -238,7 +242,8 @@ describe('Claude input box (synthetic)', () => {
       readable: true,
       emptyAtPrompt: false,
     });
-    // Narrow pane: Claude’s own footer still moves its right side to the row under it, below the status rows.
+    // Narrow pane: Claude moves its right side from the first status row to the row under its own mode row, below
+    // the status rows (`statusline-narrow-60/40-stash-empty`).
     expect(
       readInputWindow(
         window(rule, '❯ ', rule, ...status, footer, right('◐ medium · › stashed')),
@@ -247,7 +252,7 @@ describe('Claude input box (synthetic)', () => {
       ),
     ).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
   });
-  it('still cannot read a popup or menu row anywhere under the rule, or more rows than a footer can have', () => {
+  it('still cannot read a popup or menu row anywhere under the rule, or a status row that starts with `/`', () => {
     expect(
       readInputWindow(window(rule, '❯ @READ', rule, '    + README.md', ...status), 1, 7),
     ).toEqual({ readable: false });
@@ -383,8 +388,8 @@ describe.each(STASH_FIXTURE_VERSIONS)(
 describe.each(STATUSLINE_FIXTURE_VERSIONS)(
   'captured Claude %s screens with a custom status line',
   (version) => {
-    const read = (state: string) => {
-      const w = readWindow(version, state);
+    const read = (state: string, source?: 'window' | 'screen') => {
+      const w = readWindow(version, state, source);
       return readInputWindow(parsed(w.text), w.cursorRow, w.cursorColumn);
     };
     it.each(Object.entries(STATUSLINE_READINGS))('reads %s', (state, expected) => {
@@ -392,6 +397,24 @@ describe.each(STATUSLINE_FIXTURE_VERSIONS)(
     });
     it.each(STATUSLINE_UNREADABLE)('cannot read %s', (state) => {
       expect(read(state)).toEqual({ readable: false });
+    });
+    it.each(STATUSLINE_NARROW_STATES)('reads %s on a narrow pane', (state) => {
+      expect(read(state)).toEqual({ readable: true, stashed: true, emptyAtPrompt: true });
+    });
+    it.each(Object.entries(STATUSLINE_PADDING_READINGS))(
+      'reads %s, a status line without `padding: 0`',
+      (state, expected) => {
+        expect(read(state)).toEqual({ readable: true, ...expected });
+      },
+    );
+    // The .window.ansi keeps 24 rows under the cursor; Gloss reads to the pane's bottom.
+    it.each([
+      ...Object.keys(STATUSLINE_READINGS),
+      ...STATUSLINE_UNREADABLE,
+      ...STATUSLINE_NARROW_STATES,
+      ...Object.keys(STATUSLINE_PADDING_READINGS),
+    ])('reads %s the same from rows cut out of the full screen', (state) => {
+      expect(read(state, 'screen')).toEqual(read(state));
     });
     it('sees every status row inside the window it reads', () => {
       const w = readWindow(version, 'statusline-empty');

@@ -252,20 +252,39 @@ export interface ReadableWindow {
   /** A one-row normal box that reads empty, with the cursor right after `❯`: a paste lands alone. */
   emptyAtPrompt: boolean;
 }
-/** Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's footer, with or without a status line (a popup or menu). */
+/**
+ * Unreadable: no bottom rule under the cursor, or the rows under it are not Claude's footer, with or without a status
+ * line (a popup, a menu or the `?` shortcuts panel).
+ */
 export type InputWindow = { readable: false } | ReadableWindow;
 /**
  * The footer's rows under the bottom rule at `rule`: every consecutive footer-shaped row (a status line's rows, then
  * Claude's own) up to the first blank row, which may be a row the capture lacks because the pane ends there, or up
  * to a right side moved down onto its own row followed by a blank one. Undefined for anything not footer-shaped
  * before the first blank row: a popup, a menu, or no footer at all.
+ *
+ * With a status line Claude draws its right side (`◐ medium · /effort`, `› stashed`) on the first status row, and on a
+ * narrow pane moves it under its own mode row, the last footer row (`statusline-narrow-60/40-*`), so the moved right
+ * side is still the last row before the blank one. Without `padding: 0` the status rows are still indented two cells
+ * (`statusline-padding-*`), so `isFooterRow` covers both. The `?` shortcuts panel replaces the status and footer rows
+ * and has a `  / for commands` row, so it is unreadable (`statusline-shortcuts`).
+ *
+ * A status line that prints a blank row ends the footer at that row, so Claude's own mode row below it is not read;
+ * vim mode there is still caught by `readInputBox` in `checkAtSend` on the full screen, and `› stashed` is on the first
+ * status row in every capture wide enough to keep the right side there, so `stashed` still reads correctly. (On a
+ * narrow pane the moved right side would sit below that blank row; no capture has a status line with a blank row.)
  */
 function footerRows(lines: readonly ScreenLine[], rule: number): string[] | undefined {
   const bottomRule = lines[rule] ?? [];
   if (!isRule(bottomRule)) return undefined;
   const rows: string[] = [];
   let next = rule + 1;
-  while (isFooterRow(lineText(lines[next] ?? []))) rows.push(lineText(lines[next++] ?? []));
+  for (;;) {
+    const text = lineText(lines[next] ?? []);
+    if (!isFooterRow(text)) break;
+    rows.push(text);
+    next += 1;
+  }
   if (rows.length === 0) return undefined;
   const stop = lines[next];
   if (isBlankRow(stop)) return rows;
@@ -275,7 +294,7 @@ function footerRows(lines: readonly ScreenLine[], rule: number): string[] | unde
 }
 /**
  * Reads the rows Gloss captured around the cursor (`cursorRow` is the cursor's row within them): the bottom rule
- * right under the cursor, then Claude's normal footer (`footerRows`). Anything else is unreadable.
+ * right under the cursor, then the footer rows, with or without a status line (`footerRows`). Anything else is unreadable.
  */
 export function readInputWindow(
   lines: readonly ScreenLine[],

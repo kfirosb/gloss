@@ -715,6 +715,7 @@ describe('typing into the terminal', () => {
         terminal.captureRows = async (start, end) => {
           reads += 1;
           const rows = (await captureRows(start, end)).split('\n');
+          // Matches `Context` alone: the captured row carries SGR codes between its words.
           const status = rows.findIndex((row) => row.includes('Context'));
           if (status >= 0) rows[status] = `${rows[status]} ${reads}`;
           return rows.join('\n');
@@ -729,13 +730,15 @@ describe('typing into the terminal', () => {
       });
       it('names what it saw when the rows under the box are a popup', async () => {
         const { terminal, log } = fixtureTerminal(version, 'statusline-at-popup');
-        const result = await send(terminal, 'hello');
+        const result = await send(terminal, 'hello', () => void log.calls.push('typing'));
         expect(result).toEqual({
           state: 'failed',
           reason: INPUT_UNREADABLE_REASON,
           openTerminal: true,
         });
         expect(log.calls).not.toContain('key:C-s');
+        expect(log.calls).not.toContain('typing');
+        expect(log.calls.some((call) => call.startsWith('paste:'))).toBe(false);
       });
     },
   );
