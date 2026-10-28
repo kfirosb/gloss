@@ -20,6 +20,7 @@ function fakePty() {
   const handlers: ((d: Buffer) => void)[] = [];
   const exits: (() => void)[] = [];
   const writes: string[] = [];
+  const sizes: number[][] = [];
   let killed = false;
   let pauses = 0,
     resumes = 0;
@@ -32,6 +33,9 @@ function fakePty() {
     },
     onData: (cb) => handlers.push(cb),
     write: (d) => writes.push(String(d)),
+    resize: (c, r) => {
+      sizes.push([c, r]);
+    },
     kill: () => {
       killed = true;
       exits.forEach((e) => e());
@@ -42,6 +46,7 @@ function fakePty() {
     p,
     emit: (s: string) => handlers.forEach((h) => h(Buffer.from(s))),
     writes,
+    sizes,
     get killed() {
       return killed;
     },
@@ -130,6 +135,36 @@ it('streams output, forwards input and resize, and kills the attach client on cl
   ws.close();
   await new Promise((r) => setTimeout(r, 50));
   expect(pty.killed).toBe(true);
+});
+it('applies the size the view sends as soon as the socket opens, while the session name is still resolving', async () => {
+  // The view sends its size on open; the bridge is still asking tmux for the session name then.
+  let release = () => {};
+  const resolving = new Promise<void>((r) => (release = r));
+  const { bridge, connect, pty, resizes, spawned } = await setup(0, {
+    tmux: async () => ({
+      hasSession: async (n: string) => {
+        await resolving;
+        return n.startsWith('gloss-');
+      },
+      attachArgv: (n: string) => ['tmux', 'attach', n],
+      resizeWindow: async (_n: string, c: number, r: number) => {
+        resizes.push([c, r]);
+      },
+    }),
+  });
+  const ws = connect(`/api/launches/L1/terminal?ticket=${bridge.issueTicket('L1').ticket}`);
+  await opened(ws);
+  ws.send(JSON.stringify({ type: 'resize', cols: 190, rows: 48 }));
+  ws.send(JSON.stringify({ type: 'input', data: 'y' }));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(spawned).toEqual([]);
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(spawned[0]).toEqual(['tmux', 'attach', 'gloss-L1']);
+  expect(pty.sizes).toEqual([[190, 48]]);
+  expect(resizes).toEqual([[190, 48]]);
+  expect(pty.writes).toEqual(['y']);
+  ws.close();
 });
 it('routes wheel scrolling to tmux and leaves history browsing before forwarding typed input', async () => {
   const events: string[] = [];
