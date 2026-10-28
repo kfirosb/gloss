@@ -3,7 +3,7 @@ import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import {
   lsofDiagnosticsClean,
   lsofPath,
@@ -56,6 +56,27 @@ export interface SourceSink {
 export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function projectIdentity(path: string): Promise<string> {
   return realpath(path);
+}
+/** Where Claude's worktree isolation keeps a session's worktrees, below the project it started in. */
+const CLAUDE_WORKTREES = ['.claude', 'worktrees'] as const;
+/**
+ * Whether a session running in `path` belongs to the project: it is the project folder itself or
+ * one of the project's Claude worktrees, `<project>/.claude/worktrees/<name>`. Claude moves a
+ * running session there when it isolates work, and Gloss keeps showing the session under the
+ * project it started in. Any other subfolder, sibling or parent is a different project, so a
+ * folder above many projects never claims their sessions.
+ */
+export async function belongsToProject(projectId: string, path: string): Promise<boolean> {
+  const project = await projectIdentity(projectId);
+  const inner = await projectIdentity(path);
+  if (inner === project) return true;
+  // Both paths are canonical, so the relative path is normalized: a worktree is exactly one name
+  // below the worktrees folder, and anything outside the project starts with `..`.
+  const segments = relative(project, inner).split(sep);
+  return (
+    segments.length === CLAUDE_WORKTREES.length + 1 &&
+    CLAUDE_WORKTREES.every((segment, index) => segments[index] === segment)
+  );
 }
 export function validateTarget(target: Target, kind: Target['agent']) {
   if (target.agent !== kind || !uuid.test(target.sessionRef))

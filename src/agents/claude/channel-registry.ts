@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { existingDataDir } from '../../runtime/data-dir.js';
 import { CHANNEL_REGISTRY_DIR } from './channel-names.js';
 import {
+  belongsToProject,
   claudeConfigDir,
   projectIdentity,
   uuid,
@@ -259,10 +260,17 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     const native = ancestors[0]!;
     if (records.filter((r) => r.sessionId === native.sessionId).length !== 1)
       throw new Error('Multiple live native owners');
+    const cwd = await projectIdentity(native.cwd);
+    // A session that entered a worktree under the project it was registered in still binds to
+    // that project; its transcript's first record names the project, not the worktree.
+    const relocated =
+      expected !== undefined &&
+      cwd !== expected.projectId &&
+      (await belongsToProject(expected.projectId, cwd));
     const target: Target = {
       agent: 'claude',
       sessionRef: native.sessionId,
-      projectId: await projectIdentity(native.cwd),
+      projectId: relocated ? expected.projectId : cwd,
     };
     validateTarget(target, 'claude');
     if (expected && !sameTarget(target, expected)) throw new Error('Target identity mismatch');
@@ -276,6 +284,7 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
     return {
       target,
       transcriptPath,
+      relocated,
       claudePid: native.pid,
       claudeStartedAt: native.procStart,
       channelPid,
@@ -423,11 +432,13 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
         const record = await readJson(path, true);
         if (!validRecord(record, generation) || !sameTarget(record.target, target)) continue;
         const live = await binding(record.channelPid, signal, target);
+        // Claude keeps a relocated session's transcript in the worktree's own project
+        // directory until the session leaves it; `transcript` already verified that file.
         if (
           live.claudePid !== record.claudePid ||
           live.claudeStartedAt !== record.claudeStartedAt ||
           live.channelStartedAt !== record.channelStartedAt ||
-          live.transcriptPath !== record.transcriptPath
+          (live.transcriptPath !== record.transcriptPath && !live.relocated)
         )
           continue;
         // Exclude failed-startup artifacts before counting competing owners.
@@ -467,7 +478,9 @@ export function createChannelRegistry(options: ChannelRegistryOptions = {}) {
         if (!original) throw new Error('Channel process identity unavailable');
         while (!signal.aborted && now() < deadline) {
           try {
-            const identity = await binding(channelPid, signal);
+            // A fresh registration binds to the session's current folder; `relocated` only
+            // describes a verification against an earlier registration.
+            const { relocated: _relocated, ...identity } = await binding(channelPid, signal);
             checkDeadline();
             if (identity.channelStartedAt !== original.startedAt)
               throw new Error('Channel process was replaced');

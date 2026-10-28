@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { appendFile, readFile, writeFile, access, chmod, stat } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile, access, chmod, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -1129,4 +1129,20 @@ it('includes file references in the authenticated native message', async () => {
   expect(result.state).toBe('unconfirmed');
   await expect.poll(() => frames.length).toBe(2);
   expect(frames[1]?.message.content).toContain('File 1:');
+});
+
+describe('Claude sessions inside worktrees', () => {
+  it('lists a session that Claude moved into a worktree under its project', async () => {
+    const h = await harness('claude');
+    cleanups.push(h.cleanup);
+    const worktree = join(h.project, '.claude', 'worktrees', 'fix');
+    await mkdir(worktree, { recursive: true });
+    const record = JSON.parse(await readFile(join(h.dir, 'sessions', 'own.json'), 'utf8'));
+    await writeFile(
+      join(h.dir, 'sessions', 'own.json'),
+      JSON.stringify({ ...record, cwd: worktree }),
+    );
+    expect(await h.adapter.discover(h.project)).toEqual([h.target]);
+    expect(await h.adapter.discover(h.dir)).toEqual([]);
+  });
 });

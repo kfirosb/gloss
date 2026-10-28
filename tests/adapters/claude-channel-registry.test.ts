@@ -516,6 +516,24 @@ describe('experimental native Claude channel registry', () => {
     expect(await registry.resolveChannel(f.target)).toBeUndefined();
   });
 
+  it('keeps resolving a registration after Claude moved the session into a worktree under its project', async () => {
+    const f = await fixture();
+    await f.seed();
+    const registry = createChannelRegistry(f.options);
+    expect(await registry.resolveChannel(f.target)).toEqual(f.record);
+    // Claude's worktree isolation changes the session's cwd and moves its transcript to the
+    // worktree's own project directory; the first record still names the original project.
+    const worktree = join(f.project, '.claude', 'worktrees', 'fix');
+    const movedDir = join(f.configDir, 'projects', 'project--claude-worktrees-fix');
+    await mkdir(worktree, { recursive: true });
+    await mkdir(movedDir, { recursive: true, mode: 0o700 });
+    await rename(f.transcript, join(movedDir, `${id}.jsonl`));
+    await writeFile(f.nativePath, JSON.stringify({ ...f.native, cwd: worktree }));
+    expect(await registry.resolveChannel(f.target)).toEqual(f.record);
+    expect(await createChannelRegistry(f.options).resolveChannel(f.target)).toEqual(f.record);
+    expect(await registry.resolveChannel({ ...f.target, projectId: worktree })).toBeUndefined();
+  });
+
   it('rejects two live native owners of the exact session', async () => {
     const f = await fixture();
     await f.seed();

@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { recordOf } from '../../core/json-record.js';
-import { projectIdentity } from '../shared.js';
+import { belongsToProject } from '../shared.js';
 import { OWN_PID_DOMAIN } from './pid-domain.js';
 
 /** One Claude `sessions/<pid>.json` record, as far as Gloss reads it. */
@@ -116,12 +116,11 @@ export async function projectSessionRecords(
   sessionRef: string,
   projectId: string,
 ): Promise<ClaudeSessionRecord[]> {
-  const project = await projectIdentity(projectId);
   const matches: ClaudeSessionRecord[] = [];
   for (const record of await readSessionRecords(config)) {
     if (record.sessionId !== sessionRef) continue;
     try {
-      if ((await projectIdentity(record.cwd)) === project) matches.push(record);
+      if (await belongsToProject(projectId, record.cwd)) matches.push(record);
     } catch {
       /* missing project */
     }
