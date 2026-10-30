@@ -1,4 +1,5 @@
 import { recordOf, textBlocks, type JsonRecord } from '../../core/json-record.js';
+import { listClaudePastSessions } from './past-sessions.js';
 import { parseClaudeActivity } from './activity.js';
 import { validateBackgroundOutputPath } from './background-output.js';
 import { findSubagentFile, streamSubagent, subagentsDir } from './subagents.js';
@@ -503,6 +504,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): AgentAd
       }
       return targets;
     },
+    listPast: (projectPath) => listClaudePastSessions(config, projectPath),
     async attach(target, context) {
       const registry = await exact(target);
       const path = options.transcriptPath
