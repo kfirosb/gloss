@@ -11,6 +11,11 @@ const MAX_BANNERS = 3,
   SOUND_GAP_MS = 2000,
   HIDE_MS = 8000;
 const isFocused = () => document.visibilityState === 'visible' && document.hasFocus();
+const ALERT_TEXT: Record<AlertEvent['kind'], string> = {
+  reply: 'New reply',
+  approval: 'Approval needed',
+  question: 'Waiting for your answer',
+};
 /** Folder name, plus the session title when the folder has more than one open session. */
 function bannerText(event: AlertEvent, entries: readonly CatalogEntry[]) {
   const entry = entries.find((e) => e.sessionId === event.sessionId);
@@ -24,7 +29,7 @@ function bannerText(event: AlertEvent, entries: readonly CatalogEntry[]) {
         (e.worktreePath ?? e.target.projectId) === (entry?.worktreePath ?? entry?.target.projectId),
     ).length > 1;
   const label = crowded && entry?.sessionTitle ? `${folder} · ${entry.sessionTitle}` : folder;
-  return `${label} — ${event.kind === 'reply' ? 'New reply' : 'Approval needed'}`;
+  return `${label} — ${ALERT_TEXT[event.kind]}`;
 }
 /** Turns catalog changes into banners and one sound/bounce per burst, honouring the alert settings. */
 export function useAttentionAlerts(

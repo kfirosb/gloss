@@ -21,6 +21,12 @@ it('needs a launched session that is waiting for approval', () => {
   expect(shouldAutoOpen({ ...entry, activity: 'idle' }, 'S', 'auto', 0, 10_000)).toBe(false);
   expect(shouldAutoOpen(undefined, 'S', 'auto', 0, 10_000)).toBe(false);
 });
+it('opens for a question Claude is waiting on, which the session record reports as a dialog', () => {
+  const asking = { ...entry, activity: 'dialog-open', attention: 'question' };
+  expect(shouldAutoOpen(asking, 'S', 'auto', 0, 10_000)).toBe(true);
+  expect(shouldAutoOpen({ ...asking, attention: 'response' }, 'S', 'auto', 0, 10_000)).toBe(false);
+  expect(shouldAutoOpen(asking, 'S', 'dot-only', 0, 10_000)).toBe(false);
+});
 it('waits two seconds after the last keystroke', () => {
   expect(shouldAutoOpen(entry, 'S', 'auto', 9_001, 10_000)).toBe(false);
   expect(shouldAutoOpen(entry, 'S', 'auto', 8_000, 10_000)).toBe(true);

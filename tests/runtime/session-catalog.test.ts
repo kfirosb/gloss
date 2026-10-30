@@ -881,6 +881,62 @@ it('baselines a never-seen session at connect, flags newer completed responses, 
   expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
   expect(f.catalog.markSeen('nope', 3)).toBe('unknown');
 });
+it('an open dialog in a Claude session is question attention until it closes', async () => {
+  const f = setup('claude');
+  f.setScan({ candidates: [claudeCandidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  f.agent.emit({ type: 'status', state: 'dialog-open' });
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === 'question');
+  f.agent.emit({ type: 'status', state: 'working' });
+  await settle(() => f.catalog.snapshot().entries[0]?.attention === undefined);
+});
+it('a question dialog seen on a launched screen counts as an open dialog', async () => {
+  const attention = new Map<string, Attention>();
+  const subscribers = new Set<(current: Map<string, Attention>) => void>();
+  const f = setup('claude', {
+    launcher: {
+      list: () => [
+        {
+          id: 'L1',
+          agent: 'claude',
+          folder: process.cwd(),
+          panePid: 1,
+          state: 'running',
+          createdAt: 0,
+          sessionRef: 'A',
+        } as LaunchRecord,
+      ],
+      subscribe: () => () => {},
+    },
+    attention: {
+      current: () => attention,
+      subscribe: (l) => {
+        subscribers.add(l);
+        return () => {
+          subscribers.delete(l);
+        };
+      },
+    },
+  });
+  f.setScan({ candidates: [claudeCandidate('A')], complete: true });
+  f.catalog.start();
+  await settle(() => f.catalog.snapshot().entries[0]?.activity === 'idle');
+  attention.set('L1', {
+    launchId: 'L1',
+    state: 'question',
+    question: { question: 'Which?', options: [{ label: 'A' }] },
+  });
+  for (const l of subscribers) l(attention);
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({
+    activity: 'dialog-open',
+    attention: 'question',
+  });
+  attention.set('L1', { launchId: 'L1', state: 'clear' });
+  for (const l of subscribers) l(attention);
+  expect(f.catalog.snapshot().entries[0]).toMatchObject({ activity: 'idle' });
+  expect(f.catalog.snapshot().entries[0]!.attention).toBeUndefined();
+});
 it('approval wins over an unseen response and an unavailable folder shows no response badge', async () => {
   const attention = new Map<string, Attention>();
   const subscribers = new Set<(current: Map<string, Attention>) => void>();

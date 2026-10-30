@@ -144,6 +144,9 @@ it('activity labels', () => {
   expect(activityLabel(at('A', '/r/.git', '/f', true, 'dialog-open'))).toBe(
     'A dialog is open in the terminal',
   );
+  expect(
+    activityLabel({ ...at('A', '/r/.git', '/f', true, 'dialog-open'), attention: 'question' }),
+  ).toBe('Waiting for your answer');
 });
 
 it('projects registered records missing from the catalog as saved entries', () => {

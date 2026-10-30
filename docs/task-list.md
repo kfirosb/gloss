@@ -187,7 +187,24 @@ A message the user writes in Hebrew is translated to English and sent to the age
 
 ## 31. Claude's option questions as a card in Gloss
 
-Status: captured on 2026-10-20; design not started.
+Status: captured on 2026-10-20. On 2026-10-30 the alert and the translated question shipped
+(branch `mode-question-claude`); answering from a card was dropped by the user as unnecessary.
+
+What shipped: an open dialog (`dialog-open`, from Claude's session record: `status: "waiting"`,
+`waitingFor: "input needed"` in 2.1.314) is attention `question` (`src/core/attention.ts`): the tab
+dot, header ("Waiting for your answer"), Dock badge, toast, sound and bounce all fire, and the
+terminal opens by itself like an approval does (`blockedOnTerminal`). For launched sessions the
+attention monitor also reads the dialog off the screen (`src/runtime/question-screen.ts`, fixture
+`claude-2.1.314-question.txt`), and `src/runtime/question-relay.ts` posts it once into the session's
+conversation as a `question:` message, so the Live Conversation view shows and translates the
+header, question and numbered options. The user answers in the terminal.
+
+Why the screen and not the transcript: with inline tools (Claude 2.1.314 on Fable 5.1) the
+AskUserQuestion call reaches the transcript only after the answer, so a PreToolUse hook or the
+screen are the only live sources; the screen needs no change to Claude's configuration. Sessions
+Gloss did not launch get the alert but not the question text.
+
+Remaining, only if the user asks for it again:
 
 When Claude Code asks the user to choose between options (its AskUserQuestion tool: a title such as "How do you want to try the fix and ship it?", numbered options with a description each, "Type something", "Chat about this"), the question appears only in the terminal. Gloss notices it: Claude's session record switches to `status: "waiting"` / `waitingFor`, `claudeActivity` in `src/agents/claude/coding-state.ts` maps that to `dialog-open`, the header shows "A dialog is open in the terminal", and deliveries are held (`DIALOG_OPEN_REASON`, `src/agents/claude/tmux-delivery.ts`). But Gloss never sees the question text or the options, so the user has to switch to the Terminal tab and answer there. The user likes the question itself and wants to answer it in Gloss, in a nicer form than the terminal, without the session hanging.
 

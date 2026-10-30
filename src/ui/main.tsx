@@ -21,6 +21,7 @@ import {
 import { workspaceFor } from './use-workspace.js';
 import { useSessionCatalog } from './use-session-catalog.js';
 import { AttentionToasts, useAttentionAlerts } from './attention-toast.js';
+import { blockedOnTerminal } from '../core/attention.js';
 import { SessionsSidebar as SessionSwitcher } from './sessions-sidebar.js';
 import { TerminalPopup } from './terminal-popup.js';
 import {
@@ -478,7 +479,7 @@ function App() {
       );
   };
   const waitingCount = (catalog?.entries ?? []).filter(
-    (e) => e.open && (e.attention === 'response' || e.attention === 'approval'),
+    (e) => e.open && e.attention !== undefined && e.attention !== 'none',
   ).length;
   useEffect(() => {
     window.gloss?.setAttentionCount?.(waitingCount);
@@ -662,14 +663,14 @@ function App() {
       ? allEntries.filter(
           (e) =>
             e.launchId &&
-            e.activity === 'approval-required' &&
+            blockedOnTerminal(e) &&
             e.sessionId &&
             e.sessionId !== selected &&
             !dismissedToasts.includes(e.launchId),
         )
       : [];
   const waitingLaunches = allEntries
-    .filter((e) => e.launchId && e.activity === 'approval-required')
+    .filter((e) => e.launchId && blockedOnTerminal(e))
     .map((e) => e.launchId!)
     .join(',');
   useEffect(() => {
@@ -905,7 +906,11 @@ function App() {
             `${e.projectName} (${e.target.agent === 'claude' ? 'Claude' : 'Codex'})`;
           return (
             <div key={e.launchId} role="status" className="approval-toast">
-              <span>{name} needs approval</span>
+              <span>
+                {e.attention === 'question'
+                  ? `${name} is waiting for your answer`
+                  : `${name} needs approval`}
+              </span>
               <button
                 type="button"
                 aria-label={`Show ${name}`}

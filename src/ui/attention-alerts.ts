@@ -112,13 +112,16 @@ export function useAlertSettings(): [
 export interface AlertEvent {
   key: string;
   sessionId: string;
-  kind: 'reply' | 'approval';
+  kind: 'reply' | 'approval' | 'question';
 }
 export interface AlertTracker {
   seeded: boolean;
   known: ReadonlySet<string>;
   lastSequence: ReadonlyMap<string, number>;
   approving: ReadonlySet<string>;
+  /** Sessions whose terminal was waiting on a question in the previous snapshot. */
+  asking: ReadonlySet<string>;
+  /** Onset counts per `<sessionId>:<a|q>`, so every onset key is unique. */
   onsets: ReadonlyMap<string, number>;
 }
 export const emptyTracker: AlertTracker = {
@@ -126,9 +129,10 @@ export const emptyTracker: AlertTracker = {
   known: new Set(),
   lastSequence: new Map(),
   approving: new Set(),
+  asking: new Set(),
   onsets: new Map(),
 };
-/** New replies and approval onsets since the previous snapshot. The first snapshot and sessions first seen in this one only seed state; the selected session is suppressed while the window is focused, but its state still advances so it never alerts later. */
+/** New replies, approval onsets and question onsets since the previous snapshot. The first snapshot and sessions first seen in this one only seed state; the selected session is suppressed while the window is focused, but its state still advances so it never alerts later. */
 export function diffAlerts(
   tracker: AlertTracker,
   entries: readonly CatalogEntry[],
@@ -137,8 +141,24 @@ export function diffAlerts(
   const known = new Set(tracker.known),
     lastSequence = new Map(tracker.lastSequence),
     approving = new Set<string>(),
+    asking = new Set<string>(),
     onsets = new Map(tracker.onsets);
   const events: AlertEvent[] = [];
+  // A terminal-blocking state alerts once when it begins, never while it lasts.
+  const onset = (
+    id: string,
+    kind: 'approval' | 'question',
+    now: Set<string>,
+    before: ReadonlySet<string>,
+    quiet: boolean,
+  ) => {
+    now.add(id);
+    if (before.has(id)) return;
+    const counter = `${id}:${kind === 'approval' ? 'a' : 'q'}`;
+    const n = (onsets.get(counter) ?? 0) + 1;
+    onsets.set(counter, n);
+    if (!quiet) events.push({ key: `${counter}:${n}`, sessionId: id, kind });
+  };
   for (const entry of entries) {
     const id = entry.sessionId;
     if (!id) continue;
@@ -156,14 +176,8 @@ export function diffAlerts(
         events.push({ key: `${id}:r:${sequence}`, sessionId: id, kind: 'reply' });
       if (previous === undefined || sequence > previous) lastSequence.set(id, sequence);
     }
-    if (entry.attention === 'approval') {
-      approving.add(id);
-      if (!tracker.approving.has(id)) {
-        const n = (onsets.get(id) ?? 0) + 1;
-        onsets.set(id, n);
-        if (!quiet) events.push({ key: `${id}:a:${n}`, sessionId: id, kind: 'approval' });
-      }
-    }
+    if (entry.attention === 'approval') onset(id, 'approval', approving, tracker.approving, quiet);
+    if (entry.attention === 'question') onset(id, 'question', asking, tracker.asking, quiet);
   }
-  return { events, tracker: { seeded: true, known, lastSequence, approving, onsets } };
+  return { events, tracker: { seeded: true, known, lastSequence, approving, asking, onsets } };
 }

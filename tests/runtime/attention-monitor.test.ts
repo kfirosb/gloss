@@ -104,6 +104,33 @@ it('does not treat prose questions as approval prompts', () => {
     classifyScreen(codex, '• Would you like to run the following command? I can if you agree.'),
   ).toBe('none');
 });
+it('monitor reports a Claude question dialog with its parsed question', async () => {
+  let screen = readFileSync(join(dir, 'claude-2.1.314-question.txt'), 'utf8');
+  const timers: (() => void)[] = [];
+  const monitor = createAttentionMonitor({
+    tmux: async () => ({ hasSession: async () => true, capturePane: async () => screen }) as any,
+    launches: () => [
+      { id: 'L1', agent: 'claude', folder: '/p', panePid: 2, state: 'running', createdAt: 0 },
+    ],
+    agentVersion: async () => '2.1.314',
+    intervalMs: 1,
+    setTimer: ((fn: () => void) => {
+      timers.push(fn);
+      return 0 as any;
+    }) as any,
+  });
+  monitor.start();
+  await vi.waitFor(() => expect(monitor.current().get('L1')?.state).toBe('question'));
+  expect(monitor.current().get('L1')?.question).toMatchObject({
+    header: 'Next step',
+    question: 'Which would you like to do next in this session?',
+  });
+  screen = readFileSync(join(dir, 'claude-2.1.299-permission.txt'), 'utf8');
+  timers.shift()!();
+  await vi.waitFor(() => expect(monitor.current().get('L1')?.state).toBe('needs-user'));
+  expect(monitor.current().get('L1')?.question).toBeUndefined();
+  monitor.close();
+});
 it('monitor reports needs-user, clears, and flags unknown versions without guessing', async () => {
   let screen = 'Working…';
   const timers: (() => void)[] = [];
