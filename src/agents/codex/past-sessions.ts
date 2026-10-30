@@ -84,8 +84,8 @@ export async function listCodexPastSessions(
       threadOrigin(row) !== 'user'
     )
       continue;
-    const lastActiveAt = updatedAt(row);
-    if (lastActiveAt === undefined) continue;
+    // A thread without a usable timestamp is still listed; 0 sorts it last.
+    const lastActiveAt = updatedAt(row) ?? 0;
     try {
       if ((await projectIdentity(row.cwd)) !== folder) continue;
     } catch {
