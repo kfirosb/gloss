@@ -34,6 +34,7 @@ import {
   runCommand,
   terminalTitle,
   endLaunch,
+  listLaunches,
   type TerminalView,
 } from './launch-controls.js';
 import { TerminalWorkspace } from './terminal-workspace.js';
@@ -74,7 +75,7 @@ import { errorMessage } from './error-message.js';
 import { SelectionErrorNote, type SelectionError } from './selection-error.js';
 import { usePastSessions } from './use-past-sessions.js';
 import { hidePastSession, manualResumeCommand, reopenPastSession } from './past-sessions.js';
-import { pastSessionKey, type PastSession } from '../core/past-sessions.js';
+import { pastSessionKey, REOPEN_FAILED_REASON, type PastSession } from '../core/past-sessions.js';
 
 window.addEventListener('hashchange', () => window.location.reload());
 applyTheme(readDisplayPreferences());
@@ -248,6 +249,38 @@ function App() {
     JSON.stringify([activeFolder?.open, activeFolder?.saved].map((l) => l?.map((e) => e.key))),
   );
   const [reopening, setReopening] = useState<string | undefined>();
+  // A reopen whose launch has not connected yet: if the agent exits first, the user gets the reason and the command.
+  const [pendingReopen, setPendingReopen] = useState<
+    { launchId: string; entry: PastSession; folder: string; folderKey: string } | undefined
+  >();
+  useEffect(() => {
+    if (!pendingReopen) return;
+    const listed = allEntries.find((e) => e.launchId === pendingReopen.launchId);
+    // Connected: nothing more to report. Still starting or waiting to connect: the catalog drops the launch once it ends.
+    if (listed?.sessionId) setPendingReopen(undefined);
+    if (listed) return;
+    let current = true;
+    void listLaunches().then(
+      (launches) => {
+        const launch = launches.find((l) => l.id === pendingReopen.launchId);
+        if (!current || (launch && launch.state !== 'ended')) return;
+        setPendingReopen(undefined);
+        const { entry, folder, folderKey } = pendingReopen;
+        if (
+          launch?.reason?.startsWith(REOPEN_FAILED_REASON) &&
+          lastActiveFolder.current === folderKey
+        )
+          setSelectionError({
+            message: `Could not reopen ${entry.title}: the agent exited.`,
+            command: manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand,
+          });
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [catalog?.sequence, pendingReopen]);
   const reopenPast = (entry: PastSession) => {
     if (!activeFolder) return;
     const folder = activeFolder.path;
@@ -262,9 +295,12 @@ function App() {
     void reopenPastSession(entry, folder)
       .then(
         (launch) => {
+          if (!unchanged()) return;
           setWaitingLaunchId(launch.id);
           setUnlistedLaunchId(launch.id);
-          if (launch.panelSessionId && unchanged()) chooseSession(launch.panelSessionId);
+          if (launch.panelSessionId) chooseSession(launch.panelSessionId);
+          else
+            setPendingReopen({ launchId: launch.id, entry, folder, folderKey: folderKeyAtClick });
         },
         (e: unknown) => {
           if (unchanged())

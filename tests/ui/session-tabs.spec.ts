@@ -727,6 +727,42 @@ test.describe('remove from history', () => {
     await expect(page.locator('code', { hasText: "cd '/repo' && codex resume T1" })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   });
+  test('a reopened session whose agent exits before connecting shows the reason and the command', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    await routePastSessions(context, () => [
+      { agent: 'codex', sessionRef: 'T1', title: 'Thread one', state: 'closed' as const },
+    ]);
+    const reason =
+      "Reopening failed; the agent exited. Run it yourself: cd '/repo' && codex resume T1";
+    const launch = {
+      id: 'R1',
+      agent: 'codex',
+      folder: '/repo',
+      panePid: 1,
+      state: 'starting',
+      createdAt: 0,
+      sessionRef: 'T1',
+      resumed: true,
+    };
+    let ended = false;
+    await context.route('**/api/launches/resume', (r) => {
+      ended = true;
+      return r.fulfill({ json: launch });
+    });
+    await context.route('**/api/launches', (r) =>
+      r.fulfill({ json: ended ? [{ ...launch, state: 'ended', reason }] : [] }),
+    );
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
+    await page.getByRole('button', { name: 'Reopen Thread one' }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'the agent exited' });
+    await expect(alert).toContainText('Could not reopen Thread one: the agent exited.');
+    await expect(alert.locator('code', { hasText: "cd '/repo' && codex resume T1" })).toBeVisible();
+  });
   test('a conversation without Gloss history is hidden after confirmation, and a failed reopen says how to resume', async ({
     page,
     context,

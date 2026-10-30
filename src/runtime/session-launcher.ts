@@ -27,8 +27,17 @@ import {
   type LaunchAgent,
   type LaunchState,
 } from '../core/session-contracts.js';
+import { manualResumeCommand, REOPEN_FAILED_REASON } from '../core/past-sessions.js';
 export type { LaunchState } from '../core/session-contracts.js';
 const MISSING_REASON = 'Session is no longer running';
+const NOT_CONNECTED_REASON = 'Started, not connected';
+/** A reopen that never connected leaves the user the command to run it by hand, in place of the usual reason. */
+function resumeFailedReason(record: LaunchRecord, reason: string): string {
+  if (!record.resumed || record.agent === 'shell' || !record.sessionRef || record.panelSessionId)
+    return reason;
+  const { cdCommand } = manualResumeCommand(record.agent, record.sessionRef, record.folder);
+  return `${REOPEN_FAILED_REASON} Run it yourself: ${cdCommand}`;
+}
 export interface LaunchRecord {
   id: string;
   agent: LaunchAgent;
@@ -40,6 +49,8 @@ export interface LaunchRecord {
   state: LaunchState;
   reason?: string;
   createdAt: number;
+  /** Started by `resume`: reopening an existing session. */
+  resumed?: boolean;
   /** Shell launches only. */
   title?: string;
   originSessionId?: string;
@@ -392,13 +403,17 @@ export function createSessionLauncher(options: {
         }
       } catch {
         if (active(id, controller) && get(id).reason !== 'Started, language settings not applied')
-          put({ ...get(id), state: 'unidentified', reason: 'Started, not connected' });
+          put({ ...get(id), state: 'unidentified', reason: NOT_CONNECTED_REASON });
       } finally {
         firstAttempt?.();
         clearTimeout(timer);
         if (identification.get(id) === controller) identification.delete(id);
         if (expired && !closed && !ending.has(id) && get(id).state !== 'ended')
-          put({ ...get(id), state: 'unidentified', reason: 'Started, not connected' });
+          put({
+            ...get(id),
+            state: 'unidentified',
+            reason: resumeFailedReason(get(id), NOT_CONNECTED_REASON),
+          });
         controller.abort();
       }
     })();
@@ -438,7 +453,7 @@ export function createSessionLauncher(options: {
       if (record.state === 'ended') {
         // A launch marked missing while its tmux session lives on (a listing gap around a restart) is adopted back;
         // launches ended on purpose stay ended.
-        if (panePid !== undefined && record.reason === MISSING_REASON) {
+        if (panePid !== undefined && record.reason === resumeFailedReason(record, MISSING_REASON)) {
           const kept = { ...get(record.id) };
           delete kept.reason;
           if (kept.agent === 'shell') {
@@ -464,7 +479,11 @@ export function createSessionLauncher(options: {
           continue;
         }
         cancel(record.id);
-        put({ ...get(record.id), state: 'ended', reason: MISSING_REASON });
+        put({
+          ...get(record.id),
+          state: 'ended',
+          reason: resumeFailedReason(get(record.id), MISSING_REASON),
+        });
         continue;
       }
       if (record.agent === 'shell') {
@@ -534,6 +553,7 @@ export function createSessionLauncher(options: {
       sessionRef?: string | undefined;
       language?: LanguageOverride | undefined;
       awaitFirstIdentify?: boolean;
+      resumed?: boolean;
     },
   ): Promise<LaunchRecord> {
     requireOpen();
@@ -552,6 +572,7 @@ export function createSessionLauncher(options: {
       createdAt: now(),
       ...(input.sessionRef ? { sessionRef: input.sessionRef } : {}),
       ...(input.language ? { languageOverride: input.language } : {}),
+      ...(input.resumed ? { resumed: true } : {}),
     };
     put(record);
     if (input.agent === 'claude' || input.awaitFirstIdentify)
@@ -659,6 +680,7 @@ export function createSessionLauncher(options: {
           argv: [...prepared.argv],
           sessionRef,
           awaitFirstIdentify: true,
+          resumed: true,
         });
       } finally {
         resuming.delete(key);

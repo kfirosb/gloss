@@ -110,6 +110,9 @@ export function mergePastSessions(
     }));
 }
 
+/** Starts the reason of a reopened launch that ended before it connected; the manual command follows. */
+export const REOPEN_FAILED_REASON = 'Reopening failed; the agent exited.';
+
 /** The command the user can paste when Gloss cannot reopen: `claude --resume <id>` or `codex resume <id>`, plus a cd variant. */
 export function manualResumeCommand(
   agent: AgentKind,

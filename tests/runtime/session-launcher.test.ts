@@ -1095,6 +1095,31 @@ it('resumes an existing Claude session in tmux with the extra arguments and no c
     reopened.close();
   }
 });
+it('a reopen that never connects and whose pane disappears ends with the command to run by hand', async () => {
+  const { launcher, folder, t, store } = await setup({
+    register: async () => {
+      throw new Error('No transcript pointer yet');
+    },
+  });
+  const record = await launcher.resume(
+    await launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  );
+  await vi.waitFor(() => expect(launcher.list()[0]?.state).toBe('unidentified'));
+  const failed = `Reopening failed; the agent exited. Run it yourself: cd '${folder}' && codex resume ${RESUMED}`;
+  expect(launcher.list()[0]?.reason).toBe(failed);
+  expect(store.listLaunches()[0]).toMatchObject({ resumed: true });
+  t.live.delete('gloss-' + record.id);
+  await launcher.reconcile();
+  expect(launcher.list()[0]).toMatchObject({ state: 'ended', reason: failed });
+  // A fresh launch that ends the same way keeps the plain reason.
+  const fresh = await launcher.launch({ agent: 'codex', folder });
+  t.live.delete('gloss-' + fresh.id);
+  await launcher.reconcile();
+  expect(launcher.list().find((l) => l.id === fresh.id)).toMatchObject({
+    state: 'ended',
+    reason: 'Session is no longer running',
+  });
+});
 it('prepareResume refuses a bad id or an unknown folder and starts nothing', async () => {
   const { launcher, folder, t } = await setup();
   await expect(
