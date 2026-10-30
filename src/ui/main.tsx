@@ -71,6 +71,7 @@ import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js'
 import type { CreatedWorktree, WorktreeRemoval } from '../runtime/application.js';
 import { SessionWorkspace } from './session-workspace.js';
 import { errorMessage } from './error-message.js';
+import { SelectionErrorNote, type SelectionError } from './selection-error.js';
 import { usePastSessions } from './use-past-sessions.js';
 import { hidePastSession, manualResumeCommand, reopenPastSession } from './past-sessions.js';
 import { pastSessionKey, type PastSession } from '../core/past-sessions.js';
@@ -92,7 +93,7 @@ function App() {
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const [initial, setInitial] = useState<SessionEnvelope | null>(null);
   const [error, setError] = useState('');
-  const [selectionError, setSelectionError] = useState('');
+  const [selectionError, setSelectionError] = useState<SelectionError>('');
   const selectionRequest = useRef(0);
   const [retry, setRetry] = useState(0);
   const [removal, setRemoval] = useState<{ entries: CatalogEntry[]; folderName?: string } | null>(
@@ -267,9 +268,10 @@ function App() {
         },
         (e: unknown) => {
           if (unchanged())
-            setSelectionError(
-              `Could not reopen ${entry.title}: ${errorMessage(e, 'unknown error')}. Run it yourself: ${manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand}`,
-            );
+            setSelectionError({
+              message: `Could not reopen ${entry.title}: ${errorMessage(e, 'unknown error')}`,
+              command: manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand,
+            });
         },
       )
       .finally(() => {
@@ -1009,11 +1011,7 @@ function App() {
             </div>
           );
         })}
-        {selectionError && (
-          <p role="alert" className="error">
-            {selectionError}
-          </p>
-        )}
+        {selectionError && <SelectionErrorNote error={selectionError} />}
         {error && (
           <p role="alert">
             {error}

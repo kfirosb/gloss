@@ -703,6 +703,30 @@ test.describe('remove from history', () => {
     await expect(dialog.getByRole('alert')).toContainText('Session is open');
     await expect(dialog).toBeVisible();
   });
+  test('a failed reopen shows the reason and the command to run by hand', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    await routePastSessions(context, () => [
+      { agent: 'codex', sessionRef: 'T1', title: 'Thread one', state: 'closed' as const },
+    ]);
+    await context.route('**/api/launches/resume', (r) =>
+      r.fulfill({
+        status: 400,
+        json: { error: 'Codex exited as soon as Gloss reopened the session.' },
+      }),
+    );
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
+    await page.getByRole('button', { name: 'Reopen Thread one' }).click();
+    await expect(
+      page.getByText('Codex exited as soon as Gloss reopened the session.'),
+    ).toBeVisible();
+    await expect(page.locator('code', { hasText: "cd '/repo' && codex resume T1" })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+  });
   test('a conversation without Gloss history is hidden after confirmation, and a failed reopen says how to resume', async ({
     page,
     context,
@@ -725,9 +749,12 @@ test.describe('remove from history', () => {
     await page.goto('/#capability=test');
     await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
     await page.getByRole('button', { name: 'Reopen Outside work' }).click();
-    await expect(page.getByRole('alert')).toHaveText(
-      "Could not reopen Outside work: Conversation is open outside Gloss. Run it yourself: cd '/repo' && claude --resume c-9",
+    await expect(page.getByRole('alert')).toContainText(
+      'Could not reopen Outside work: Conversation is open outside Gloss',
     );
+    await expect(
+      page.locator('code', { hasText: "cd '/repo' && claude --resume c-9" }),
+    ).toBeVisible();
     // The row has no Gloss session to select, but its context menu still works from the keyboard.
     await page.getByRole('menuitem', { name: /Outside work/ }).press('Shift+F10');
     await page.getByRole('menuitem', { name: 'Remove from history…' }).press('Enter');
