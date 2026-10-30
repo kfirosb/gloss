@@ -5,7 +5,11 @@ export interface PopupMenuItem {
   content: ReactNode;
   current?: boolean;
   disabled?: boolean;
+  /** Focusable but not choosable: arrows still reach it, and its context menu and action still work. */
+  unavailable?: boolean;
   onChoose(): void;
+  /** A secondary button beside the item, outside arrow-key order (its context menu offers the same action). */
+  action?: { label: ReactNode; ariaLabel: string; disabled?: boolean; onAction(): void };
   onContext?(anchor: { x: number; y: number }): void;
   data?: Record<string, string | undefined>;
 }
@@ -27,6 +31,8 @@ export function PopupMenu({
   menuLabel,
   triggerLabel,
   triggerClassName,
+  triggerDisabled,
+  onOpen,
 }: {
   label: ReactNode;
   description?: string | undefined;
@@ -38,6 +44,8 @@ export function PopupMenu({
   menuLabel?: string;
   triggerLabel?: string;
   triggerClassName?: string;
+  triggerDisabled?: boolean | undefined;
+  onOpen?: (() => void) | undefined;
 }) {
   const [ownOpen, setOwnOpen] = useState(false);
   const open = controlled ? controlled.open : ownOpen;
@@ -114,7 +122,11 @@ export function PopupMenu({
           aria-haspopup="menu"
           aria-expanded={open}
           {...(description ? { 'aria-describedby': descId } : {})}
-          onClick={() => setOpen((v) => !v)}
+          disabled={triggerDisabled}
+          onClick={() => {
+            if (!open) onOpen?.();
+            setOpen(!open);
+          }}
         >
           {label}
         </button>
@@ -131,44 +143,70 @@ export function PopupMenu({
           {...(menuLabel ? { 'aria-label': menuLabel } : {})}
           className={menuClassName}
         >
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              disabled={item.disabled}
-              aria-current={item.current ? 'true' : undefined}
-              data-session-key={item.data?.['sessionKey']}
-              data-session-id={item.data?.['sessionId']}
-              onClick={() => {
-                close();
-                item.onChoose();
-              }}
-              onContextMenu={
-                item.onContext
-                  ? (e) => {
-                      e.preventDefault();
-                      item.onContext!({ x: e.clientX, y: e.clientY });
-                    }
-                  : undefined
-              }
-              onKeyDown={
-                item.onContext
-                  ? (e) => {
-                      if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+          {items.map((item) => {
+            const choice = (
+              <button
+                key={item.key}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                disabled={item.disabled}
+                aria-disabled={item.unavailable || undefined}
+                aria-current={item.current ? 'true' : undefined}
+                data-session-key={item.data?.['sessionKey']}
+                data-session-id={item.data?.['sessionId']}
+                onClick={() => {
+                  if (item.unavailable) return;
+                  close();
+                  item.onChoose();
+                }}
+                onContextMenu={
+                  item.onContext
+                    ? (e) => {
                         e.preventDefault();
-                        e.stopPropagation();
-                        const box = e.currentTarget.getBoundingClientRect();
-                        item.onContext!({ x: box.left + 16, y: box.bottom });
+                        item.onContext!({ x: e.clientX, y: e.clientY });
                       }
-                    }
-                  : undefined
-              }
-            >
-              {item.content}
-            </button>
-          ))}
+                    : undefined
+                }
+                onKeyDown={
+                  item.onContext
+                    ? (e) => {
+                        if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const box = e.currentTarget.getBoundingClientRect();
+                          item.onContext!({ x: box.left + 16, y: box.bottom });
+                        }
+                      }
+                    : undefined
+                }
+              >
+                {item.content}
+              </button>
+            );
+            const action = item.action;
+            if (!action) return choice;
+            // The action is a sibling of the item because a button cannot contain another button.
+            return (
+              <div key={item.key} role="none" className="popup-menu-row">
+                {choice}
+                <button
+                  type="button"
+                  className="popup-menu-action"
+                  tabIndex={-1}
+                  aria-label={action.ariaLabel}
+                  title={action.ariaLabel}
+                  disabled={action.disabled}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    action.onAction();
+                  }}
+                >
+                  {action.label}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,4 +1,6 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Page } from '@playwright/test';
+import type { PastSession } from '../../src/core/past-sessions.js';
+import type { CatalogEntry } from '../../src/core/session-catalog.js';
 import { defaultWorkspace, type WorkspaceRecord } from '../../src/core/session-contracts.js';
 /** The Assistant opens compact by default; these regression suites exercise the full view, so they start from an explicit
  * 'full' choice for their sessions (only when the page has no saved display preferences yet). */
@@ -25,6 +27,58 @@ export async function preferFullAssistant(
     }
   }, ids);
 }
+type PastRow = Pick<PastSession, 'sessionRef' | 'panelSessionId' | 'title' | 'state'> & {
+  agent: string;
+};
+/** Answers the past-sessions listing with `rows(folder)`; register it after any catch-all `catch-all /api` route. */
+export async function routePastSessions(
+  target: Page | BrowserContext,
+  rows: (folder: string | null) => PastRow[],
+) {
+  await target.route('**/api/past-sessions**', (route) => {
+    const folder = new URL(route.request().url()).searchParams.get('folder');
+    return route.fulfill({ json: { folder, entries: rows(folder) } });
+  });
+}
+/** As the server lists them with no agent transcripts on disk: the folder's registered sessions, closed. */
+export const pastFromRecords =
+  (
+    records: Array<{
+      id: string;
+      target: { agent: string; sessionRef: string };
+      canonicalRoot: string;
+    }>,
+  ) =>
+  (folder: string | null): PastRow[] =>
+    records
+      .filter((r) => r.canonicalRoot === folder)
+      .map((r) => ({
+        agent: r.target.agent,
+        sessionRef: r.target.sessionRef,
+        panelSessionId: r.id,
+        title: `Session ${r.id}`,
+        state: 'closed',
+      }));
+/** As the server lists them from the catalog: the folder's closed Gloss sessions, read when asked. */
+type CatalogRow = Pick<CatalogEntry, 'open' | 'sessionId' | 'worktreePath' | 'sessionTitle'> & {
+  target: { agent: string; sessionRef: string };
+};
+export const pastFromCatalog =
+  (catalog: () => { entries: CatalogRow[] }) =>
+  (folder: string | null): PastRow[] =>
+    catalog().entries.flatMap((e) =>
+      !e.open && e.sessionId && e.worktreePath === folder
+        ? [
+            {
+              agent: e.target.agent,
+              sessionRef: e.target.sessionRef,
+              panelSessionId: e.sessionId,
+              title: e.sessionTitle ?? e.target.sessionRef,
+              state: 'closed' as const,
+            },
+          ]
+        : [],
+    );
 /** Connected folders, worktrees, sidebar settings and About: empty defaults a spec can override with later routes. */
 export async function mockSidebarDefaults(
   target: Page | import('@playwright/test').BrowserContext,
@@ -156,13 +210,15 @@ export async function expectSelected(page: Page, id: string) {
 export async function selectSession(page: Page, id: string) {
   const tab = page.locator(`[role=tab][data-session-id=${JSON.stringify(id)}]`);
   const item = page.locator(`[role=menuitem][data-session-id=${JSON.stringify(id)}]`);
-  const saved = page.getByRole('button', { name: /^Saved sessions \(\d+\)$/ });
+  const saved = page.getByRole('button', { name: /^Saved sessions/ });
   async function here() {
     if (await tab.count()) {
       await tab.click();
       return true;
     }
-    if (await saved.count()) {
+    // The Saved menu's rows come from the folder's past-sessions listing: wait for its count.
+    if (await saved.count()) await expect(saved).toHaveAccessibleName(/^Saved sessions \(\d+\)$/);
+    if ((await saved.count()) && (await saved.isEnabled())) {
       await saved.click();
       if (await item.count()) {
         await item.click();

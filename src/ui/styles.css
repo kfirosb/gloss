@@ -2844,6 +2844,10 @@ pre {
   box-shadow: 0 14px 40px #17203324;
   padding: 6px;
   min-width: 220px;
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: min(60vh, calc(100vh - 120px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
 }
@@ -2866,6 +2870,42 @@ pre {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+.popup-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.popup-menu-row > [role='menuitem'] {
+  flex: 1;
+  min-width: 0;
+}
+/* Rows keep their height so a long list scrolls instead of squeezing. */
+.session-saved-menu > button,
+.popup-menu-row {
+  flex-shrink: 0;
+}
+.session-saved-menu .popup-menu-action {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  border: 1px solid light-dark(#d9deea, var(--dk-bg-d9deea));
+}
+.past-session-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.past-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.past-session-details,
+.past-session-state {
+  font-size: 0.72rem;
+  color: light-dark(#647089, var(--dk-fg-647089));
+  white-space: nowrap;
 }
 .session-header {
   display: flex;

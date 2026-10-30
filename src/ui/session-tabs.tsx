@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PopupMenu } from './popup-menu.js';
 import { MovePopover, useMoveLauncher } from './claude-move.js';
 import { SessionClient } from './session-client.js';
+import { providerLabel } from './provider-label.js';
+import { relativeTime } from './past-sessions.js';
 import type { CatalogEntry } from '../core/session-catalog.js';
+import { pastSessionKey, type PastSession } from '../core/past-sessions.js';
 import type { TerminalEntry, TerminalView } from '../core/session-contracts.js';
 import {
   activityLabel,
@@ -38,6 +41,36 @@ export function ActivityDot({ entry }: { entry: CatalogEntry }) {
     />
   );
 }
+/** The folder's past conversations; undefined until the first answer is asked for. */
+export interface PastSessionsList {
+  entries: PastSession[];
+  loading: boolean; // no answer yet for this folder
+  error?: string | undefined; // the last fetch failed; `entries` are from an earlier answer, if any
+}
+const PAST_STATE_LABEL: Record<Exclude<PastSession['state'], 'closed'>, string> = {
+  'open-in-gloss': 'Open in Gloss',
+  'open-outside': 'Open elsewhere',
+};
+// `saved` is the folder's saved Gloss session for the row, whose live activity the row keeps showing.
+function PastSessionRow({ entry, saved }: { entry: PastSession; saved: CatalogEntry | undefined }) {
+  const details = [
+    providerLabel(entry.agent),
+    ...(entry.lastActiveAt ? [relativeTime(entry.lastActiveAt)] : []),
+    ...(entry.branch ? [entry.branch] : []),
+  ];
+  return (
+    <>
+      <span className="past-session-text">
+        <span className="past-session-title">{entry.title}</span>
+        <span className="past-session-details">{details.join(' · ')}</span>
+      </span>
+      {entry.state !== 'closed' && (
+        <span className="past-session-state">{PAST_STATE_LABEL[entry.state]}</span>
+      )}
+      {saved && <ActivityDot entry={saved} />}
+    </>
+  );
+}
 export function SessionTabs({
   folder,
   selectedId,
@@ -47,6 +80,11 @@ export function SessionTabs({
   onShowTerminal,
   onRetry,
   onRemove,
+  pastSessions,
+  onOpenSaved,
+  onReopen,
+  onRemovePast,
+  reopening,
   offerMoveToGloss = false,
   selectedTerminalId,
   onSelectTerminal,
@@ -62,6 +100,11 @@ export function SessionTabs({
   onShowTerminal?(launchId: string, title: string): void;
   onRetry?(launchId: string): void;
   onRemove?(entries: CatalogEntry[]): void;
+  pastSessions?: PastSessionsList | undefined; // the Saved sessions rows; undefined = not fetched yet
+  onOpenSaved?(): void; // the Saved sessions popup opened: the parent refetches
+  onReopen?(entry: PastSession): void;
+  onRemovePast?(entry: PastSession): void; // a row with no saved Gloss session to remove (onRemove covers those)
+  reopening?: string | undefined; // pastSessionKey of the row being reopened
   offerMoveToGloss?: boolean; // context menu: Move to Gloss for an outside Claude session
   selectedTerminalId?: string | undefined; // launchId shown in the workspace view
   onSelectTerminal?(terminal: TerminalEntry): void; // click on a terminal tab
@@ -80,7 +123,7 @@ export function SessionTabs({
     x: number;
     y: number;
   } | null>(null);
-  const [savedMenu, setSavedMenu] = useState<{ entry: CatalogEntry; x: number; y: number } | null>(
+  const [savedMenu, setSavedMenu] = useState<{ entry: PastSession; x: number; y: number } | null>(
     null,
   );
   // The compact Move to Gloss popover, opened from a tab's menu at the menu's place; a move started there is
@@ -119,11 +162,28 @@ export function SessionTabs({
     (!!entry.launchId && (!!onEnd || (launchPending(entry) && !!(onShowTerminal || onRetry))));
   const tabFor = (key: string) =>
     root.current?.querySelector<HTMLElement>(`[data-session-key=${JSON.stringify(key)}]`);
-  const openSavedMenu = (entry: CatalogEntry, anchor: { x: number; y: number }) => {
-    if (!onRemove || !entry.sessionId) return;
+  const openSavedMenu = (entry: PastSession, anchor: { x: number; y: number }) => {
     const box = root.current?.getBoundingClientRect();
     setSavedMenu({ entry, x: anchor.x - (box?.left ?? 0), y: anchor.y - (box?.top ?? 0) });
   };
+  // Removal goes through the saved Gloss session when there is one, else the row is only hidden.
+  const savedFor = (entry: PastSession) =>
+    entry.panelSessionId ? saved.find((e) => e.sessionId === entry.panelSessionId) : undefined;
+  const removePast = (entry: PastSession) => {
+    const record = savedFor(entry);
+    if (record) onRemove?.([record]);
+    else onRemovePast?.(entry);
+  };
+  const canRemove = (entry: PastSession) =>
+    entry.state !== 'open-in-gloss' && (savedFor(entry) ? !!onRemove : !!onRemovePast);
+  const savedMenuItems = (entry: PastSession) => [
+    ...(entry.state === 'closed' && onReopen
+      ? [{ key: 'reopen', content: 'Reopen', onChoose: () => onReopen(entry) }]
+      : []),
+    ...(canRemove(entry)
+      ? [{ key: 'remove', content: 'Remove from history…', onChoose: () => removePast(entry) }]
+      : []),
+  ];
   const openMenu = (
     entry: CatalogEntry,
     anchor: { x: number; y: number } | undefined,
@@ -242,6 +302,43 @@ export function SessionTabs({
     if (!next) return;
     setFocusKey(next);
     list.current?.querySelector<HTMLElement>(`[data-session-key=${JSON.stringify(next)}]`)?.focus();
+  };
+  const pastEntries = pastSessions?.entries ?? [];
+  // The count is shown once an answer is in; a failed first fetch keeps the menu open to say why.
+  const savedKnown =
+    !!pastSessions && (pastEntries.length > 0 || (!pastSessions.loading && !pastSessions.error));
+  const savedStatus = pastSessions?.error
+    ? `Could not load saved sessions: ${pastSessions.error}`
+    : savedKnown
+      ? 'No saved sessions'
+      : 'Loading…';
+  const pastItem = (entry: PastSession) => {
+    const key = pastSessionKey(entry.agent, entry.sessionRef);
+    const panelId = entry.panelSessionId;
+    const menu = savedMenuItems(entry);
+    return {
+      key,
+      unavailable: !panelId,
+      current: !!panelId && panelId === selectedId,
+      data: { sessionKey: key, sessionId: panelId },
+      content: <PastSessionRow entry={entry} saved={savedFor(entry)} />,
+      onChoose: () => {
+        if (panelId) onSelect(panelId);
+      },
+      ...(entry.state === 'closed' && onReopen
+        ? {
+            action: {
+              label: reopening === key ? 'Reopening…' : 'Reopen',
+              ariaLabel: `Reopen ${entry.title}`,
+              disabled: reopening !== undefined,
+              onAction: () => onReopen(entry),
+            },
+          }
+        : {}),
+      ...(menu.length
+        ? { onContext: (anchor: { x: number; y: number }) => openSavedMenu(entry, anchor) }
+        : {}),
+    };
   };
   const newButton = onNewSession && (
     <button type="button" className="session-new" aria-label="New session" onClick={onNewSession}>
@@ -513,59 +610,38 @@ export function SessionTabs({
                 if (!v) setSavedMenu(null);
               },
               restoreFocus: () => {
-                const key = savedMenu.entry.key;
                 setSavedMenu(null);
-                (
-                  tabFor(key) ?? root.current?.querySelector<HTMLElement>('.session-saved > button')
-                )?.focus();
+                root.current?.querySelector<HTMLElement>('.session-saved > button')?.focus();
               },
             }}
             label="Session actions"
             menuClassName="session-saved-menu session-context-menu"
             menuLabel="Session actions"
-            items={[
-              {
-                key: 'remove',
-                content: 'Remove from history…',
-                onChoose: () => onRemove?.([savedMenu.entry]),
-              },
-            ]}
+            items={savedMenuItems(savedMenu.entry)}
           />
         </div>
       )}
       {!folderHasLiveSessions(folder) && (
         <p className="session-tabs-empty">No open sessions in this folder.</p>
       )}
-      {saved.length > 0 && (
-        <PopupMenu
-          className="session-saved"
-          menuClassName="session-saved-menu"
-          resetKey={folder.key}
-          label={<>Saved sessions ({saved.length})</>}
-          description={
-            saved.some((e) => e.sessionId && e.sessionId === selectedId)
-              ? '(current session inside)'
-              : undefined
-          }
-          items={saved.map((entry) => ({
-            key: entry.key,
-            disabled: !entry.sessionId,
-            current: !!entry.sessionId && entry.sessionId === selectedId,
-            data: { sessionKey: entry.key, sessionId: entry.sessionId },
-            content: (
-              <>
-                {sessionTitle(entry)} <ActivityDot entry={entry} />
-              </>
-            ),
-            onChoose: () => {
-              if (entry.sessionId) onSelect(entry.sessionId);
-            },
-            ...(onRemove && entry.sessionId
-              ? { onContext: (anchor: { x: number; y: number }) => openSavedMenu(entry, anchor) }
-              : {}),
-          }))}
-        />
-      )}
+      <PopupMenu
+        className="session-saved"
+        menuClassName="session-saved-menu"
+        resetKey={folder.key}
+        label={savedKnown ? <>Saved sessions ({pastEntries.length})</> : 'Saved sessions'}
+        triggerDisabled={savedKnown && pastEntries.length === 0}
+        onOpen={onOpenSaved}
+        description={
+          pastEntries.some((e) => e.panelSessionId && e.panelSessionId === selectedId)
+            ? '(current session inside)'
+            : undefined
+        }
+        items={
+          pastEntries.length
+            ? pastEntries.map(pastItem)
+            : [{ key: 'status', disabled: true, content: savedStatus, onChoose: () => {} }]
+        }
+      />
     </div>
   );
 }

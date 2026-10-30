@@ -1,6 +1,6 @@
 import type { BrowserContext } from '@playwright/test';
 import { defaultWorkspace } from '../../src/core/session-contracts.js';
-import { preferFullAssistant } from './session-fixture.js';
+import { pastFromRecords, preferFullAssistant, routePastSessions } from './session-fixture.js';
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=';
 export async function sessionFixture(context: BrowserContext) {
@@ -187,6 +187,7 @@ export async function sessionFixture(context: BrowserContext) {
       });
     return route.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') });
   });
+  await routePastSessions(context, pastFromRecords(records));
   return {
     records,
     workspaces,

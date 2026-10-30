@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { expectSelected } from './session-fixture.js';
+import { expectSelected, pastFromCatalog, routePastSessions } from './session-fixture.js';
 import { sessionFixture } from './multi-session-fixture.js';
 import type { CatalogSnapshot } from '../../src/core/session-catalog.js';
 
@@ -75,7 +75,12 @@ test('activity dots have text labels and keyboard moves between tabs', async ({
 });
 test('a closed selected session moves to Saved and stays selected', async ({ page, context }) => {
   const f = await sessionFixture(context);
-  await serve(context, catalogFor(f, { A: { open: false, activity: 'disconnected' } }));
+  const catalog = catalogFor(f, { A: { open: false, activity: 'disconnected' } });
+  await serve(context, catalog);
+  await routePastSessions(
+    context,
+    pastFromCatalog(() => catalog),
+  );
   await page.goto('/#capability=test');
   const tabs = page.getByRole('tablist', { name: 'Sessions in repo' });
   await expect(tabs.getByRole('tab')).toHaveCount(1);
@@ -88,12 +93,14 @@ test('a folder with only saved sessions shows the empty state and the Saved menu
   context,
 }) => {
   const f = await sessionFixture(context);
-  await serve(
+  const catalog = catalogFor(f, {
+    A: { open: false, activity: 'disconnected' },
+    B: { open: false, activity: 'disconnected' },
+  });
+  await serve(context, catalog);
+  await routePastSessions(
     context,
-    catalogFor(f, {
-      A: { open: false, activity: 'disconnected' },
-      B: { open: false, activity: 'disconnected' },
-    }),
+    pastFromCatalog(() => catalog),
   );
   await page.goto('/#capability=test');
   await expect(page.getByText('No open sessions in this folder.')).toBeVisible();
@@ -318,7 +325,12 @@ test.describe('Saved sessions menu', () => {
     context,
   }) => {
     const f = await sessionFixture(context);
-    await serve(context, catalogFor(f, allSaved));
+    const catalog = catalogFor(f, allSaved);
+    await serve(context, catalog);
+    await routePastSessions(
+      context,
+      pastFromCatalog(() => catalog),
+    );
     await page.goto('/#capability=test');
     const trigger = page.getByRole('button', { name: /Saved sessions \(2\)/ });
     await expect(trigger).toHaveAccessibleDescription('(current session inside)');
@@ -347,7 +359,12 @@ test.describe('Saved sessions menu', () => {
     context,
   }) => {
     const f = await sessionFixture(context);
-    await serve(context, catalogFor(f, allSaved));
+    const catalog = catalogFor(f, allSaved);
+    await serve(context, catalog);
+    await routePastSessions(
+      context,
+      pastFromCatalog(() => catalog),
+    );
     await page.goto('/#capability=test');
     const trigger = page.getByRole('button', { name: /Saved sessions/ });
     await trigger.click();
@@ -361,9 +378,14 @@ test.describe('Saved sessions menu', () => {
   });
   test('outside click closes the menu and a folder change resets it', async ({ page, context }) => {
     const f = await sessionFixture(context);
-    await serve(
+    const catalog = catalogFor(f, {
+      ...allSaved,
+      B: { ...allSaved.B, worktreePath: '/wt/feature' },
+    });
+    await serve(context, catalog);
+    await routePastSessions(
       context,
-      catalogFor(f, { ...allSaved, B: { ...allSaved.B, worktreePath: '/wt/feature' } }),
+      pastFromCatalog(() => catalog),
     );
     await page.goto('/#capability=test');
     const trigger = page.getByRole('button', { name: /Saved sessions/ });
@@ -383,6 +405,84 @@ test.describe('Saved sessions menu', () => {
       'aria-expanded',
       'false',
     );
+  });
+  test('lists past conversations with Reopen, and reopening selects the session', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    const past = {
+      folder: '/repo',
+      entries: [
+        {
+          agent: 'claude',
+          sessionRef: 'c-1',
+          title: 'Login fix',
+          lastActiveAt: new Date().toISOString(),
+          branch: 'main',
+          state: 'closed',
+        },
+        {
+          agent: 'codex',
+          sessionRef: 'B',
+          panelSessionId: 'B',
+          title: 'Session B',
+          lastActiveAt: new Date(Date.now() - 7_200_000).toISOString(),
+          state: 'open-outside',
+        },
+      ],
+    };
+    await context.route('**/api/past-sessions**', (r) => r.fulfill({ json: past }));
+    const posts: unknown[] = [];
+    await context.route('**/api/launches/resume', (r) => {
+      posts.push(r.request().postDataJSON());
+      return r.fulfill({
+        json: {
+          id: 'R1',
+          agent: 'claude',
+          folder: '/repo',
+          panePid: 1,
+          state: 'running',
+          createdAt: 0,
+          sessionRef: 'c-1',
+          panelSessionId: 'A',
+        },
+      });
+    });
+    await serve(context, catalogFor(f, { A: { open: true }, B: { open: false } }));
+    await page.goto('/#capability=test');
+    const trigger = page.getByRole('button', { name: 'Saved sessions (2)' });
+    await trigger.click();
+    await expect(page.getByText('Login fix')).toBeVisible();
+    await expect(page.getByText('Open elsewhere')).toBeVisible();
+    await page.getByRole('button', { name: 'Reopen Login fix' }).click();
+    await expect
+      .poll(() => posts)
+      .toEqual([{ agent: 'claude', sessionRef: 'c-1', folder: '/repo' }]);
+    await expectSelected(page, 'A');
+  });
+  test('the saved menu scrolls when it is taller than the window', async ({ page, context }) => {
+    const f = await sessionFixture(context);
+    const entries = Array.from({ length: 10 }, (_, i) => ({
+      agent: 'claude',
+      sessionRef: `c${i}`,
+      title: `Conversation ${i}`,
+      lastActiveAt: new Date().toISOString(),
+      state: 'closed',
+    }));
+    await context.route('**/api/past-sessions**', (r) =>
+      r.fulfill({ json: { folder: '/repo', entries } }),
+    );
+    await serve(context, catalogFor(f));
+    await page.setViewportSize({ width: 900, height: 420 });
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (10)' }).click();
+    const menu = page.locator('.session-saved-menu');
+    const overflow = await menu.evaluate(
+      (el) => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto',
+    );
+    expect(overflow).toBe(true);
+    await expect(page.getByText('Conversation 9')).toBeAttached();
   });
 });
 test('a stale failed session lookup does not show an error after a later choice', async ({
@@ -482,14 +582,20 @@ test.describe('remove from history', () => {
     const f = await sessionFixture(context);
     const catalog = catalogFor(f, { B: { open: false, activity: 'disconnected' } });
     await serve(context, catalog);
+    await routePastSessions(
+      context,
+      pastFromCatalog(() => catalog),
+    );
     const deleted: string[] = [];
     await deleteRoute(context, f, deleted);
     await page.goto('/#capability=test');
     await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
     await page.getByRole('menuitem', { name: /Session B/ }).click({ button: 'right' });
-    const action = page
-      .getByRole('menu', { name: 'Session actions' })
-      .getByRole('menuitem', { name: 'Remove from history…' });
+    const actions = page.getByRole('menu', { name: 'Session actions' });
+    // A closed conversation offers Reopen first, then removal.
+    await expect(actions.getByRole('menuitem', { name: 'Reopen' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    const action = actions.getByRole('menuitem', { name: 'Remove from history…' });
     await expect(action).toBeFocused();
     await action.press('Enter');
     const dialog = page.getByRole('dialog', { name: 'Remove from history' });
@@ -508,7 +614,12 @@ test.describe('remove from history', () => {
     context,
   }) => {
     const f = await sessionFixture(context);
-    await serve(context, catalogFor(f, { B: { open: false, activity: 'disconnected' } }));
+    const catalog = catalogFor(f, { B: { open: false, activity: 'disconnected' } });
+    await serve(context, catalog);
+    await routePastSessions(
+      context,
+      pastFromCatalog(() => catalog),
+    );
     const deleted: string[] = [];
     await deleteRoute(context, f, deleted, 'B');
     await page.goto('/#capability=test');
