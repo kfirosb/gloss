@@ -386,6 +386,30 @@ it('reopens a session with only agent, id and folder forwarded', async () => {
   expect(prepareResume).toHaveBeenCalledWith({ agent: 'codex', sessionRef: 'T', folder: '/p' });
   expect(await res.json()).toMatchObject({ id: 'R1', agent: 'codex' });
 });
+it('answers 409 to a reopen of a conversation open outside Gloss and never resumes it', async () => {
+  const prepareResume = vi.fn(async (input: any) => ({ ...input, cwd: input.folder, argv: [] }));
+  const resume = vi.fn();
+  const pastSessions = {
+    list: vi.fn(),
+    invalidate: vi.fn(),
+    close: vi.fn(),
+    openOutside: vi.fn(async () => true),
+  };
+  const { request } = await setup(fakeLauncher({ prepareResume, resume }), undefined, {
+    pastSessions,
+  });
+  const res = await request('/api/launches/resume', 'POST', {
+    agent: 'codex',
+    sessionRef: 'T',
+    folder: '/p',
+  });
+  expect(res.status).toBe(409);
+  expect((await res.json()).error).toBe(
+    'Codex is running this thread in another terminal; close it there first.',
+  );
+  expect(pastSessions.openOutside).toHaveBeenCalledWith('codex', 'T');
+  expect(resume).not.toHaveBeenCalled();
+});
 it('hides a past conversation that has no panel', async () => {
   const { request, store } = await setup(fakeLauncher());
   const res = await request('/api/past-sessions/hide', 'POST', {

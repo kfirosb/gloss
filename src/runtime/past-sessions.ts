@@ -18,6 +18,8 @@ const OPEN_SCAN_TIMEOUT_MS = 10_000;
 
 export interface PastSessionsService {
   list(folder: unknown): Promise<PastSessionsResponse>;
+  /** Whether the agent reports this conversation open now, from a fresh scan; a failed or slow scan reports false. */
+  openOutside(agent: AgentKind, sessionRef: string): Promise<boolean>;
   /** Drops cached listings, after something changed what a listing would show (hide, reopen, remove). */
   invalidate(): void;
   close(): void;
@@ -74,9 +76,11 @@ export function createPastSessionsService(options: {
       }));
   };
 
+  const scanSignal = () =>
+    AbortSignal.any([closing.signal, AbortSignal.timeout(OPEN_SCAN_TIMEOUT_MS)]);
   /** Keys of conversations each agent reports open now; a scan counts even when incomplete. */
   const openOutside = async (): Promise<Set<string>> => {
-    const signal = AbortSignal.any([closing.signal, AbortSignal.timeout(OPEN_SCAN_TIMEOUT_MS)]);
+    const signal = scanSignal();
     const scans = await Promise.all(
       options.agents.map((agent) =>
         agent.discoverOpen?.(signal).catch(failed('Open session scan', agent.kind)),
@@ -139,6 +143,15 @@ export function createPastSessionsService(options: {
       if (closing.signal.aborted) throw new Error('Past sessions unavailable');
       const real = await canonicalFolder(folder);
       return cache.get(real, () => read(real));
+    },
+    async openOutside(agent, sessionRef) {
+      const adapter = options.agents.find((a) => a.kind === agent);
+      const scan = await adapter
+        ?.discoverOpen?.(scanSignal(), { fresh: true })
+        .catch(failed('Open session scan', agent));
+      return (scan?.candidates ?? []).some(
+        (c) => c.target.agent === agent && c.target.sessionRef === sessionRef,
+      );
     },
     invalidate() {
       cache.clear();

@@ -502,6 +502,8 @@ export function createApplication(options: ApplicationOptions): Application {
       if (typeof folder !== 'string') throw failure('Choose a project folder', 'bad-request');
       if (!options.launcher) throw new Error('Session launching unavailable');
       const prepared = await options.launcher.prepareResume({ agent, sessionRef, folder });
+      if (await options.pastSessions?.openOutside(agent, sessionRef))
+        throw failure(OPEN_OUTSIDE_REASON[agent], 'session-open');
       const launch = await options.launcher.resume(prepared);
       options.pastSessions?.invalidate();
       return launch;
@@ -1063,6 +1065,11 @@ function normalizeLaunchSettings(value: unknown): LaunchSettings {
 }
 
 const MAX_LISTED_CHANGED_FILES = 199;
+/** Why a reopen is refused while the agent runs the conversation in another terminal. */
+const OPEN_OUTSIDE_REASON = {
+  claude: 'Claude is running this session in another terminal; use Move to Gloss instead.',
+  codex: 'Codex is running this thread in another terminal; close it there first.',
+} as const;
 
 /** Statuses, file names and change times only; file contents never leave the computer here. */
 function describeInspection(info: WorktreeInspection): string {

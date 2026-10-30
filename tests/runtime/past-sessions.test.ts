@@ -309,3 +309,60 @@ it('hides a conversation without a panel and refuses one that has a panel', asyn
   expect(store.listHiddenSessions()).toHaveLength(2);
   await app.close();
 });
+
+it('reports a conversation an agent has open outside Gloss from a fresh scan', async () => {
+  const discoverOpen = vi.fn(async (_signal: AbortSignal, _options?: { fresh?: boolean }) => ({
+    complete: true,
+    candidates: [
+      { target: { agent: 'codex', sessionRef: 'live', projectId: '/x' }, support: 'supported' },
+    ] as never,
+  }));
+  const service = createPastSessionsService({
+    store: { listSessions: () => [] } as never,
+    agents: [adapter('claude', [], ['live']), { ...adapter('codex', []), discoverOpen }],
+    knownFolder: async () => true,
+  });
+  await expect(service.openOutside('codex', 'live')).resolves.toBe(true);
+  expect(discoverOpen).toHaveBeenCalledWith(expect.any(AbortSignal), { fresh: true });
+  await expect(service.openOutside('codex', 'other')).resolves.toBe(false);
+  await expect(
+    createPastSessionsService({
+      store: { listSessions: () => [] } as never,
+      agents: [
+        { ...adapter('claude', []), discoverOpen: async () => Promise.reject(new Error('x')) },
+      ],
+      knownFolder: async () => true,
+      log: () => {},
+    }).openOutside('claude', 'live'),
+  ).resolves.toBe(false);
+  service.close();
+});
+
+it('refuses to reopen a conversation open outside Gloss, before anything starts', async () => {
+  const prepareResume = vi.fn(async () => ({}) as never);
+  const resume = vi.fn(async () => ({ id: 'L' }) as never);
+  const store = new SqliteStore(':memory:');
+  const openOutside = vi.fn(async () => true);
+  const app = createApplication({
+    store,
+    agents: [new FakeAgent()],
+    conversationId: 'A',
+    languageBackends: {},
+    launcher: { prepareResume, resume, list: () => [], close() {} } as never,
+    pastSessions: { list: vi.fn(), invalidate: vi.fn(), close: vi.fn(), openOutside } as never,
+  });
+  await expect(
+    app.reopenSession!({ agent: 'claude', sessionRef: 'c', folder: '/f' }),
+  ).rejects.toThrow(
+    expect.objectContaining({
+      code: 'session-open',
+      message: 'Claude is running this session in another terminal; use Move to Gloss instead.',
+    }),
+  );
+  await expect(
+    app.reopenSession!({ agent: 'codex', sessionRef: 't', folder: '/f' }),
+  ).rejects.toThrow('Codex is running this thread in another terminal; close it there first.');
+  expect(openOutside).toHaveBeenCalledWith('codex', 't');
+  expect(resume).not.toHaveBeenCalled();
+  await app.close();
+});
