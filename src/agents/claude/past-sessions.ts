@@ -78,6 +78,7 @@ export async function listClaudePastSessions(
       let cwd: string | undefined;
       let branch: string | undefined;
       let fallback: string | undefined;
+      let prompted = false;
       for (const line of await readLines(path, info.size, 'start', CLAUDE_PAST_HEAD_BYTES)) {
         const record = parse(line);
         if (!record) continue;
@@ -85,11 +86,13 @@ export async function listClaudePastSessions(
           cwd = record.cwd;
           if (typeof record.gitBranch === 'string') branch = record.gitBranch;
         }
-        if (fallback === undefined && record.type === 'user') fallback = promptText(record);
+        if (record.type !== 'user') continue;
+        prompted = true;
+        fallback ??= promptText(record);
       }
-      if (cwd === undefined || fallback === undefined || (await projectIdentity(cwd)) !== folder)
-        continue;
-      let title = normalizeSessionTitle(fallback);
+      // A transcript with only the setup prompt is listed without a title of its own.
+      if (cwd === undefined || !prompted || (await projectIdentity(cwd)) !== folder) continue;
+      let title = fallback === undefined ? undefined : normalizeSessionTitle(fallback);
       for (const line of (
         await readLines(path, info.size, 'end', CLAUDE_PAST_TAIL_BYTES)
       ).reverse()) {

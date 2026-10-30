@@ -104,6 +104,14 @@ it('skips a file without a user record', async () => {
   await writeFile(join(dir, `${ID3}.jsonl`), rec({ type: 'file-history-snapshot', cwd: folder }));
   expect(await listClaudePastSessions(config, folder)).toEqual([]);
 });
+it('lists a transcript whose only prompt is the setup prompt, without a title', async () => {
+  const { folder, config, dir } = await home();
+  await writeFile(join(dir, `${ID3}.jsonl`), user(folder, ID3, CLAUDE_SETUP_PROMPT));
+  const [entry, ...rest] = await listClaudePastSessions(config, folder);
+  expect(rest).toEqual([]);
+  expect(entry).toMatchObject({ agent: 'claude', sessionRef: ID3 });
+  expect(entry).not.toHaveProperty('title');
+});
 it('skips a transcript of another existing folder that shares the slug', async () => {
   const { folder, config, dir } = await home();
   const other = folder.replace('my.project', 'my-project');
