@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { AgentPastSession } from '../../core/past-sessions.js';
+import { latestFirst, type AgentPastSession } from '../../core/past-sessions.js';
 import { normalizeSessionTitle } from '../../core/session-title.js';
 import { projectIdentity } from '../shared.js';
 import { threadOrigin } from './discovery.js';
@@ -84,8 +84,8 @@ export async function listCodexPastSessions(
       threadOrigin(row) !== 'user'
     )
       continue;
-    // A thread without a usable timestamp is still listed; 0 sorts it last.
-    const lastActiveAt = updatedAt(row) ?? 0;
+    // A thread without a usable timestamp is still listed, without a time, after dated ones.
+    const lastActiveAt = updatedAt(row);
     try {
       if ((await projectIdentity(row.cwd)) !== folder) continue;
     } catch {
@@ -97,9 +97,9 @@ export async function listCodexPastSessions(
       agent: 'codex',
       sessionRef: row.id,
       ...(title ? { title } : {}),
-      lastActiveAt,
+      ...(lastActiveAt !== undefined ? { lastActiveAt } : {}),
       ...(branch ? { branch } : {}),
     });
   }
-  return sessions.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+  return sessions.sort(latestFirst);
 }

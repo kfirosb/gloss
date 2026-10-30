@@ -132,21 +132,20 @@ it('prefers updated_at_ms over updated_at seconds', async () => {
   f.close();
   expect((await listCodexPastSessions(f.path, f.folder))[0]?.lastActiveAt).toBe(5_500);
 });
-it('lists threads without a timestamp last, at 0', async () => {
+it('lists threads without a timestamp last, without a time', async () => {
   const none = await bare(', first_user_message TEXT');
   none.insert('x', { first_user_message: 'hi' });
   none.close();
-  expect((await listCodexPastSessions(none.path, none.folder)).map((e) => e.lastActiveAt)).toEqual([
-    0,
-  ]);
+  const [undated] = await listCodexPastSessions(none.path, none.folder);
+  expect(undated?.sessionRef).toBe('x');
+  expect(undated).not.toHaveProperty('lastActiveAt');
   const nulls = await bare(', first_user_message TEXT, updated_at INTEGER');
   nulls.insert('n', { first_user_message: 'hi', updated_at: null });
   nulls.insert('t', { first_user_message: 'hi', updated_at: 9 });
   nulls.close();
-  expect((await listCodexPastSessions(nulls.path, nulls.folder)).map((e) => e.sessionRef)).toEqual([
-    't',
-    'n',
-  ]);
+  const listed = await listCodexPastSessions(nulls.path, nulls.folder);
+  expect(listed.map((e) => e.sessionRef)).toEqual(['t', 'n']);
+  expect(listed[1]).not.toHaveProperty('lastActiveAt');
 });
 it('skips unsupported versions, unknown origins and deleted folders without throwing', async () => {
   const f = await bare(', first_user_message TEXT');

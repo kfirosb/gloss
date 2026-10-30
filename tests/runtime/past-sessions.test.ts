@@ -230,6 +230,30 @@ it('counts an ended launch only while its pane lives, and a Gloss row takes the 
   ]);
 });
 
+it('lists a Gloss row with no agent counterpart without a time, after dated entries', async () => {
+  const f = await folder();
+  const store = {
+    listSessions: () => [
+      {
+        id: 'P',
+        target: { agent: 'claude', sessionRef: 'gone', projectId: f },
+        canonicalRoot: f,
+        projectName: 'p',
+        enabled: true,
+      },
+    ],
+  };
+  const service = createPastSessionsService({
+    store: store as never,
+    agents: [adapter('codex', [{ agent: 'codex', sessionRef: 't', lastActiveAt: 1 }])],
+    knownFolder: async () => true,
+  });
+  const { entries } = await service.list(f);
+  expect(entries.map((e) => e.sessionRef)).toEqual(['t', 'gone']);
+  expect(entries[1]).toMatchObject({ panelSessionId: 'P', title: 'Claude Code' });
+  expect(entries[1]).not.toHaveProperty('lastActiveAt');
+});
+
 function application(launcher?: Partial<SessionLauncher>) {
   const store = new SqliteStore(':memory:');
   const app = createApplication({

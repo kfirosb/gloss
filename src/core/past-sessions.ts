@@ -10,7 +10,8 @@ export interface AgentPastSession {
   agent: AgentKind;
   sessionRef: string;
   title?: string;
-  lastActiveAt: number; // epoch ms
+  /** Epoch ms; absent when unknown (never 0). */
+  lastActiveAt?: number;
   branch?: string;
 }
 
@@ -19,7 +20,8 @@ export interface PastSession {
   sessionRef: string;
   panelSessionId?: string;
   title: string;
-  lastActiveAt: string; // ISO
+  /** ISO time; absent when unknown. */
+  lastActiveAt?: string;
   branch?: string;
   state: PastSessionState;
 }
@@ -35,25 +37,42 @@ const AGENT_NAMES: Record<AgentKind, string> = { claude: 'Claude Code', codex: '
 
 export const pastSessionKey = (agent: AgentKind, sessionRef: string) => `${agent}:${sessionRef}`;
 
-/** Title fallback: `${agentName} · ${date}`; applies normalizeSessionTitle to a given title first. */
+/** Title fallback: `${agentName} · ${date}`, or just the agent name when the time is unknown; applies normalizeSessionTitle to a given title first. */
 export function pastSessionTitle(
   entry: Pick<AgentPastSession, 'agent' | 'title' | 'lastActiveAt'>,
 ): string {
-  return (
-    normalizeSessionTitle(entry.title) ??
-    `${AGENT_NAMES[entry.agent]} · ${new Date(entry.lastActiveAt).toLocaleDateString()}`
-  );
+  const given = normalizeSessionTitle(entry.title);
+  if (given) return given;
+  const name = AGENT_NAMES[entry.agent];
+  return entry.lastActiveAt === undefined
+    ? name
+    : `${name} · ${new Date(entry.lastActiveAt).toLocaleDateString()}`;
+}
+
+/** Sort comparator: newest first, entries without a time after all dated ones (stable among themselves). */
+export function latestFirst(
+  a: Pick<AgentPastSession, 'lastActiveAt'>,
+  b: Pick<AgentPastSession, 'lastActiveAt'>,
+): number {
+  if (a.lastActiveAt === undefined || b.lastActiveAt === undefined)
+    return (a.lastActiveAt === undefined ? 1 : 0) - (b.lastActiveAt === undefined ? 1 : 0);
+  return b.lastActiveAt - a.lastActiveAt;
+}
+
+/** The later of two times, either of which may be unknown. */
+function latest(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  return b === undefined ? a : Math.max(a, b);
 }
 
 /** Two entries for one conversation: keep the panel id and Gloss's own title, and the latest activity. */
 function combine(a: PastSessionSource, b: PastSessionSource): PastSessionSource {
   const withPanel = a.panelSessionId || !b.panelSessionId ? a : b;
   const other = withPanel === a ? b : a;
-  const merged: PastSessionSource = {
-    ...other,
-    ...withPanel,
-    lastActiveAt: Math.max(a.lastActiveAt, b.lastActiveAt),
-  };
+  const merged: PastSessionSource = { ...other, ...withPanel };
+  delete merged.lastActiveAt;
+  const time = latest(a.lastActiveAt, b.lastActiveAt);
+  if (time !== undefined) merged.lastActiveAt = time;
   const title = withPanel.title ?? other.title;
   if (title !== undefined) merged.title = title;
   const branch = withPanel.branch ?? other.branch;
@@ -61,7 +80,7 @@ function combine(a: PastSessionSource, b: PastSessionSource): PastSessionSource 
   return merged;
 }
 
-/** Dedupes by (agent, sessionRef), prefers the entry with a panelSessionId then a Gloss title, sorts by lastActiveAt desc, truncates to limit, skips hidden. */
+/** Dedupes by (agent, sessionRef), prefers the entry with a panelSessionId then a Gloss title, sorts by lastActiveAt desc with unknown times last (so they drop first), truncates to limit, skips hidden. */
 export function mergePastSessions(
   sources: readonly PastSessionSource[],
   hidden: ReadonlySet<string>,
@@ -76,14 +95,16 @@ export function mergePastSessions(
     byKey.set(key, existing ? combine(existing, source) : source);
   }
   return [...byKey.values()]
-    .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+    .sort(latestFirst)
     .slice(0, limit)
     .map((entry) => ({
       agent: entry.agent,
       sessionRef: entry.sessionRef,
       ...(entry.panelSessionId ? { panelSessionId: entry.panelSessionId } : {}),
       title: pastSessionTitle(entry),
-      lastActiveAt: new Date(entry.lastActiveAt).toISOString(),
+      ...(entry.lastActiveAt !== undefined
+        ? { lastActiveAt: new Date(entry.lastActiveAt).toISOString() }
+        : {}),
       ...(entry.branch ? { branch: entry.branch } : {}),
       state: stateOf(entry.agent, entry.sessionRef),
     }));

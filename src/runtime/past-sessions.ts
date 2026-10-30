@@ -52,7 +52,7 @@ export function createPastSessionsService(options: {
     return real;
   };
 
-  /** Gloss's own rows for the folder; their time comes from the agent's entry when it has one. */
+  /** Gloss's own rows for the folder; they carry no time of their own and take the agent's entry's when it has one. */
   const glossRows = async (folder: string) => {
     const rows = options.store.listSessions();
     const inFolder = await Promise.all(
@@ -71,7 +71,6 @@ export function createPastSessionsService(options: {
         sessionRef: row.target.sessionRef,
         panelSessionId: row.id,
         ...(row.sessionTitle !== undefined ? { title: row.sessionTitle } : {}),
-        lastActiveAt: 0,
       }));
   };
 

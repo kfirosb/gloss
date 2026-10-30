@@ -30,6 +30,43 @@ it('caps at PAST_SESSIONS_LIMIT most recent, newest first', () => {
     's3',
   ]);
 });
+it('sorts entries without a time after dated ones and drops them first at the cap', () => {
+  const dated = Array.from({ length: 9 }, (_, i) => ({
+    agent: 'codex' as const,
+    sessionRef: `d${i}`,
+    lastActiveAt: 100 + i,
+  }));
+  const undated = ['u1', 'u2'].map((sessionRef) => ({ agent: 'claude' as const, sessionRef }));
+  const out = mergePastSessions([undated[0]!, ...dated, undated[1]!], new Set(), closed);
+  expect(out).toHaveLength(10);
+  expect(out.slice(0, 9).map((e) => e.sessionRef)).toEqual(
+    dated.map((d) => d.sessionRef).reverse(),
+  );
+  expect(out[9]?.sessionRef).toBe('u1');
+  expect(out[9]).not.toHaveProperty('lastActiveAt');
+});
+it('dedupes keeping the defined time when only one duplicate has one', () => {
+  const out = mergePastSessions(
+    [
+      { agent: 'claude', sessionRef: 'c', panelSessionId: 'P' },
+      { agent: 'claude', sessionRef: 'c', lastActiveAt: 7 },
+    ],
+    new Set(),
+    closed,
+  );
+  expect(out).toEqual([
+    expect.objectContaining({ panelSessionId: 'P', lastActiveAt: new Date(7).toISOString() }),
+  ]);
+  const unknown = mergePastSessions(
+    [
+      { agent: 'claude', sessionRef: 'c', panelSessionId: 'P' },
+      { agent: 'claude', sessionRef: 'c' },
+    ],
+    new Set(),
+    closed,
+  );
+  expect(unknown[0]).not.toHaveProperty('lastActiveAt');
+});
 it('dedupes by agent and id, keeping the panel id, the Gloss title and the latest time', () => {
   const out = mergePastSessions(
     [
@@ -73,6 +110,8 @@ it('titles fall back to the agent and the date, and are normalized', () => {
   expect(pastSessionTitle({ agent: 'claude', title: ' hi\x00 there ', lastActiveAt: 0 })).toBe(
     'hi there',
   );
+  expect(pastSessionTitle({ agent: 'claude' })).toBe('Claude Code');
+  expect(pastSessionTitle({ agent: 'codex', title: '  ' })).toBe('Codex');
 });
 it('builds the manual resume command per agent with a quoted folder', () => {
   expect(manualResumeCommand('claude', 'ID', "/p/it's")).toEqual({
