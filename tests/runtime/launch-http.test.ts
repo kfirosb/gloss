@@ -83,7 +83,7 @@ async function setup(
     await server.close();
     await app.close();
   });
-  return { request, app, port: Number(new URL(server.url).port) };
+  return { request, app, store, port: Number(new URL(server.url).port) };
 }
 function rawUpgrade(port: number, path: string, host: string) {
   return new Promise<string>((resolve) => {
@@ -349,4 +349,60 @@ it('identify refuses a terminal with 400', async () => {
   expect(res.status).toBe(400);
   expect((await res.json()).error).toBe('Terminals have nothing to identify');
   expect(launcher.identify).not.toHaveBeenCalled();
+});
+
+it('lists past sessions of a folder through the service', async () => {
+  const pastSessions = {
+    list: vi.fn(async (folder: unknown) => ({ folder, entries: [] })),
+    invalidate: vi.fn(),
+    close: vi.fn(),
+  };
+  const { request } = await setup(fakeLauncher(), undefined, { pastSessions });
+  const res = await request('/api/past-sessions?folder=%2Fp');
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  expect(await res.json()).toEqual({ folder: '/p', entries: [] });
+  expect(pastSessions.list).toHaveBeenCalledWith('/p');
+});
+it('reopens a session with only agent, id and folder forwarded', async () => {
+  const prepareResume = vi.fn(async (input: any) => ({ ...input, cwd: input.folder, argv: [] }));
+  const resume = vi.fn(async (p: any) => ({
+    id: 'R1',
+    agent: p.agent,
+    folder: p.cwd,
+    panePid: 9,
+    state: 'starting',
+    createdAt: 0,
+    sessionRef: p.sessionRef,
+  }));
+  const { request } = await setup(fakeLauncher({ prepareResume, resume }));
+  const res = await request('/api/launches/resume', 'POST', {
+    agent: 'codex',
+    sessionRef: 'T',
+    folder: '/p',
+    argv: ['evil'],
+  });
+  expect(res.status).toBe(200);
+  expect(prepareResume).toHaveBeenCalledWith({ agent: 'codex', sessionRef: 'T', folder: '/p' });
+  expect(await res.json()).toMatchObject({ id: 'R1', agent: 'codex' });
+});
+it('hides a past conversation that has no panel', async () => {
+  const { request, store } = await setup(fakeLauncher());
+  const res = await request('/api/past-sessions/hide', 'POST', {
+    agent: 'claude',
+    sessionRef: 'c-9',
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ hidden: true });
+  expect(store.listHiddenSessions()).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
+});
+it('rejects a reopen with an unknown agent', async () => {
+  const { request } = await setup(fakeLauncher());
+  const res = await request('/api/launches/resume', 'POST', {
+    agent: 'shell',
+    sessionRef: 'T',
+    folder: '/p',
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe('Invalid agent');
 });

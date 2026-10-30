@@ -543,6 +543,29 @@ async function sessionRoute(
   }
   return attachmentRoute(app, req, res, route, id);
 }
+async function pastSessionsRoute(
+  app: Application,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+) {
+  const list = url.pathname === '/api/past-sessions' && req.method === 'GET';
+  const hide = url.pathname === '/api/past-sessions/hide' && req.method === 'POST';
+  if (!list && !hide) return false;
+  res.setHeader('cache-control', 'no-store');
+  if (list) {
+    if (!app.pastSessions) respond(res, 501, { error: 'Past sessions unavailable' });
+    else respond(res, 200, await app.pastSessions(url.searchParams.get('folder')));
+    return true;
+  }
+  if (!app.hidePastSession) {
+    respond(res, 501, { error: 'Past sessions unavailable' });
+    return true;
+  }
+  app.hidePastSession(await readBody(req, 1024));
+  respond(res, 200, { hidden: true });
+  return true;
+}
 async function launchRoute(
   app: Application,
   req: IncomingMessage,
@@ -578,6 +601,15 @@ async function launchRoute(
         ...(languageOverride ? { languageOverride } : {}),
       }),
     );
+    return true;
+  }
+  if (path === '/api/launches/resume' && req.method === 'POST') {
+    if (!app.reopenSession) {
+      respond(res, 501, { error: 'Session reopening unavailable' });
+      return true;
+    }
+    // The application narrows the body to agent, sessionRef and folder; nothing else reaches the launcher.
+    respond(res, 200, await app.reopenSession(await readBody(req, 4096)));
     return true;
   }
   if (path === '/api/launches/run' && req.method === 'POST') {
@@ -904,6 +936,7 @@ export async function startServer(
             ),
           );
       }
+      if (await pastSessionsRoute(application, req, res, url)) return;
       if (await projectRoute(application, req, res, url.pathname, url)) return;
       if (await launchFolderRoute(application, req, res, url.pathname)) return;
       if (await launchRoute(application, req, res, url.pathname)) return;

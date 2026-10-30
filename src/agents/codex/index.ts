@@ -59,7 +59,7 @@ export interface CodexAdapterOptions extends AdapterOptions {
 }
 /** Shown when a send targets a Codex thread with no attached terminal. */
 export const CODEX_CLOSED_REASON =
-  'Codex session is closed: no Codex terminal is attached, so a queued message would never be processed. Resume it in a terminal first.';
+  'Codex session is closed: no Codex terminal is attached, so a queued message would never be processed. Reopen it from Saved sessions first.';
 /**
  * How long one writer/attachment probe round is shared by discovery and every connection
  * of one adapter, in milliseconds after it finished. Sends always probe afresh.
