@@ -85,6 +85,7 @@ export function SessionTabs({
   onReopen,
   onRemovePast,
   reopening,
+  reopened = 0,
   offerMoveToGloss = false,
   selectedTerminalId,
   onSelectTerminal,
@@ -105,6 +106,7 @@ export function SessionTabs({
   onReopen?(entry: PastSession): void;
   onRemovePast?(entry: PastSession): void; // a row with no saved Gloss session to remove (onRemove covers those)
   reopening?: string | undefined; // pastSessionKey of the row being reopened
+  reopened?: number; // counts successful reopens; each one closes the Saved sessions popup
   offerMoveToGloss?: boolean; // context menu: Move to Gloss for an outside Claude session
   selectedTerminalId?: string | undefined; // launchId shown in the workspace view
   onSelectTerminal?(terminal: TerminalEntry): void; // click on a terminal tab
@@ -627,8 +629,8 @@ export function SessionTabs({
       )}
       <PopupMenu
         className="session-saved"
-        menuClassName="session-saved-menu"
-        resetKey={folder.key}
+        menuClassName="session-saved-menu session-past-menu"
+        resetKey={`${folder.key}\0${reopened}`}
         label={savedKnown ? <>Saved sessions ({pastEntries.length})</> : 'Saved sessions'}
         triggerDisabled={savedKnown && pastEntries.length === 0}
         onOpen={onOpenSaved}

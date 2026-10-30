@@ -249,6 +249,7 @@ function App() {
     JSON.stringify([activeFolder?.open, activeFolder?.saved].map((l) => l?.map((e) => e.key))),
   );
   const [reopening, setReopening] = useState<string | undefined>();
+  const [reopened, setReopened] = useState(0);
   // A reopen whose launch has not connected yet: if the agent exits first, the user gets the reason and the command.
   const [pendingReopen, setPendingReopen] = useState<
     { launchId: string; entry: PastSession; folder: string; folderKey: string } | undefined
@@ -296,6 +297,7 @@ function App() {
       .then(
         (launch) => {
           if (!unchanged()) return;
+          setReopened((n) => n + 1);
           setWaitingLaunchId(launch.id);
           setUnlistedLaunchId(launch.id);
           if (launch.panelSessionId) chooseSession(launch.panelSessionId);
@@ -881,6 +883,7 @@ function App() {
             if (activeFolder) requestHide(entry, activeFolder.path);
           }}
           reopening={reopening}
+          reopened={reopened}
           offerMoveToGloss
           onRetry={(launchId) => {
             setSelectionError('');

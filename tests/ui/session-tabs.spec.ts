@@ -460,6 +460,8 @@ test.describe('Saved sessions menu', () => {
       .poll(() => posts)
       .toEqual([{ agent: 'claude', sessionRef: 'c-1', folder: '/repo' }]);
     await expectSelected(page, 'A');
+    // The reopened session is selected, so the menu has nothing more to show.
+    await expect(page.getByRole('menu')).toHaveCount(0);
   });
   test('a late reopen does not change a session chosen meanwhile', async ({ page, context }) => {
     const f = await sessionFixture(context);
@@ -663,6 +665,9 @@ test.describe('remove from history', () => {
     const actions = page.getByRole('menu', { name: 'Session actions' });
     // A closed conversation offers Reopen first, then removal.
     await expect(actions.getByRole('menuitem', { name: 'Reopen' })).toBeFocused();
+    // Only the Saved sessions list scrolls; other menus sharing its look do not.
+    await expect(actions).toHaveCSS('overflow-y', 'visible');
+    await expect(page.locator('.session-past-menu')).toHaveCSS('overflow-y', 'auto');
     await page.keyboard.press('ArrowDown');
     const action = actions.getByRole('menuitem', { name: 'Remove from history…' });
     await expect(action).toBeFocused();
@@ -726,6 +731,8 @@ test.describe('remove from history', () => {
     ).toBeVisible();
     await expect(page.locator('code', { hasText: "cd '/repo' && codex resume T1" })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+    // A failed reopen keeps the menu open beside the reason.
+    await expect(page.getByRole('menu')).toBeVisible();
   });
   test('a reopened session whose agent exits before connecting shows the reason and the command', async ({
     page,
