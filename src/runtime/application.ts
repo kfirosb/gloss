@@ -482,9 +482,10 @@ export function createApplication(options: ApplicationOptions): Application {
             options.store.fileOwners(file.id).every((owner) => owner === sessionId),
         );
       const { target } = sessionRecord(sessionId);
+      await sessions.remove(sessionId, { catalogClosed: entry !== undefined });
+      // Hidden only once removed, so a refused removal leaves the conversation listed.
       options.store.hideSession?.(target.agent, target.sessionRef);
       options.pastSessions?.invalidate();
-      await sessions.remove(sessionId, { catalogClosed: entry !== undefined });
       catalog.forget(sessionId);
       await Promise.all(uploads.map((file) => unlink(file.path).catch(() => {})));
     },

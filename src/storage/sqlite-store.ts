@@ -1163,6 +1163,12 @@ export class SqliteStore
       .run(agent, sessionRef, hiddenAt);
   }
 
+  unhideSession(agent: AgentKind, sessionRef: string): void {
+    this.database
+      .prepare('DELETE FROM hidden_sessions WHERE agent = ? AND session_ref = ?')
+      .run(agent, sessionRef);
+  }
+
   listHiddenSessions(): { agent: AgentKind; sessionRef: string }[] {
     return (
       this.database

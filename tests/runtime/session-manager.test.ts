@@ -188,6 +188,15 @@ describe('independent session workflows', () => {
     });
     expect(agents.A.sent).toHaveLength(1);
   });
+  it('un-hides a conversation when it is registered again, new or existing', async () => {
+    const { manager, store } = setup();
+    store.hideSession('codex', 'A');
+    store.hideSession('codex', 'N');
+    store.hideSession('claude', 'B');
+    await manager.register({ agent: 'codex', sessionRef: 'A', projectId: process.cwd() });
+    await manager.register({ agent: 'codex', sessionRef: 'N', projectId: process.cwd() });
+    expect(store.listHiddenSessions()).toEqual([{ agent: 'claude', sessionRef: 'B' }]);
+  });
   it('rejects a different project for an existing native identity without mutating it', async () => {
     const { manager } = setup();
     const original = manager.list().find((r) => r.id === 'A')!;

@@ -12,3 +12,13 @@ it('hides a conversation once and lists it', () => {
   ]);
   store.close();
 });
+
+it('unhides a conversation and ignores one that was never hidden', () => {
+  const store = new SqliteStore(':memory:');
+  store.hideSession('claude', 'A');
+  store.hideSession('codex', 'A');
+  store.unhideSession('claude', 'A');
+  store.unhideSession('claude', 'never');
+  expect(store.listHiddenSessions()).toEqual([{ agent: 'codex', sessionRef: 'A' }]);
+  store.close();
+});

@@ -58,6 +58,8 @@ export interface HiddenSessionStore {
   /** Hides a conversation from Saved sessions; idempotent. Never touches agent files. */
   hideSession(agent: AgentKind, sessionRef: string, hiddenAt?: number): void;
   listHiddenSessions(): { agent: AgentKind; sessionRef: string }[];
+  /** Lists a conversation again, once Gloss opens it again; idempotent. */
+  unhideSession(agent: AgentKind, sessionRef: string): void;
 }
 
 export interface SessionStore {

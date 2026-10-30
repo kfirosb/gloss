@@ -9,7 +9,12 @@ import type {
   SourceMessage,
   Target,
 } from '../core/contracts.js';
-import type { SessionRecord, SessionStore, SessionEnvelope } from '../core/session-contracts.js';
+import type {
+  HiddenSessionStore,
+  SessionRecord,
+  SessionStore,
+  SessionEnvelope,
+} from '../core/session-contracts.js';
 export type { SessionEnvelope } from '../core/session-contracts.js';
 import { MAX_ATTACHMENTS, ATTACHMENT_LIMIT_MESSAGE } from '../core/content-policy.js';
 import { INITIAL_LANGUAGE_DEFAULTS, type LanguageSettings } from '../core/language-settings.js';
@@ -62,7 +67,7 @@ export interface SessionManager {
   close(): Promise<void>;
 }
 export function createSessionManager(options: {
-  store: ConversationStore & SessionStore;
+  store: ConversationStore & SessionStore & Partial<Pick<HiddenSessionStore, 'unhideSession'>>;
   agents: AgentAdapter[];
   files?: FileRegistry;
   languageSettings?(sessionId: string): LanguageSettings;
@@ -216,8 +221,11 @@ export function createSessionManager(options: {
         if ((await canonicalProject(registeredTarget.projectId)) !== requestedProject)
           throw new Error('Session is already registered to a different project');
       };
+      // A conversation Gloss opens again is no longer hidden from Saved sessions.
+      const unhide = () => store.unhideSession?.(target.agent, target.sessionRef);
       if (existing) {
         await checkProject(existing.target);
+        unhide();
         if (existing.canonicalRoot) return existing;
         const {
           available,
@@ -251,6 +259,7 @@ export function createSessionManager(options: {
       });
       // A concurrent registration may have won while project metadata was loading.
       await checkProject(registered.target);
+      unhide();
       for (const listener of registrations) listener(registered);
       return registered;
     },

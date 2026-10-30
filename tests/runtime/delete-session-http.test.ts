@@ -90,6 +90,7 @@ it('returns 409 for an open (live) session and keeps it', async () => {
   expect(open.status).toBe(409);
   expect((await open.json()).error).toMatch(/open/);
   expect(store.listSessions()).toHaveLength(2);
+  expect(store.listHiddenSessions()).toEqual([]);
 });
 it('refuses a session whose launch is still running', async () => {
   const store = new SqliteStore(':memory:');
@@ -126,5 +127,18 @@ it('refuses a session whose launch is still running', async () => {
 it('hides the removed conversation so a disk listing cannot bring it back', async () => {
   const { request, store } = await setup();
   expect((await request('sessions/B', 'DELETE')).status).toBe(200);
+  expect(store.listHiddenSessions()).toEqual([{ agent: 'codex', sessionRef: 'B' }]);
+});
+
+it('hides nothing when the session manager refuses the removal', async () => {
+  const { app, store } = await setup();
+  vi.spyOn(app.sessions!, 'remove').mockRejectedValueOnce(
+    Object.assign(new Error('Session is open; close it before removing it from history'), {
+      code: 'session-open',
+    }),
+  );
+  await expect(app.removeSession!('B')).rejects.toMatchObject({ code: 'session-open' });
+  expect(store.listHiddenSessions()).toEqual([]);
+  await app.removeSession!('B');
   expect(store.listHiddenSessions()).toEqual([{ agent: 'codex', sessionRef: 'B' }]);
 });
