@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { sessionFixture } from './multi-session-fixture.js';
-import { expectSelected } from './session-fixture.js';
+import { expectSelected, pastFromCatalog, routePastSessions } from './session-fixture.js';
 import type { CatalogSnapshot } from '../../src/core/session-catalog.js';
 
 // Playwright treats aria-disabled controls as not actionable, so clicks on them are forced.
@@ -250,6 +250,10 @@ test('selected closed session remains reachable in Saved', async ({ page, contex
       contentType: 'text/event-stream',
       body: 'data: ' + JSON.stringify(catalog) + '\n\n',
     }),
+  );
+  await routePastSessions(
+    context,
+    pastFromCatalog(() => catalog),
   );
   await page.goto('/#capability=test');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });

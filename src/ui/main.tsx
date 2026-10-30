@@ -71,6 +71,9 @@ import type { SessionRecord, TerminalEntry } from '../core/session-contracts.js'
 import type { CreatedWorktree, WorktreeRemoval } from '../runtime/application.js';
 import { SessionWorkspace } from './session-workspace.js';
 import { errorMessage } from './error-message.js';
+import { usePastSessions } from './use-past-sessions.js';
+import { hidePastSession, manualResumeCommand, reopenPastSession } from './past-sessions.js';
+import { pastSessionKey, type PastSession } from '../core/past-sessions.js';
 
 window.addEventListener('hashchange', () => window.location.reload());
 applyTheme(readDisplayPreferences());
@@ -95,12 +98,32 @@ function App() {
   const [removal, setRemoval] = useState<{ entries: CatalogEntry[]; folderName?: string } | null>(
     null,
   );
+  // A Saved sessions row with no Gloss history: removing it only hides the conversation from the list.
+  const [hiding, setHiding] = useState<{ entry: PastSession; folder: string } | null>(null);
   const [removeError, setRemoveError] = useState('');
   const [removeBusy, setRemoveBusy] = useState(false);
   const requestRemoval = (entries: CatalogEntry[], folderName?: string) => {
     if (!entries.length) return;
     setRemoveError('');
     setRemoval({ entries, ...(folderName ? { folderName } : {}) });
+  };
+  const requestHide = (entry: PastSession, folder: string) => {
+    setRemoveError('');
+    setHiding({ entry, folder });
+  };
+  const confirmHide = async () => {
+    if (!hiding) return;
+    setRemoveBusy(true);
+    setRemoveError('');
+    try {
+      await hidePastSession(hiding.entry);
+      setHiding(null);
+      pastSessions.refresh(hiding.folder);
+    } catch (e) {
+      setRemoveError(errorMessage(e, 'Could not remove from history'));
+    } finally {
+      setRemoveBusy(false);
+    }
   };
   const confirmRemoval = async () => {
     if (!removal) return;
@@ -134,6 +157,7 @@ function App() {
       }
     }
     setRemoveBusy(false);
+    if (done.length) pastSessions.refresh();
     if (failed.length) {
       setRemoval({
         entries: failed,
@@ -217,6 +241,35 @@ function App() {
   const sidebarTree = applySidebarSettings(shownTree, projects.settings, selectedProjectKey);
   lastActiveFolder.current = activeFolderKey;
   const activeFolder: FolderNode | undefined = folders.find((f) => f.key === activeFolderKey);
+  // Saved sessions rows come from the past-sessions listing; a catalog change in the folder refetches it.
+  const pastSessions = usePastSessions(
+    activeFolder?.path,
+    JSON.stringify([activeFolder?.open, activeFolder?.saved].map((l) => l?.map((e) => e.key))),
+  );
+  const [reopening, setReopening] = useState<string | undefined>();
+  const reopenPast = (entry: PastSession) => {
+    if (!activeFolder) return;
+    const folder = activeFolder.path;
+    const key = pastSessionKey(entry.agent, entry.sessionRef);
+    setReopening(key);
+    setSelectionError('');
+    void reopenPastSession(entry, folder)
+      .then(
+        (launch) => {
+          setWaitingLaunchId(launch.id);
+          setUnlistedLaunchId(launch.id);
+          if (launch.panelSessionId) chooseSession(launch.panelSessionId);
+        },
+        (e: unknown) =>
+          setSelectionError(
+            `Could not reopen ${entry.title}: ${errorMessage(e, 'unknown error')}. Run it yourself: ${manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand}`,
+          ),
+      )
+      .finally(() => {
+        setReopening((current) => (current === key ? undefined : current));
+        pastSessions.refresh(folder);
+      });
+  };
   // The shown terminal always belongs to the folder whose tabs are shown; moving to another folder drops it.
   const shownTerminal =
     selectedTerminalEntry?.folder === activeFolderKey ? selectedTerminalEntry : undefined;
@@ -557,8 +610,9 @@ function App() {
     const ended = allEntries.find((e) => e.launchId === launchId);
     const name = ended ? (ended.sessionTitle ?? agentName(ended)) : 'session';
     setSelectionError('');
-    void endLaunch(launchId).catch((e) =>
-      setSelectionError(`Could not end ${name}: ${errorMessage(e, 'unknown error')}`),
+    void endLaunch(launchId).then(
+      () => pastSessions.refresh(),
+      (e) => setSelectionError(`Could not end ${name}: ${errorMessage(e, 'unknown error')}`),
     );
   };
   const [composerInsert, setComposerInsert] = useState<{
@@ -775,6 +829,13 @@ function App() {
           }
           onEndTerminal={endTerminal}
           onRemove={requestRemoval}
+          pastSessions={pastSessions.list}
+          onOpenSaved={() => pastSessions.refresh()}
+          onReopen={reopenPast}
+          onRemovePast={(entry) => {
+            if (activeFolder) requestHide(entry, activeFolder.path);
+          }}
+          reopening={reopening}
           offerMoveToGloss
           onRetry={(launchId) => {
             setSelectionError('');
@@ -785,25 +846,36 @@ function App() {
         />
         <PanelDialog
           title="Remove from history"
-          open={!!removal}
+          open={!!removal || !!hiding}
           close={() => {
-            if (!removeBusy) setRemoval(null);
+            if (removeBusy) return;
+            setRemoval(null);
+            setHiding(null);
           }}
         >
           <div className="review-body">
-            <p>
-              {removal
-                ? removal.entries.length === 1
-                  ? `Remove “${sessionTitle(removal.entries[0]!)}” from Gloss's history?`
-                  : `Remove ${removal.entries.length} closed sessions${removal.folderName ? ` in ${removal.folderName}` : ''} from Gloss's history?`
-                : ''}
-            </p>
-            <p>
-              This deletes only the saved Gloss conversation, drafts and settings for{' '}
-              {removal && removal.entries.length === 1 ? 'this session' : 'these sessions'}. The
-              agent's own transcript in Claude Code or Codex is not touched, and a session reappears
-              here if you open it again.
-            </p>
+            {hiding ? (
+              <p>
+                Gloss keeps no history for this conversation. Hiding it removes it from Saved
+                sessions; the agent's own files stay.
+              </p>
+            ) : (
+              <>
+                <p>
+                  {removal
+                    ? removal.entries.length === 1
+                      ? `Remove “${sessionTitle(removal.entries[0]!)}” from Gloss's history?`
+                      : `Remove ${removal.entries.length} closed sessions${removal.folderName ? ` in ${removal.folderName}` : ''} from Gloss's history?`
+                    : ''}
+                </p>
+                <p>
+                  This deletes only the saved Gloss conversation, drafts and settings for{' '}
+                  {removal && removal.entries.length === 1 ? 'this session' : 'these sessions'}. The
+                  agent's own transcript in Claude Code or Codex is not touched, and a session
+                  reappears here if you open it again.
+                </p>
+              </>
+            )}
             {removeError && (
               <p role="alert" className="error">
                 {removeError}
@@ -811,14 +883,21 @@ function App() {
             )}
           </div>
           <div className="review-actions">
-            <button type="button" disabled={removeBusy} onClick={() => setRemoval(null)}>
+            <button
+              type="button"
+              disabled={removeBusy}
+              onClick={() => {
+                setRemoval(null);
+                setHiding(null);
+              }}
+            >
               Cancel
             </button>
             <button
               type="button"
               className="primary"
               disabled={removeBusy}
-              onClick={() => void confirmRemoval()}
+              onClick={() => void (hiding ? confirmHide() : confirmRemoval())}
             >
               {removeBusy ? 'Removing…' : 'Remove from history'}
             </button>
@@ -981,7 +1060,7 @@ function App() {
           <FolderEmptyState
             key={activeFolder.key}
             folderName={activeFolder.name}
-            hasSaved={activeFolder.saved.length > 0}
+            hasSaved={(pastSessions.list?.entries.length ?? activeFolder.saved.length) > 0}
             onNewSession={openNewSession}
           />
         ) : null}

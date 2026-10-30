@@ -484,6 +484,44 @@ test.describe('Saved sessions menu', () => {
     expect(overflow).toBe(true);
     await expect(page.getByText('Conversation 9')).toBeAttached();
   });
+  test('a late past-sessions response for another folder is dropped', async ({ page, context }) => {
+    const f = await sessionFixture(context);
+    const held: Array<() => void> = [];
+    await context.route('**/api/past-sessions**', async (r) => {
+      const folder = new URL(r.request().url()).searchParams.get('folder');
+      if (folder === '/repo') await new Promise<void>((res) => held.push(res));
+      return r.fulfill({
+        json: {
+          folder,
+          entries:
+            folder === '/repo'
+              ? [
+                  {
+                    agent: 'claude',
+                    sessionRef: 'a1',
+                    title: 'From A',
+                    lastActiveAt: new Date().toISOString(),
+                    state: 'closed',
+                  },
+                ]
+              : [],
+        },
+      });
+    });
+    await serve(context, catalogFor(f, { B: { worktreePath: '/wt/feature' } }));
+    await page.goto('/#capability=test');
+    // The main checkout is shown first and its listing hangs; switch to the worktree, then let that answer arrive.
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    await page
+      .getByRole('navigation', { name: 'Sessions' })
+      .getByRole('button', { name: 'feature, 1 open' })
+      .click();
+    await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
+    for (const release of held) release();
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
+    await expect(page.getByText('From A')).toHaveCount(0);
+  });
 });
 test('a stale failed session lookup does not show an error after a later choice', async ({
   page,
@@ -633,6 +671,41 @@ test.describe('remove from history', () => {
     await dialog.getByRole('button', { name: 'Remove from history', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText('Session is open');
     await expect(dialog).toBeVisible();
+  });
+  test('a conversation without Gloss history is hidden after confirmation, and a failed reopen says how to resume', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    let entries = [
+      { agent: 'claude', sessionRef: 'c-9', title: 'Outside work', state: 'closed' as const },
+    ];
+    await routePastSessions(context, () => entries);
+    const hidden: unknown[] = [];
+    await context.route('**/api/past-sessions/hide', (r) => {
+      hidden.push(r.request().postDataJSON());
+      entries = [];
+      return r.fulfill({ json: { hidden: true } });
+    });
+    await context.route('**/api/launches/resume', (r) =>
+      r.fulfill({ status: 400, json: { error: 'Conversation is open outside Gloss' } }),
+    );
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
+    await page.getByRole('button', { name: 'Reopen Outside work' }).click();
+    await expect(page.getByRole('alert')).toHaveText(
+      "Could not reopen Outside work: Conversation is open outside Gloss. Run it yourself: cd '/repo' && claude --resume c-9",
+    );
+    // The row has no Gloss session to select, but its context menu still works from the keyboard.
+    await page.getByRole('menuitem', { name: /Outside work/ }).press('Shift+F10');
+    await page.getByRole('menuitem', { name: 'Remove from history…' }).press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Remove from history' });
+    await expect(dialog).toContainText('Gloss keeps no history for this conversation.');
+    await dialog.getByRole('button', { name: 'Remove from history', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(hidden).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
+    await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
   });
   test('folder context menu removes all closed sessions after one confirmation', async ({
     page,

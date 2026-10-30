@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { defaultWorkspace } from '../../src/core/session-contracts.js';
-import { mockSession, basicSnapshot, selectSession } from './session-fixture.js';
+import {
+  mockSession,
+  basicSnapshot,
+  selectSession,
+  pastFromRecords,
+  routePastSessions,
+} from './session-fixture.js';
 for (const [width, height] of [
   [1280, 800],
   [390, 700],
@@ -322,6 +328,7 @@ test('late preview and attachment responses stay with their originating session'
     if (path.endsWith('/metadata')) return r.fulfill({ json: ref });
     return r.fulfill({ status: 404, json: { error: 'Unexpected route' } });
   });
+  await routePastSessions(page, pastFromRecords(records));
   await page.goto('/#capability=test');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
   await input.fill('A draft');

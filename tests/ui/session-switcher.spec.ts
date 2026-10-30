@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { sessionFixture } from './multi-session-fixture.js';
-import { expectSelected } from './session-fixture.js';
+import { expectSelected, pastFromCatalog, routePastSessions } from './session-fixture.js';
 import type { CatalogSnapshot } from '../../src/core/session-catalog.js';
 const tab = (page: Page, key: string) => page.locator(`[role=tab][data-session-key="${key}"]`);
 const header = (page: Page) => page.locator('.session-header');
@@ -30,6 +30,10 @@ async function setup(context: Parameters<typeof sessionFixture>[0]) {
       contentType: 'text/event-stream',
       body: 'data: ' + JSON.stringify(catalog) + '\n\n',
     }),
+  );
+  await routePastSessions(
+    context,
+    pastFromCatalog(() => catalog),
   );
   return { ...f, catalog };
 }

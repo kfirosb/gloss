@@ -1,7 +1,12 @@
 import { selectSession } from './session-fixture.js';
 import { test, expect } from '@playwright/test';
 import { defaultWorkspace } from '../../src/core/session-contracts.js';
-import { mockSession, basicSnapshot } from './session-fixture.js';
+import {
+  mockSession,
+  basicSnapshot,
+  pastFromRecords,
+  routePastSessions,
+} from './session-fixture.js';
 const reference = (id: string, index: number, path: string, source = 'upload') => ({
   id,
   sessionId: 'basic',
@@ -297,6 +302,7 @@ test('delayed upload belongs to A and stale lookup cannot appear in B', async ({
     if (path.endsWith('/metadata')) return r.fulfill({ json: files.get(path.split('/')[5]!) });
     return r.fulfill({ status: 404, json: { error: 'Unexpected route' } });
   });
+  await routePastSessions(page, pastFromRecords(records));
   await page.goto('/#capability=test');
   const input = page.getByRole('textbox', { name: 'Discuss with language assistant' });
   await input.fill('A @same');

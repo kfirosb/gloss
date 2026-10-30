@@ -1,5 +1,6 @@
 import { test, expect, type BrowserContext } from '@playwright/test';
 import { sessionFixture } from './multi-session-fixture.js';
+import { pastFromCatalog, routePastSessions } from './session-fixture.js';
 import type { CatalogEntry, CatalogSnapshot } from '../../src/core/session-catalog.js';
 
 type Fixture = Awaited<ReturnType<typeof sessionFixture>>;
@@ -47,6 +48,10 @@ test('a folder without open sessions shows the empty state and its + opens New s
     entries: entriesFor(f),
   };
   await serve(context, () => catalog);
+  await routePastSessions(
+    context,
+    pastFromCatalog(() => catalog),
+  );
   const launched: unknown[] = [];
   await context.route('**/api/launches', (r) => {
     if (r.request().method() !== 'POST') return r.fallback();
@@ -184,7 +189,8 @@ test('a worktree with no sessions at all leaves out the resume line and fits a s
   const empty = page.getByRole('region', { name: 'Start a session' });
   await expect(empty).toBeVisible();
   await expect(empty).not.toContainText('Saved sessions');
-  await expect(page.getByRole('button', { name: /^Saved sessions/ })).toHaveCount(0);
+  // Nothing to resume here: the Saved sessions button stays, disabled with no entries.
+  await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
 
   await page.setViewportSize({ width: 390, height: 420 });
   const start = empty.getByRole('button', { name: 'Start a session in fresh' });

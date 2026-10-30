@@ -5,7 +5,7 @@ export function FolderEmptyState({
   onNewSession,
 }: {
   folderName: string;
-  hasSaved: boolean; // the tabs row then shows the Saved sessions menu
+  hasSaved: boolean; // the Saved sessions menu above lists conversations to resume
   onNewSession(): void;
 }) {
   return (

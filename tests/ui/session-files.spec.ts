@@ -1,4 +1,10 @@
-import { selectSession, expectSelected, preferFullAssistant } from './session-fixture.js';
+import {
+  selectSession,
+  expectSelected,
+  preferFullAssistant,
+  pastFromRecords,
+  routePastSessions,
+} from './session-fixture.js';
 import { test, expect, type BrowserContext } from '@playwright/test';
 import { defaultWorkspace } from '../../src/core/session-contracts.js';
 
@@ -118,6 +124,7 @@ async function fixture(context: BrowserContext) {
     }
     return route.fulfill({ status: 404, json: { error: 'Unexpected fixture route' } });
   });
+  await routePastSessions(context, pastFromRecords(records));
   return {
     snapshots,
     workspaces,
