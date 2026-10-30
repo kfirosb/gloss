@@ -126,6 +126,10 @@ export function createSessionCatalog(options: SessionCatalogOptions): SessionCat
       launchId: launch.id,
       launchState: launch.state,
       ...(seen?.state === 'needs-user' ? { activity: 'approval-required' as const } : {}),
+      // The screen shows Claude's question dialog; its session record normally says so too, but not every version does.
+      ...(seen?.state === 'question' && (entry.activity === 'idle' || entry.activity === 'working')
+        ? { activity: 'dialog-open' as const }
+        : {}),
       ...(seen?.state === 'unknown-version'
         ? {
             attentionNotice: `Approval detection unavailable for this ${agentLabel(launch)} version`,

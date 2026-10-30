@@ -93,6 +93,7 @@ import { RunCommandContext } from './run-command.js';
 
 import { activityLabel } from './session-navigation.js';
 import type { CatalogEntry } from '../core/session-catalog.js';
+import { blockedOnTerminal } from '../core/attention.js';
 import type { UsageSnapshot } from '../core/usage.js';
 import { QuotaBreakDialog, UsageReadout } from './usage-dialogs.js';
 import { terminalDestinationLabel } from './provider-label.js';
@@ -356,7 +357,8 @@ export function SessionWorkspace({
       assistantModes: { ...value.assistantModes, [record.id]: mode },
     }));
   const launchId = entry?.launchId;
-  const approval = entry?.activity === 'approval-required';
+  // An approval or a question Claude is waiting on: both are answered in the terminal.
+  const blocked = entry ? blockedOnTerminal(entry) : false;
   const liveLayout = preferences.liveViews[record.id] ?? DEFAULT_LIVE_LAYOUT;
   // An approval shows the terminal without saving it: the remembered view is what returns when it ends.
   // A manual choice saves itself and drops this override.
@@ -425,7 +427,7 @@ export function SessionWorkspace({
   // Restore once the approval is over and the user has left the terminal: not while typing, focused there or
   // holding unsent Hebrew-line text. An approval that comes back first simply keeps the terminal.
   useEffect(() => {
-    if (approval || !approvalView) return;
+    if (blocked || !approvalView) return;
     const tick = () => {
       if (typedRecently(lastKeystrokeAt(), Date.now()) || terminalDraft.current) return;
       if (document.activeElement?.closest('.live-terminal')) return;
@@ -434,7 +436,7 @@ export function SessionWorkspace({
     tick();
     const timer = setInterval(tick, AUTO_OPEN_POLL_MS);
     return () => clearInterval(timer);
-  }, [approval, approvalView]);
+  }, [blocked, approvalView]);
   useEffect(() => {
     if (!launchId) return;
     // Capture phase: the terminal's own textarea would otherwise take the key first.
@@ -1303,7 +1305,7 @@ export function SessionWorkspace({
             label: LIVE_VIEW_LABELS[view],
             disabled: unavailable,
             title: unavailable ? NO_TERMINAL_TOOLTIP : undefined,
-            badge: view === 'terminal' && approval && (
+            badge: view === 'terminal' && blocked && (
               <span className="live-view-dot" aria-hidden="true" />
             ),
           };
@@ -1394,7 +1396,7 @@ export function SessionWorkspace({
           <LiveTerminal
             launchId={launchId}
             client={client}
-            attention={approval}
+            attention={blocked}
             autoFocus={terminalFocus}
             onDraft={(hasDraft) => {
               terminalDraft.current = hasDraft;

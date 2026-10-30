@@ -2,11 +2,18 @@ import type { AgentKind } from '../core/contracts.js';
 import { classifyScreen, markersFor, type MarkerTable } from './attention-markers.js';
 import type { LaunchRecord } from './session-launcher.js';
 import { sessionNameOf, type Tmux } from './tmux.js';
+import {
+  parseQuestionScreen,
+  questionMessageText,
+  type TerminalQuestion,
+} from './question-screen.js';
 
 export type Attention = {
   launchId: string;
-  state: 'needs-user' | 'clear' | 'unknown-version';
+  /** `question`: Claude's AskUserQuestion dialog is open; the user answers it in the terminal. */
+  state: 'needs-user' | 'question' | 'clear' | 'unknown-version';
   reason?: string;
+  question?: TerminalQuestion;
 };
 export interface AttentionMonitor {
   start(): void;
@@ -21,6 +28,8 @@ export const VERSION_RETRY_MS = 60_000;
 export const CAPTURE_RETRY_MS = 15_000;
 const agentLabel = (agent: AgentKind) => (agent === 'claude' ? 'Claude' : 'Codex');
 
+const questionKey = (attention: Attention) =>
+  attention.question ? questionMessageText(attention.question) : undefined;
 /** Watches launched sessions' screens for prompts that need the user. It never answers them. */
 export function createAttentionMonitor(options: {
   tmux: () => Promise<Tmux>;
@@ -87,13 +96,18 @@ export function createAttentionMonitor(options: {
         },
       );
     const kind = classifyScreen(table, screen);
-    return {
-      launchId: launch.id,
-      state: kind === 'none' ? 'clear' : 'needs-user',
-      ...(kind === 'consent'
-        ? { reason: `${agentLabel(agent)} is asking for startup consent` }
-        : {}),
-    };
+    if (kind !== 'none')
+      return {
+        launchId: launch.id,
+        state: 'needs-user',
+        ...(kind === 'consent'
+          ? { reason: `${agentLabel(agent)} is asking for startup consent` }
+          : {}),
+      };
+    const question = agent === 'claude' ? parseQuestionScreen(screen) : undefined;
+    return question
+      ? { launchId: launch.id, state: 'question', question }
+      : { launchId: launch.id, state: 'clear' };
   }
   async function poll() {
     if (closed) return;
@@ -107,7 +121,12 @@ export function createAttentionMonitor(options: {
         const next = await inspect(launch);
         if (closed) return;
         const prev = state.get(launch.id);
-        if (!prev || prev.state !== next.state || prev.reason !== next.reason) {
+        if (
+          !prev ||
+          prev.state !== next.state ||
+          prev.reason !== next.reason ||
+          questionKey(prev) !== questionKey(next)
+        ) {
           state.set(launch.id, next);
           changed = true;
         }

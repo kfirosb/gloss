@@ -25,6 +25,7 @@ const tabTitle = (entry: CatalogEntry) =>
     : sessionTitle(entry);
 const dotClass = (entry: CatalogEntry) =>
   entry.attention === 'approval' ||
+  entry.attention === 'question' ||
   entry.attention === 'response' ||
   entry.activity === 'dialog-open' ||
   entry.activity === 'approval-required'

@@ -6,6 +6,7 @@ import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import type { LanguageOverride } from '../core/language-settings.js';
 import type { HiddenSessionStore, SessionStore } from '../core/session-contracts.js';
 import { createAttentionMonitor } from './attention-monitor.js';
+import { createQuestionRelay } from './question-relay.js';
 import { createClaudeExecutable } from './claude-config.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
 import type { OpenSessionCandidate } from '../core/session-catalog.js';
@@ -254,7 +255,9 @@ export function createLaunchServices(options: {
     sessions?: SessionManager;
     catalog?: {
       refresh(): void;
-      snapshot?(): { entries: { target: Target; worktreePath?: string }[] };
+      snapshot?(): {
+        entries: { target: Target; worktreePath?: string; launchId?: string; sessionId?: string }[];
+      };
     };
   };
   tmux?: () => Promise<Tmux>;
@@ -331,6 +334,11 @@ export function createLaunchServices(options: {
       return parseVersion(result.lines.join('\n'));
     },
   });
+  const questions = createQuestionRelay({
+    attention,
+    entries: () => live().catalog?.snapshot?.().entries ?? [],
+    ingest: (agent, message) => live().sessions!.ingest(agent, message),
+  });
   // Includes launches in subfolders: removing a folder must not run under a live agent.
   const endLaunchesInFolder = async (folder: string) => {
     const live = launcher.list().filter((l) => l.state !== 'ended');
@@ -363,6 +371,7 @@ export function createLaunchServices(options: {
     launcher,
     terminals,
     attention,
+    questions,
     approveFolder: (folder: string) => {
       approvedFolders.add(folder);
     },

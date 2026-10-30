@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { CatalogEntry } from '../core/session-catalog.js';
+import { blockedOnTerminal } from '../core/attention.js';
 import type { LaunchRecord } from '../runtime/session-launcher.js';
 import type { TerminalView } from '../core/session-contracts.js';
 import { sessionRequest } from './session-client.js';
@@ -97,13 +98,12 @@ export function shouldAutoOpen(
   lastKeystrokeAt: number,
   now: number,
 ) {
-  if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
-    return false;
+  if (!entry?.launchId || !blockedOnTerminal(entry) || popup === 'dot-only') return false;
   if (entry.sessionId !== selectedId) return false; // 'auto' and 'current-tab' only ever open the shown session
   return !typedRecently(lastKeystrokeAt, now);
 }
 type AutoOpenRule = typeof shouldAutoOpen;
-/** Polls `rule` while `entry` waits for approval and calls `open` once per launch and activity. */
+/** Polls `rule` while `entry` waits for approval or an answer and calls `open` once per launch and state. */
 function useAutoOpen(
   entry: CatalogEntry | undefined,
   selectedId: string,
@@ -114,8 +114,8 @@ function useAutoOpen(
 ) {
   const [handled, setHandled] = useState('');
   useEffect(() => {
-    const key = `${entry?.launchId}:${entry?.activity}`;
-    if (handled === key || !entry?.launchId || entry.activity !== 'approval-required') return;
+    const key = `${entry?.launchId}:${entry?.activity}:${entry?.attention}`;
+    if (handled === key || !entry?.launchId || !blockedOnTerminal(entry)) return;
     const tick = () => {
       if (rule(entry, selectedId, popup, lastKeystrokeAt(), Date.now())) {
         setHandled(key);
@@ -125,10 +125,18 @@ function useAutoOpen(
     tick();
     const timer = setInterval(tick, AUTO_OPEN_POLL_MS);
     return () => clearInterval(timer);
-  }, [entry?.launchId, entry?.activity, entry?.sessionId, selectedId, popup, handled]);
+  }, [
+    entry?.launchId,
+    entry?.activity,
+    entry?.attention,
+    entry?.sessionId,
+    selectedId,
+    popup,
+    handled,
+  ]);
   useEffect(() => {
-    if (entry?.activity !== 'approval-required') setHandled('');
-  }, [entry?.activity]);
+    if (!entry || !blockedOnTerminal(entry)) setHandled('');
+  }, [entry?.activity, entry?.attention]);
 }
 export function useAutoOpenTerminal(
   entry: CatalogEntry | undefined,
@@ -148,8 +156,7 @@ export function shouldAutoOpenLaunch(
   lastKeystrokeAt: number,
   now: number,
 ) {
-  if (!entry?.launchId || entry.activity !== 'approval-required' || popup === 'dot-only')
-    return false;
+  if (!entry?.launchId || !blockedOnTerminal(entry) || popup === 'dot-only') return false;
   if (entry.sessionId && entry.sessionId === selectedId) return false; // the per-session auto-open owns it
   return !typedRecently(lastKeystrokeAt, now);
 }

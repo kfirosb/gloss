@@ -2,6 +2,19 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 39. "Translation failed" on plain replies that repeat product terms
+
+Status: urgent; captured on 2026-10-16, still open in 0.23.2.
+
+Hebrew translation protects product words (`Codex`, `refresh`, …) with the same exact-once markers as code (`replyLiteralPattern` in `src/core/translations.ts`). Haiku often drops one while writing natural Hebrew, and after a single retry the whole reply fails. A plain 1.8 KB reply with 12 markers passed only 2 of 8 tries.
+
+- [ ] Stop protecting `englishProductTerms` with markers. Keep them in English through the prompt instruction only. Code, paths and URLs keep strict markers.
+- [ ] Keep the strict exact-once check for code markers, since a missing one can mean missing content (2 of 8 tries left out the opening sentence).
+- [ ] Remove the duplicate `Codex` from `englishProductTerms`.
+- [ ] Record the reason for each failed translation (missing or invented marker, model/CLI error, abort), with no message text in the log.
+- [ ] Regression test: a translation that rewords a product term but keeps every code marker is accepted. Existing placeholder tests still pass.
+- [ ] Re-run the 8-try check with Haiku on the fixed version and record the pass rate.
+
 ## 20. Sign and notarize the Mac build
 
 Status: complete; Gloss 0.19.0 (2026-10-20) is the first signed and notarized release, published on GitHub and in the Homebrew tap. Remaining: confirm the first launch on a Mac other than the maintainer's. Captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
@@ -174,7 +187,24 @@ A message the user writes in Hebrew is translated to English and sent to the age
 
 ## 31. Claude's option questions as a card in Gloss
 
-Status: captured on 2026-10-20; design not started.
+Status: captured on 2026-10-20. On 2026-10-30 the alert and the translated question shipped
+(branch `mode-question-claude`); answering from a card was dropped by the user as unnecessary.
+
+What shipped: an open dialog (`dialog-open`, from Claude's session record: `status: "waiting"`,
+`waitingFor: "input needed"` in 2.1.314) is attention `question` (`src/core/attention.ts`): the tab
+dot, header ("Waiting for your answer"), Dock badge, toast, sound and bounce all fire, and the
+terminal opens by itself like an approval does (`blockedOnTerminal`). For launched sessions the
+attention monitor also reads the dialog off the screen (`src/runtime/question-screen.ts`, fixture
+`claude-2.1.314-question.txt`), and `src/runtime/question-relay.ts` posts it once into the session's
+conversation as a `question:` message, so the Live Conversation view shows and translates the
+header, question and numbered options. The user answers in the terminal.
+
+Why the screen and not the transcript: with inline tools (Claude 2.1.314 on Fable 5.1) the
+AskUserQuestion call reaches the transcript only after the answer, so a PreToolUse hook or the
+screen are the only live sources; the screen needs no change to Claude's configuration. Sessions
+Gloss did not launch get the alert but not the question text.
+
+Remaining, only if the user asks for it again:
 
 When Claude Code asks the user to choose between options (its AskUserQuestion tool: a title such as "How do you want to try the fix and ship it?", numbered options with a description each, "Type something", "Chat about this"), the question appears only in the terminal. Gloss notices it: Claude's session record switches to `status: "waiting"` / `waitingFor`, `claudeActivity` in `src/agents/claude/coding-state.ts` maps that to `dialog-open`, the header shows "A dialog is open in the terminal", and deliveries are held (`DIALOG_OPEN_REASON`, `src/agents/claude/tmux-delivery.ts`). But Gloss never sees the question text or the options, so the user has to switch to the Terminal tab and answer there. The user likes the question itself and wants to answer it in Gloss, in a nicer form than the terminal, without the session hanging.
 
@@ -237,7 +267,7 @@ The Files panel previews text and code (with syntax colouring), Markdown and HTM
 
 ## 36. Language Assistant with file access and a choice of model
 
-Status: captured on 2026-10-20; needs design.
+Status: superseded on 2026-10-30 by task 40 (translation model) and task 41 (side assistant), which carry these notes forward.
 
 Today the Language Assistant always runs on the same agent as the session: a Claude session gets a Claude assistant, a Codex session a Codex one (`options.languageBackends[record.target.agent]` in `src/runtime/application.ts`). The Claude assistant runs with every tool switched off (`--safe-mode`, `--tools ''` in `src/language/claude.ts`); the Codex one runs in a read-only sandbox (`src/language/codex.ts`). So the assistant can only answer from the conversation text it is handed and cannot open the project's files. The user wants two things, both configurable: the assistant can read the project's files, and the assistant can be a different model or agent than the session, for example a second opinion from GPT on work Claude is doing.
 
@@ -276,6 +306,35 @@ Today Gloss works only on the computer it runs on. The local server accepts only
 - [ ] Security before anything ships: explicit pairing (QR code shown on the Mac, each device revocable in Settings), every remote request authenticated, remote access off by default, and the phone gets only what the UI needs: no file writes, no terminal input beyond the composer's send path, no secrets. The loopback-only checks stay for the local UI; remote access is a separate entry point the user turns on deliberately.
 - [ ] When the Mac sleeps or Gloss is closed: the phone shows "Mac offline" with the last known state instead of failing silently; a message is never queued for later sending without the user knowing.
 - [ ] Tests: an unpaired or revoked device is refused; a remote send reaches the right session or reports "Not sent"; the loopback server still rejects non-loopback hosts; the layout has no horizontal scroll at 375 px width.
+
+## 40. Choose the model that translates the conversation
+
+Status: captured on 2026-10-30; needs design. Split out of task 36 so the translation choice can ship on its own.
+
+Today every language call a session makes (reply translation, re-translation on a language change, file Translate, summaries, instruction preparation and assistant chat) runs on one model: the `--model` launch flag for the launch session, else the session's saved `languageModel`, else the provider default, `haiku` for Claude and `gpt-5.6-sol` for Codex (`languageModelFor` in `src/runtime/application.ts`). The saved `languageModel` column is always `default` because no setting writes it. Both backends already list their models (`models()` in `src/language/claude.ts` and `src/language/codex.ts`), but nothing in the UI calls them. The user wants to decide which model translates, for example Opus instead of Haiku, and accept the cost.
+
+- [ ] Translation model setting: a picker listing the models of the installed backends from `models()`, with the provider default marked as such. A global default in Settings and a per-session override in the session's language chip, like task 32. The `--model` launch flag keeps precedence for the launch session.
+- [ ] Scope: the choice covers the translation of agent replies and of the user's own messages. Decide whether summaries, file Translate and instruction preparation follow the same choice or keep the cheap default; the assistant conversation is chosen separately (task 41).
+- [ ] Existing translations stay as they are; only new translations use the new model. "Translate" on an untranslated reply uses the current choice. The summary cache is already keyed by model.
+- [ ] A model the account cannot use (a Claude alias is checked only on use; a Codex slug may be gone from the cache) reports the error in the translation notice and keeps the original visible, as a failed translation does today. No silent fallback to another model.
+- [ ] Usage: the spend readout already records the model per call; show the model name in the usage popover's spend breakdown so the extra cost of a stronger model is visible.
+- [ ] Record the pass rate of the task 39 check with Opus and Sonnet beside Haiku, so the setting can be recommended on evidence.
+- [ ] Tests: the chosen model reaches `backend.open` for a translation regardless of the session's agent; the session override wins over the global default; an unknown model reports `model-unavailable` and changes nothing.
+
+## 41. A side assistant that can consult any model, read files and act
+
+Status: captured on 2026-10-30; needs design. Replaces task 36, whose notes it absorbs.
+
+The Language Assistant is a side conversation that runs on the same agent as the session, with no tools: the Claude assistant starts with `--safe-mode --tools ''` (`src/language/claude.ts`), the Codex one in a read-only sandbox (`src/language/codex.ts`), and both answer only from the conversation text Gloss hands them. Many people already keep a second conversation open beside their coding agent, for example with GPT, but that consultant cannot see the project. The user wants the Language Assistant to become a general side assistant, an external consultant on the same task: the user decides who answers (any model or company; today Gloss has only the Claude and Codex backends), and the assistant can read the project's files and perform actions before it answers. Translation and the Hebrew discussion stay part of it.
+
+- [ ] Product and naming: the panel becomes the Assistant (final name open), keeping the language features. `Language Assistant` is a protected term in `englishProductTerms` (`src/core/language-style.ts`), the Claude channel server keeps its `language-assistant` name and old data paths keep working; only labels change.
+- [ ] Who answers: pick the backend and model for the assistant independently of the session's agent, for example Codex/GPT beside a Claude session, as a global default in Settings and a per-session choice in the assistant's controls. Separate from the translation model (task 40). Each reply shows which model answered. Changing the choice mid-conversation starts a new assistant session with the conversation so far handed over as context.
+- [ ] More providers: new companies (Gemini, others) are new `LanguageBackend` implementations behind the existing contract (`src/core/contracts.ts`), added one at a time: a CLI with its own login, like Claude and Codex today, or an API key the user stores in Settings. Decide which comes first and keep it a separate task per provider.
+- [ ] Capability levels per assistant, chosen by the user, with the level shown in the panel: conversation only (today); read files, read-only tools scoped to the session's folder (Claude: Read, Grep, Glob; Codex: the read-only sandbox pointed at the folder), secrets such as `.env` left out unless opted in; act, the assistant may run commands and edit files in the session's folder before answering. Acting is an explicit opt-in per session, never the default, and approval prompts stay in the assistant's own CLI (Claude permission mode, Codex `workspace-write` sandbox) rather than being answered by Gloss.
+- [ ] Context handed over: the latest exchange or the messages picked with "Add to answer", the session folder, and the changed files when file access is on. A "Second opinion" action asks the assistant to review the latest exchange; the answer appears in the Assistant pane, translated like any other reply.
+- [ ] Two agents in one folder: when the assistant may act, warn that it edits the same working tree as the session's agent, and offer to run it in the session's worktree only. The assistant never sends anything to the coding agent's terminal on its own; "Send to Terminal" stays the user's action.
+- [ ] Usage and cost: the usage indicator counts each backend separately; a chosen backend that is missing or signed out (GPT chosen but Codex not installed or not logged in) shows a clear message instead of failing silently.
+- [ ] Tests: the chosen backend is used regardless of the session's agent; a read-files assistant gets only read tools scoped to the folder; an acting assistant is only started after the per-session opt-in; a missing backend reports an error the UI shows.
 
 ## 19. lsof storm in Claude session liveness checks
 

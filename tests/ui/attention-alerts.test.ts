@@ -74,6 +74,18 @@ describe('diffAlerts', () => {
       ['A:a:2'],
     ]);
   });
+  it('alerts on each question onset, separately from approvals', () => {
+    const asking = entry('A', { attention: 'question', activity: 'dialog-open' });
+    const approving = entry('A', { attention: 'approval', activity: 'approval-required' });
+    expect(run([[entry('A')], [asking], [asking], [entry('A')], [asking], [approving]])).toEqual([
+      [],
+      ['A:q:1'],
+      [],
+      [],
+      ['A:q:2'],
+      ['A:a:1'],
+    ]);
+  });
   it('suppresses the selected session only while focused', () => {
     const snaps = [
       [entry('A'), entry('B')],

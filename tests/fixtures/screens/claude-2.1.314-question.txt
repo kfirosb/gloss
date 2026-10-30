@@ -1,0 +1,27 @@
+ ▐▛███▛█   Claude Code v2.1.314
+▝▜██████▀  Fable 5.1 · Claude Max
+ ▝▝   ▝▝   /Users/kfirbechavod/.superset/projects/hebrow-for-terminal
+
+
+❯ Reply with READY only. Do not use tools.
+
+⏺ READY
+
+✻ Worked for 4s · done 1:25 PM
+
+❯ Use the AskUserQuestion tool to ask me one question with two options.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Next step
+
+Which would you like to do next in this session?
+
+❯ 1. Review recent changes
+     Look over the latest commits and working tree for issues.
+  2. Start a new task
+     Tell me what you want built or fixed and I'll get going.
+  3. Type something.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
