@@ -1,4 +1,4 @@
-import type { Target, ConversationSnapshot, Draft } from './contracts.js';
+import type { AgentKind, Target, ConversationSnapshot, Draft } from './contracts.js';
 
 /** Snapshot envelope shared by the HTTP server and browser transport. */
 export interface SessionEnvelope {
@@ -52,6 +52,12 @@ export interface WorkspaceRecord {
   sessionId: string;
   revision: number;
   data: WorkspaceData;
+}
+
+export interface HiddenSessionStore {
+  /** Hides a conversation from Saved sessions; idempotent. Never touches agent files. */
+  hideSession(agent: AgentKind, sessionRef: string, hiddenAt?: number): void;
+  listHiddenSessions(): { agent: AgentKind; sessionRef: string }[];
 }
 
 export interface SessionStore {

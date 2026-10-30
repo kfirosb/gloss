@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
+  AgentKind,
   AgentMessage,
   ConversationSnapshot,
   ConversationStore,
@@ -20,6 +21,7 @@ import {
   clampLayoutSize,
   defaultWorkspace,
   WorkspaceConflict,
+  type HiddenSessionStore,
   type SessionRecord,
   type SessionStore,
   type WorkspaceData,
@@ -69,7 +71,8 @@ export class SqliteStore
     LaunchStore,
     ConnectedFolderStore,
     SeenStore,
-    SpendStore
+    SpendStore,
+    HiddenSessionStore
 {
   addSpend(scope: string, provider: string, spend: Spend): void {
     this.database
@@ -1150,6 +1153,25 @@ export class SqliteStore
         .run(id);
       this.database.prepare('DELETE FROM panel_sessions WHERE id = ?').run(id);
     });
+  }
+
+  hideSession(agent: AgentKind, sessionRef: string, hiddenAt: number = Date.now()): void {
+    this.database
+      .prepare(
+        'INSERT INTO hidden_sessions(agent, session_ref, hidden_at) VALUES (?, ?, ?) ON CONFLICT(agent, session_ref) DO NOTHING',
+      )
+      .run(agent, sessionRef, hiddenAt);
+  }
+
+  listHiddenSessions(): { agent: AgentKind; sessionRef: string }[] {
+    return (
+      this.database
+        .prepare('SELECT agent, session_ref FROM hidden_sessions ORDER BY hidden_at, rowid')
+        .all() as Row[]
+    ).map((row) => ({
+      agent: String(row.agent) as AgentKind,
+      sessionRef: String(row.session_ref),
+    }));
   }
 
   list(projectId?: string): ConversationSummary[] {

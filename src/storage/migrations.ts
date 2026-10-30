@@ -201,4 +201,9 @@ export const MIGRATIONS = [
     // The request id a native user record carries (a peer message's Gloss tag), so a reload still matches its delivery.
     sql: 'ALTER TABLE source_messages ADD COLUMN client_id TEXT;',
   },
+  {
+    version: 28,
+    // Conversations the user removed from Saved sessions; the agent's own files are never touched.
+    sql: 'CREATE TABLE hidden_sessions (agent TEXT NOT NULL, session_ref TEXT NOT NULL, hidden_at INTEGER NOT NULL, PRIMARY KEY (agent, session_ref));',
+  },
 ] as const;
