@@ -1,12 +1,13 @@
 // tests/adapters/claude-past-sessions.test.ts
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, mkdir, writeFile, realpath, rm, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, realpath, rm, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   claudeProjectSlug,
   listClaudePastSessions,
   CLAUDE_PAST_HEAD_BYTES,
+  CLAUDE_PAST_TAIL_BYTES,
 } from '../../src/agents/claude/past-sessions.js';
 import { CLAUDE_SETUP_PROMPT } from '../../src/core/session-contracts.js';
 
@@ -81,31 +82,89 @@ it('falls back to the first prompt that is not the setup prompt', async () => {
   );
   expect((await listClaudePastSessions(config, folder))[0]?.title).toBe('Rename the module');
 });
-it('skips subagent and memory directories, non-uuid names, other folders and files without a user record', async () => {
+
+const user = (folder: string, id: string, content: unknown = 'hello') =>
+  rec({ type: 'user', cwd: folder, sessionId: id, message: { content } });
+
+it('skips a directory named like a transcript', async () => {
   const { folder, config, dir } = await home();
-  await mkdir(join(dir, ID2));
-  await writeFile(
-    join(dir, ID2, 'agent-x.jsonl'),
-    rec({ type: 'user', cwd: folder, message: { content: 'x' } }),
-  );
-  await mkdir(join(dir, 'memory'));
-  await writeFile(
-    join(dir, 'notes.jsonl'),
-    rec({ type: 'user', cwd: folder, message: { content: 'x' } }),
-  );
-  // Same slug, different folder (dot vs dash): must not be listed.
-  await writeFile(
-    join(dir, `${ID1}.jsonl`),
-    rec({
-      type: 'user',
-      cwd: folder.replace('my.project', 'my-project'),
-      sessionId: ID1,
-      message: { content: 'x' },
-    }),
-  );
-  await writeFile(join(dir, `${ID3}.jsonl`), rec({ type: 'file-history-snapshot' }));
+  await mkdir(join(dir, `${ID2}.jsonl`));
   expect(await listClaudePastSessions(config, folder)).toEqual([]);
 });
+it('skips subagent directories, the memory directory and non-uuid file names', async () => {
+  const { folder, config, dir } = await home();
+  await mkdir(join(dir, ID2));
+  await writeFile(join(dir, ID2, `${ID3}.jsonl`), user(folder, ID3));
+  await mkdir(join(dir, 'memory'));
+  await writeFile(join(dir, 'notes.jsonl'), user(folder, ID1));
+  expect(await listClaudePastSessions(config, folder)).toEqual([]);
+});
+it('skips a file without a user record', async () => {
+  const { folder, config, dir } = await home();
+  await writeFile(join(dir, `${ID3}.jsonl`), rec({ type: 'file-history-snapshot', cwd: folder }));
+  expect(await listClaudePastSessions(config, folder)).toEqual([]);
+});
+it('skips a transcript of another existing folder that shares the slug', async () => {
+  const { folder, config, dir } = await home();
+  const other = folder.replace('my.project', 'my-project');
+  await mkdir(other);
+  await writeFile(join(dir, `${ID1}.jsonl`), user(other, ID1));
+  expect(await listClaudePastSessions(config, folder)).toEqual([]);
+});
+it('lists a transcript whose cwd is a symlink to the folder', async () => {
+  const { folder, config, dir } = await home();
+  const alias = join(folder, '..', 'alias');
+  await symlink(folder, alias);
+  await writeFile(join(dir, `${ID1}.jsonl`), user(alias, ID1));
+  expect((await listClaudePastSessions(config, folder)).map((s) => s.sessionRef)).toEqual([ID1]);
+});
+it('drops a partial last line of the head window', async () => {
+  const { folder, config, dir } = await home();
+  const head = user(folder, ID1, 'first');
+  // The only second user record straddles the head bound, so it must not be parsed.
+  const pad = rec({ type: 'mode', pad: 'x'.repeat(CLAUDE_PAST_HEAD_BYTES - head.length - 200) });
+  const straddling = JSON.stringify({
+    type: 'user',
+    cwd: folder,
+    message: { content: 'x'.repeat(500) },
+  });
+  await writeFile(join(dir, `${ID1}.jsonl`), head + pad + straddling + '\n');
+  expect((await listClaudePastSessions(config, folder))[0]?.title).toBe('first');
+});
+it('ignores a title record that only the tail’s partial first line could hold', async () => {
+  const { folder, config, dir } = await home();
+  const early = rec({ type: 'ai-title', aiTitle: 'Early', sessionId: ID1 });
+  const filler = rec({ type: 'mode', pad: 'x'.repeat(1000) }).repeat(
+    Math.ceil(CLAUDE_PAST_TAIL_BYTES / 1000) + 2,
+  );
+  await writeFile(join(dir, `${ID1}.jsonl`), user(folder, ID1, 'prompt') + early + filler);
+  expect((await listClaudePastSessions(config, folder))[0]?.title).toBe('prompt');
+});
+it('reads a title inside the tail window and drops the line the window cuts', async () => {
+  const { folder, config, dir } = await home();
+  const filler = rec({ type: 'mode', pad: 'x'.repeat(1000) }).repeat(
+    Math.ceil(CLAUDE_PAST_TAIL_BYTES / 1000) + 2,
+  );
+  const tail = rec({ type: 'ai-title', aiTitle: 'Late', sessionId: ID1 });
+  await writeFile(join(dir, `${ID1}.jsonl`), user(folder, ID1, 'prompt') + filler + tail);
+  expect((await listClaudePastSessions(config, folder))[0]?.title).toBe('Late');
+});
+it('survives a multibyte character cut at the window edge', async () => {
+  const { folder, config, dir } = await home();
+  const head = user(folder, ID1, 'prompt');
+  const filler = rec({ type: 'mode', pad: 'é'.repeat(CLAUDE_PAST_TAIL_BYTES) });
+  const tail = rec({ type: 'ai-title', aiTitle: 'שלום', sessionId: ID1 });
+  await writeFile(join(dir, `${ID1}.jsonl`), head + filler + tail);
+  expect((await listClaudePastSessions(config, folder))[0]?.title).toBe('שלום');
+});
+it('rejects a project directory with more than 10,000 entries', async () => {
+  const { folder, config, dir } = await home();
+  await Promise.all(Array.from({ length: 10_001 }, (_, i) => writeFile(join(dir, `f${i}`), '')));
+  await expect(listClaudePastSessions(config, folder)).rejects.toThrow(
+    'Transcript enumeration exceeds bound',
+  );
+});
+
 it('ignores a file whose first cwd lies beyond the head bound', async () => {
   const { folder, config, dir } = await home();
   const filler = rec({ type: 'mode', pad: 'x'.repeat(4096) }).repeat(
