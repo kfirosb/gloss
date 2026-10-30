@@ -369,7 +369,11 @@ export function createSessionLauncher(options: {
               await connect(id, target, controller);
               return;
             } catch (error) {
-              if (!/transcript pointer/i.test(error instanceof Error ? error.message : ''))
+              if (
+                !/transcript pointer|project identity mismatch/i.test(
+                  error instanceof Error ? error.message : '',
+                )
+              )
                 throw error;
               firstAttempt?.();
               firstAttempt = undefined;

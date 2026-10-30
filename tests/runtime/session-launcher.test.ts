@@ -1311,3 +1311,38 @@ it('two resumes of one session started together open one pane', async () => {
   // A preparation is used once, even after its start was refused.
   await expect(launcher.resume(second)).rejects.toThrow('Unknown resume');
 });
+it('keeps identifying a resumed session while the agent has not written its own record yet', async () => {
+  const { folder, t } = await setup();
+  let calls = 0;
+  const register = vi.fn(async (target: Target): Promise<SessionRecord> => {
+    if (++calls < 3) throw new Error('Session project identity mismatch');
+    return { id: 'panel-late', target, canonicalRoot: folder, projectName: 'p', enabled: true };
+  });
+  const store = new SqliteStore(':memory:');
+  const launcher = createSessionLauncher({
+    tmux: async () => t.tmux,
+    store,
+    shell: '/bin/zsh',
+    sessions: { register },
+    panels: () => [],
+    claudeExecutable: async () => '/bin/claude',
+    findCodex: async () => undefined,
+    resolveExecutable: async () => '/bin/codex',
+    knownFolder: async (f: string) => f === folder,
+    sleep: async () => {},
+    identifyTimeoutMs: 1000,
+    retryDelaysMs: [1, 1, 1],
+  });
+  launchers.push(launcher);
+  // resume returns after the first attempt; identification keeps retrying in the background.
+  const { id } = await launcher.resume(
+    await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  );
+  await vi.waitFor(() =>
+    expect(launcher.list().find((r) => r.id === id)).toMatchObject({
+      state: 'running',
+      panelSessionId: 'panel-late',
+    }),
+  );
+  expect(register).toHaveBeenCalledTimes(3);
+});
