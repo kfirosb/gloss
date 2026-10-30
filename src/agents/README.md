@@ -1,6 +1,6 @@
 # Versioned local coding adapters
 
-These adapters attach to an existing exact coding session; they never start, resume, fork, interrupt, or terminate it. They are experimental integrations with version-sensitive local files. The tested baseline and current exact allowlist are **Claude Code 2.1.273** and **Codex CLI 0.154.0**. Newer versions require a new protocol verification and parser review; an unverified version fails closed.
+These adapters attach to an existing exact coding session; they never start, resume, fork, interrupt, or terminate it. They also list past conversations for Saved sessions (`listPast`: Claude from `projects/<slug>/*.jsonl` with bounded head and tail reads; Codex from `threads` metadata, user-origin and non-archived with a first user message), and only the launcher, never an adapter, may start a resume (`claude --resume <id>`, `codex resume <id>`) in a new Gloss pane. They are experimental integrations with version-sensitive local files. The tested baseline and current exact allowlist are **Claude Code 2.1.273** and **Codex CLI 0.154.0**. Newer versions require a new protocol verification and parser review; an unverified version fails closed.
 
 `createClaudeAdapter(options)` and `createCodexAdapter(options)` implement the core `AgentAdapter` contract. Both accept `runner`, `pollMs`, `pageSize`, an abortable `clock.sleep`, and an optional trusted server `observeLive(target)` probe. Never populate this probe or credentials from browser-supplied claims.
 
