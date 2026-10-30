@@ -8,6 +8,8 @@ const AGENT_KINDS: readonly AgentKind[] = ['claude', 'codex'];
 /** Bounds on saved extra launch arguments per agent. */
 export const MAX_EXTRA_ARGS = 32;
 export const MAX_EXTRA_ARG_CHARS = 512;
+/** Saved sessions shows this many past conversations per folder. */
+export const PAST_SESSIONS_LIMIT = 10;
 export interface LaunchSettings {
   extraArgs: Record<AgentKind, string[]>;
   popup: PopupMode;

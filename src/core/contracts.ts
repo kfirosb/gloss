@@ -1,4 +1,5 @@
 import type { OpenSessionScan } from './session-catalog.js';
+import type { AgentPastSession } from './past-sessions.js';
 import type { FileReference } from './file-references.js';
 import type { LanguageSettings } from './language-settings.js';
 import type { ActivityEvent, ActivitySnapshot } from './activity-contracts.js';
@@ -254,6 +255,8 @@ export interface AgentAdapter {
   /** `fresh` asks for a scan that does not reuse a recent cached probe, e.g. to identify a new launch. */
   discoverOpen?(signal: AbortSignal, options?: { fresh?: boolean }): Promise<OpenSessionScan>;
   attach(target: Target, context?: { panelSessionId: string }): Promise<CodingConnection>;
+  /** Past conversations of a folder that are not open now, newest information the agent keeps on disk. */
+  listPast?(projectPath: string): Promise<AgentPastSession[]>;
 }
 export interface LanguageTurn {
   id?: string;
