@@ -410,15 +410,16 @@ it('answers 409 to a reopen of a conversation open outside Gloss and never resum
   expect(pastSessions.openOutside).toHaveBeenCalledWith('codex', 'T');
   expect(resume).not.toHaveBeenCalled();
 });
+const C9 = '99999999-9999-4999-8999-999999999999';
 it('hides a past conversation that has no panel', async () => {
   const { request, store } = await setup(fakeLauncher());
   const res = await request('/api/past-sessions/hide', 'POST', {
     agent: 'claude',
-    sessionRef: 'c-9',
+    sessionRef: C9,
   });
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ hidden: true });
-  expect(store.listHiddenSessions()).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
+  expect(store.listHiddenSessions()).toEqual([{ agent: 'claude', sessionRef: C9 }]);
 });
 it('rejects a reopen with an unknown agent', async () => {
   const { request } = await setup(fakeLauncher());

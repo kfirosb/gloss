@@ -292,18 +292,23 @@ it('reopens with only the agent, session and folder', async () => {
 
 it('hides a conversation without a panel and refuses one that has a panel', async () => {
   const { app, store } = application();
-  await app.sessions!.register({ agent: 'codex', sessionRef: 'P', projectId: process.cwd() }, 'P');
-  expect(() => app.hidePastSession!({ agent: 'codex', sessionRef: 'P' })).toThrow(
+  const P = '11111111-1111-4111-8111-111111111111';
+  const gone = '22222222-2222-4222-8222-222222222222';
+  await app.sessions!.register({ agent: 'codex', sessionRef: P, projectId: process.cwd() }, 'P');
+  expect(() => app.hidePastSession!({ agent: 'codex', sessionRef: P })).toThrow(
     expect.objectContaining({ code: 'session-open' }),
   );
   expect(() => app.hidePastSession!({ agent: 'codex', sessionRef: '' })).toThrow('Invalid session');
+  expect(() => app.hidePastSession!({ agent: 'codex', sessionRef: '--help' })).toThrow(
+    'Invalid session',
+  );
   expect(() => app.hidePastSession!({ agent: 'shell', sessionRef: 'x' })).toThrow('Invalid agent');
-  app.hidePastSession!({ agent: 'claude', sessionRef: 'P' });
-  app.hidePastSession!({ agent: 'codex', sessionRef: 'gone' });
+  app.hidePastSession!({ agent: 'claude', sessionRef: P });
+  app.hidePastSession!({ agent: 'codex', sessionRef: gone });
   expect(store.listHiddenSessions()).toEqual(
     expect.arrayContaining([
-      { agent: 'claude', sessionRef: 'P' },
-      { agent: 'codex', sessionRef: 'gone' },
+      { agent: 'claude', sessionRef: P },
+      { agent: 'codex', sessionRef: gone },
     ]),
   );
   expect(store.listHiddenSessions()).toHaveLength(2);

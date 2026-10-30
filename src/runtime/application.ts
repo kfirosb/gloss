@@ -8,6 +8,7 @@ import type { DeliveryRoute, ImageAttachment } from '../core/contracts.js';
 import { createFileRegistry } from './file-registry.js';
 import { splitArgs, validateLaunchSettings, type LaunchSettings } from '../core/launch-settings.js';
 import { recordOf } from '../core/json-record.js';
+import { uuid } from '../agents/shared.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { PACKAGE_NAME, packageRoot } from './package-root.js';
@@ -513,7 +514,8 @@ export function createApplication(options: ApplicationOptions): Application {
       requireOpen();
       const { agent, sessionRef } = recordOf(input) ?? {};
       if (agent !== 'claude' && agent !== 'codex') throw failure('Invalid agent', 'bad-request');
-      if (typeof sessionRef !== 'string' || !sessionRef)
+      // Claude session ids and Codex thread ids are both UUIDs, as a reopen requires.
+      if (typeof sessionRef !== 'string' || !uuid.test(sessionRef))
         throw failure('Invalid session', 'bad-request');
       if (
         options.store
