@@ -250,7 +250,12 @@ function App() {
   const reopenPast = (entry: PastSession) => {
     if (!activeFolder) return;
     const folder = activeFolder.path;
+    const folderKeyAtClick = activeFolder.key;
     const key = pastSessionKey(entry.agent, entry.sessionRef);
+    const request = selectionRequest.current;
+    // A late answer must not change a session or folder the user picked meanwhile.
+    const unchanged = () =>
+      request === selectionRequest.current && lastActiveFolder.current === folderKeyAtClick;
     setReopening(key);
     setSelectionError('');
     void reopenPastSession(entry, folder)
@@ -258,12 +263,14 @@ function App() {
         (launch) => {
           setWaitingLaunchId(launch.id);
           setUnlistedLaunchId(launch.id);
-          if (launch.panelSessionId) chooseSession(launch.panelSessionId);
+          if (launch.panelSessionId && unchanged()) chooseSession(launch.panelSessionId);
         },
-        (e: unknown) =>
-          setSelectionError(
-            `Could not reopen ${entry.title}: ${errorMessage(e, 'unknown error')}. Run it yourself: ${manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand}`,
-          ),
+        (e: unknown) => {
+          if (unchanged())
+            setSelectionError(
+              `Could not reopen ${entry.title}: ${errorMessage(e, 'unknown error')}. Run it yourself: ${manualResumeCommand(entry.agent, entry.sessionRef, folder).cdCommand}`,
+            );
+        },
       )
       .finally(() => {
         setReopening((current) => (current === key ? undefined : current));

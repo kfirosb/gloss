@@ -461,6 +461,37 @@ test.describe('Saved sessions menu', () => {
       .toEqual([{ agent: 'claude', sessionRef: 'c-1', folder: '/repo' }]);
     await expectSelected(page, 'A');
   });
+  test('a late reopen does not change a session chosen meanwhile', async ({ page, context }) => {
+    const f = await sessionFixture(context);
+    await routePastSessions(context, () => [
+      { agent: 'claude', sessionRef: 'c-1', title: 'Login fix', state: 'closed' },
+    ]);
+    const held: Array<() => void> = [];
+    await context.route('**/api/launches/resume', async (r) => {
+      await new Promise<void>((res) => held.push(res));
+      return r.fulfill({
+        json: {
+          id: 'R1',
+          agent: 'claude',
+          folder: '/repo',
+          state: 'running',
+          createdAt: 0,
+          panelSessionId: 'A',
+        },
+      });
+    });
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await expectSelected(page, 'A');
+    await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
+    await page.getByRole('button', { name: 'Reopen Login fix' }).click();
+    await expect.poll(() => held.length).toBe(1);
+    await page.getByRole('tab', { name: /Session B/ }).click();
+    await expectSelected(page, 'B');
+    for (const release of held) release();
+    await page.waitForTimeout(500);
+    await expectSelected(page, 'B');
+  });
   test('the saved menu scrolls when it is taller than the window', async ({ page, context }) => {
     const f = await sessionFixture(context);
     const entries = Array.from({ length: 10 }, (_, i) => ({
@@ -706,6 +737,22 @@ test.describe('remove from history', () => {
     await expect(dialog).toBeHidden();
     expect(hidden).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
     await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
+  });
+  test('a Gloss session row that is not saved here offers no removal and never the hide dialog', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    await routePastSessions(context, () => [
+      { agent: 'codex', sessionRef: 'Z', panelSessionId: 'Z', title: 'Elsewhere', state: 'closed' },
+    ]);
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (1)' }).click();
+    await page.getByRole('menuitem', { name: /Elsewhere/ }).click({ button: 'right' });
+    const actions = page.getByRole('menu', { name: 'Session actions' });
+    await expect(actions.getByRole('menuitem', { name: 'Reopen' })).toBeVisible();
+    await expect(actions.getByRole('menuitem', { name: 'Remove from history…' })).toHaveCount(0);
   });
   test('folder context menu removes all closed sessions after one confirmation', async ({
     page,

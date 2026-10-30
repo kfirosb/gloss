@@ -166,16 +166,17 @@ export function SessionTabs({
     const box = root.current?.getBoundingClientRect();
     setSavedMenu({ entry, x: anchor.x - (box?.left ?? 0), y: anchor.y - (box?.top ?? 0) });
   };
-  // Removal goes through the saved Gloss session when there is one, else the row is only hidden.
+  // A row with a Gloss session is removed through its saved catalog entry; only a row with no Gloss session is hidden.
   const savedFor = (entry: PastSession) =>
     entry.panelSessionId ? saved.find((e) => e.sessionId === entry.panelSessionId) : undefined;
   const removePast = (entry: PastSession) => {
+    if (!entry.panelSessionId) return onRemovePast?.(entry);
     const record = savedFor(entry);
     if (record) onRemove?.([record]);
-    else onRemovePast?.(entry);
   };
   const canRemove = (entry: PastSession) =>
-    entry.state !== 'open-in-gloss' && (savedFor(entry) ? !!onRemove : !!onRemovePast);
+    entry.state !== 'open-in-gloss' &&
+    (entry.panelSessionId ? !!savedFor(entry) && !!onRemove : !!onRemovePast);
   const savedMenuItems = (entry: PastSession) => [
     ...(entry.state === 'closed' && onReopen
       ? [{ key: 'reopen', content: 'Reopen', onChoose: () => onReopen(entry) }]
