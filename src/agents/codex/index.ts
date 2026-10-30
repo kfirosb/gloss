@@ -5,6 +5,7 @@ import {
   threadLiveness,
   type CodexSnapshot,
 } from './discovery.js';
+import { listCodexPastSessions } from './past-sessions.js';
 import type { LaunchedLiveness, ThreadLiveness } from './liveness.js';
 import { attachmentManifest, isFileReference } from '../../core/file-references.js';
 import { stat } from 'node:fs/promises';
@@ -178,6 +179,7 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
     kind: 'codex',
     discoverOpen: (signal, { fresh = false } = {}) =>
       discoverOpenCodex(options, signal, () => snapshot({ fresh })),
+    listPast: (projectPath) => listCodexPastSessions(database, projectPath),
     async discover(projectPath) {
       const project = await projectIdentity(projectPath);
       let threads: Thread[];

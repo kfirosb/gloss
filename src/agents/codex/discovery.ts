@@ -22,7 +22,9 @@ interface Metadata {
   created_at?: unknown;
   created_at_ms?: unknown;
 }
-function origin(row: Metadata): 'user' | 'internal' | 'unknown' {
+export function threadOrigin(
+  row: Pick<Metadata, 'source' | 'thread_source' | 'agent_path' | 'originator'>,
+): 'user' | 'internal' | 'unknown' {
   let source: unknown = row.source;
   try {
     source = JSON.parse(row.source);
@@ -364,7 +366,7 @@ export async function discoverOpenCodex(
           continue;
         }
         const row = rows[0]!;
-        const classification = origin(row);
+        const classification = threadOrigin(row);
         if (classification === 'internal') continue;
         if (classification === 'unknown') {
           fail('Codex session origin is unverified');
