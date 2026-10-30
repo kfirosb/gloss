@@ -2844,12 +2844,15 @@ pre {
   box-shadow: 0 14px 40px #17203324;
   padding: 6px;
   min-width: 220px;
+  display: flex;
+  flex-direction: column;
+}
+/* Only the Saved sessions list grows long enough to need a bound and its own scrolling. */
+.session-past-menu {
   max-width: min(420px, calc(100vw - 32px));
   max-height: min(60vh, calc(100vh - 120px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  display: flex;
-  flex-direction: column;
 }
 .visually-hidden {
   position: absolute;
