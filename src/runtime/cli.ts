@@ -128,6 +128,7 @@ export async function launch(args: string[]) {
   const launchServices = createLaunchServices({
     store,
     codex: codexAdapter,
+    agents: [claudeAdapter, codexAdapter],
     application: () => application,
   });
   launchedCodex = launchServices.launchedCodexLive;
@@ -147,6 +148,7 @@ export async function launch(args: string[]) {
     approveLaunchFolder: launchServices.approveFolder,
     endLaunchesInFolder: launchServices.endLaunchesInFolder,
     claudeMove: launchServices.claudeMove,
+    pastSessions: launchServices.pastSessions,
     dictation,
     ...(process.env.LANGUAGE_PANEL_CAPABILITY
       ? { capability: process.env.LANGUAGE_PANEL_CAPABILITY }

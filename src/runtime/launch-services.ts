@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { AgentAdapter, AgentKind, Target } from '../core/contracts.js';
 import type { LanguageOverride } from '../core/language-settings.js';
-import type { SessionStore } from '../core/session-contracts.js';
+import type { HiddenSessionStore, SessionStore } from '../core/session-contracts.js';
 import { createAttentionMonitor } from './attention-monitor.js';
 import { createClaudeExecutable } from './claude-config.js';
 import { collectProcess, runProcess, type ProcessRunner } from './process-runner.js';
@@ -19,6 +19,7 @@ import {
 import type { SessionManager } from './session-manager.js';
 import { createTerminalBridge } from './terminal-bridge.js';
 import { createClaudeMove } from './claude-move.js';
+import { createPastSessionsService } from './past-sessions.js';
 import {
   createTmux,
   existingSessionName,
@@ -242,10 +243,13 @@ export async function knownFolder(
 
 export function createLaunchServices(options: {
   store: LaunchStore &
-    Pick<SessionStore, 'listSessions'> & { listConnectedFolders?(): { path: string }[] } & {
+    Pick<SessionStore, 'listSessions'> &
+    Partial<HiddenSessionStore> & { listConnectedFolders?(): { path: string }[] } & {
       writeLanguageOverride?(id: string, override: LanguageOverride | null): void;
     };
   codex: AgentAdapter;
+  /** Adapters whose past conversations Saved sessions lists. */
+  agents?: readonly AgentAdapter[];
   application: () => {
     sessions?: SessionManager;
     catalog?: {
@@ -259,6 +263,18 @@ export function createLaunchServices(options: {
   const tmux = options.tmux ?? cachedTmux();
   const runner = options.runner ?? runProcess;
   const live = () => options.application();
+  // One folder check for launching in a folder and for listing its past sessions.
+  const launchFolderKnown = (folder: string) =>
+    knownFolder(folder, [
+      ...(options.store.listConnectedFolders?.().map((f) => f.path) ?? []),
+      ...options.store
+        .listSessions()
+        .flatMap((r) => [r.target.projectId, r.worktreePath, r.canonicalRoot]),
+      ...(live().catalog?.snapshot?.().entries ?? []).flatMap((e) => [
+        e.worktreePath,
+        e.target.projectId,
+      ]),
+    ]);
   const launcher = createSessionLauncher({
     shell: defaultShell(),
     tmux,
@@ -289,17 +305,7 @@ export function createLaunchServices(options: {
       return matchCodexByFolderTime(launch, candidates, launches, claimed);
     },
     resolveExecutable: () => findOnPath('codex'),
-    knownFolder: (folder) =>
-      knownFolder(folder, [
-        ...(options.store.listConnectedFolders?.().map((f) => f.path) ?? []),
-        ...options.store
-          .listSessions()
-          .flatMap((r) => [r.target.projectId, r.worktreePath, r.canonicalRoot]),
-        ...(live().catalog?.snapshot?.().entries ?? []).flatMap((e) => [
-          e.worktreePath,
-          e.target.projectId,
-        ]),
-      ]),
+    knownFolder: launchFolderKnown,
     applyLanguage: (panelId, override) => {
       const app = live();
       return createLaunchApplyLanguage(
@@ -339,11 +345,19 @@ export function createLaunchServices(options: {
     const name = await existingSessionName(current, launch.id);
     return name === undefined ? undefined : glossTerminalFor(current, launch, name);
   };
+  const paneAlive = async (launchId: string) => hasLaunchSession(await tmux(), launchId);
   /** Move to Gloss (spec 5): the service decides from Gloss's own launches and panels what an outside session is. */
   const claudeMove = createClaudeMove({
     launcher,
     panels: () => options.store.listSessions(),
-    paneAlive: async (launchId) => hasLaunchSession(await tmux(), launchId),
+    paneAlive,
+  });
+  const pastSessions = createPastSessionsService({
+    store: options.store,
+    agents: options.agents ?? [],
+    launcher,
+    knownFolder: launchFolderKnown,
+    paneAlive,
   });
   return {
     launcher,
@@ -357,5 +371,6 @@ export function createLaunchServices(options: {
       launchedCodexLiveness(sessionRef, launcher.list(), options.store.listSessions()),
     glossTerminal,
     claudeMove,
+    pastSessions,
   };
 }

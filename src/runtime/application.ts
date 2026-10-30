@@ -53,7 +53,9 @@ import {
   type LanguageSettings,
   type LanguageSettingsStore,
 } from '../core/language-settings.js';
-import type { SessionLauncher, LaunchStore } from './session-launcher.js';
+import type { LaunchRecord, SessionLauncher, LaunchStore } from './session-launcher.js';
+import type { PastSessionsService } from './past-sessions.js';
+import type { PastSessionsResponse } from '../core/past-sessions.js';
 import type { TerminalBridge } from './terminal-bridge.js';
 import type { DictationBridge } from './dictation/bridge.js';
 import { createUsageService, type SessionUsageReport, type UsageService } from './usage.js';
@@ -123,6 +125,7 @@ export interface ApplicationOptions {
   endLaunchesInFolder?(folder: string): Promise<void>;
   worktrees?: WorktreeService;
   inventory?: InventoryService;
+  pastSessions?: PastSessionsService;
 }
 export interface WorktreeListing {
   hasCommits: boolean;
@@ -229,6 +232,12 @@ export interface Application {
   readonly sessions?: SessionManager;
   /** Removes a closed session from this app's history only; agent transcripts are never touched. */
   removeSession?(id: string): Promise<void>;
+  /** A folder's past Claude and Codex conversations, Gloss's own and those on disk, newest first. */
+  pastSessions?(folder: unknown): Promise<PastSessionsResponse>;
+  /** Reopens a past conversation in Gloss; body `{ agent, sessionRef, folder }`. */
+  reopenSession?(input: unknown): Promise<LaunchRecord>;
+  /** Hides a conversation Gloss has no panel for; body { agent, sessionRef }. A conversation with a panel goes through removeSession instead. */
+  hidePastSession?(input: unknown): void;
   readonly catalog?: SessionCatalog;
   readonly usage?: UsageService;
   /** The selected session's provider quota and what Gloss spent for it, today and overall. */
@@ -474,9 +483,44 @@ export function createApplication(options: ApplicationOptions): Application {
         );
       const { target } = sessionRecord(sessionId);
       options.store.hideSession?.(target.agent, target.sessionRef);
+      options.pastSessions?.invalidate();
       await sessions.remove(sessionId, { catalogClosed: entry !== undefined });
       catalog.forget(sessionId);
       await Promise.all(uploads.map((file) => unlink(file.path).catch(() => {})));
+    },
+    async pastSessions(folder) {
+      requireOpen();
+      if (!options.pastSessions) throw new Error('Past sessions unavailable');
+      return options.pastSessions.list(folder);
+    },
+    async reopenSession(input) {
+      requireOpen();
+      const { agent, sessionRef, folder } = recordOf(input) ?? {};
+      if (agent !== 'claude' && agent !== 'codex') throw failure('Invalid agent', 'bad-request');
+      if (typeof sessionRef !== 'string' || !sessionRef)
+        throw failure('Invalid session', 'bad-request');
+      if (typeof folder !== 'string') throw failure('Choose a project folder', 'bad-request');
+      if (!options.launcher) throw new Error('Session launching unavailable');
+      const prepared = await options.launcher.prepareResume({ agent, sessionRef, folder });
+      const launch = await options.launcher.resume(prepared);
+      options.pastSessions?.invalidate();
+      return launch;
+    },
+    hidePastSession(input) {
+      requireOpen();
+      const { agent, sessionRef } = recordOf(input) ?? {};
+      if (agent !== 'claude' && agent !== 'codex') throw failure('Invalid agent', 'bad-request');
+      if (typeof sessionRef !== 'string' || !sessionRef)
+        throw failure('Invalid session', 'bad-request');
+      if (
+        options.store
+          .listSessions()
+          .some((r) => r.target.agent === agent && r.target.sessionRef === sessionRef)
+      )
+        throw failure('Session has history; remove it from history instead', 'session-open');
+      if (!options.store.hideSession) throw new Error('Session history unavailable');
+      options.store.hideSession(agent, sessionRef);
+      options.pastSessions?.invalidate();
     },
     about() {
       requireOpen();
@@ -988,6 +1032,7 @@ export function createApplication(options: ApplicationOptions): Application {
           options.attention?.close();
           options.terminals?.close();
           options.claudeMove?.close();
+          options.pastSessions?.close();
           options.launcher?.close();
           await catalog.close();
           await sessions.close();
