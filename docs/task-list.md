@@ -2,6 +2,19 @@
 
 Captured from the user's request on 2026-09-28. These are separate workstreams, not one implementation plan. Task 1 was authorized with preview-first browsing and explicit attachment; tasks 2 and 3 remain separate.
 
+## 39. "Translation failed" on plain replies that repeat product terms
+
+Status: urgent; captured on 2026-10-16, still open in 0.23.2.
+
+Hebrew translation protects product words (`Codex`, `refresh`, …) with the same exact-once markers as code (`replyLiteralPattern` in `src/core/translations.ts`). Haiku often drops one while writing natural Hebrew, and after a single retry the whole reply fails. A plain 1.8 KB reply with 12 markers passed only 2 of 8 tries.
+
+- [ ] Stop protecting `englishProductTerms` with markers. Keep them in English through the prompt instruction only. Code, paths and URLs keep strict markers.
+- [ ] Keep the strict exact-once check for code markers, since a missing one can mean missing content (2 of 8 tries left out the opening sentence).
+- [ ] Remove the duplicate `Codex` from `englishProductTerms`.
+- [ ] Record the reason for each failed translation (missing or invented marker, model/CLI error, abort), with no message text in the log.
+- [ ] Regression test: a translation that rewords a product term but keeps every code marker is accepted. Existing placeholder tests still pass.
+- [ ] Re-run the 8-try check with Haiku on the fixed version and record the pass rate.
+
 ## 20. Sign and notarize the Mac build
 
 Status: complete; Gloss 0.19.0 (2026-10-20) is the first signed and notarized release, published on GitHub and in the Homebrew tap. Remaining: confirm the first launch on a Mac other than the maintainer's. Captured 2026-10-19 after a first outside user got Gatekeeper's "Apple could not verify Gloss is free of malware" dialog on 0.13.0. The repository was made public the same day.
