@@ -55,6 +55,7 @@ export interface LaunchStore {
 }
 /** What `resume` starts, as checked by `prepareResume`; only an object `prepareResume` returned is accepted, once. */
 export interface PreparedResume {
+  readonly agent: 'claude' | 'codex';
   readonly sessionRef: string;
   readonly cwd: string;
   readonly argv: readonly string[];
@@ -67,11 +68,18 @@ export interface SessionLauncher {
     prompt?: string;
   }): Promise<LaunchRecord>;
   /**
-   * Everything reopening an existing Claude session needs, checked before anything is closed: a valid id, a known
-   * folder, the Claude executable, tmux, an open launcher and no Gloss launch owning the session. Throws otherwise.
+   * Everything reopening an existing Claude or Codex session needs, checked before anything is closed: a valid id, a
+   * known folder, the agent's executable, tmux, an open launcher and no Gloss launch owning the session. Throws otherwise.
    */
-  prepareResume(input: { sessionRef: string; folder: string }): Promise<PreparedResume>;
-  /** Reopens the prepared session in Gloss's tmux with `claude --resume <id>`: no first message, no channel flags. */
+  prepareResume(input: {
+    agent: 'claude' | 'codex';
+    sessionRef: string;
+    folder: string;
+  }): Promise<PreparedResume>;
+  /**
+   * Reopens the prepared session in Gloss's tmux with `claude --resume <id>` or `codex resume <id>`: no first message,
+   * no channel flags.
+   */
   resume(prepared: PreparedResume): Promise<LaunchRecord>;
   /** Types a command into the folder's idle terminal, starting one when none is free. Never runs anything by itself. */
   run(input: {
@@ -162,15 +170,16 @@ export function owningLaunches(
   );
 }
 
-/** The Claude launches owning a session, with whether each ended one's tmux pane still runs (live ones aren't asked). */
-export function claudeOwners(
+/** The launches of `agent` owning a session, with whether each ended one's tmux pane still runs (live ones aren't asked). */
+export function launchOwners(
+  agent: 'claude' | 'codex',
   sessionRef: string,
   launches: readonly LaunchRecord[],
   sessions: readonly { id: string; target: Target }[],
   paneAlive: (launchId: string) => Promise<boolean>,
 ): Promise<GlossLaunches['owners']> {
   return Promise.all(
-    owningLaunches('claude', sessionRef, launches, sessions).map(async (launch) => ({
+    owningLaunches(agent, sessionRef, launches, sessions).map(async (launch) => ({
       state: launch.state,
       paneAlive: launch.state === 'ended' && (await paneAlive(launch.id)),
     })),
@@ -206,7 +215,7 @@ export function createSessionLauncher(options: {
   const readyTimeoutMs = options.readyTimeoutMs ?? 5000;
   const busy = new Map<string, boolean>();
   const preparedResumes = new WeakSet<PreparedResume>();
-  /** Sessions whose resume is between its ownership check and its recorded launch. */
+  /** `agent:sessionRef` of sessions whose resume is between its ownership check and its recorded launch. */
   const resuming = new Set<string>();
   const list = (): LaunchRecord[] =>
     options.store
@@ -508,7 +517,10 @@ export function createSessionLauncher(options: {
     });
     return list().find((r) => r.id === id)!;
   }
-  /** Starts an agent's tmux session and records the launch; a Claude launch waits for its first identification attempt. */
+  /**
+   * Starts an agent's tmux session and records the launch; a Claude launch, or any launch with `awaitFirstIdentify`,
+   * waits for its first identification attempt.
+   */
   async function startAgent(
     tmux: Tmux,
     input: {
@@ -517,6 +529,7 @@ export function createSessionLauncher(options: {
       argv: string[];
       sessionRef?: string | undefined;
       language?: LanguageOverride | undefined;
+      awaitFirstIdentify?: boolean;
     },
   ): Promise<LaunchRecord> {
     requireOpen();
@@ -537,16 +550,17 @@ export function createSessionLauncher(options: {
       ...(input.language ? { languageOverride: input.language } : {}),
     };
     put(record);
-    if (input.agent === 'claude')
+    if (input.agent === 'claude' || input.awaitFirstIdentify)
       await new Promise<void>((done) => {
         void identify(id, done).finally(done);
       });
     else void identify(id);
     return get(id);
   }
-  /** Spec 5 / C1: a Claude launch owns the session (directly or through its panel) unless it ended and its pane is gone. */
-  async function requireNotInGloss(tmux: Tmux, sessionRef: string) {
-    const owners = await claudeOwners(
+  /** Spec 5 / C1: a launch of the agent owns the session (directly or through its panel) unless it ended and its pane is gone. */
+  async function requireNotInGloss(tmux: Tmux, agent: 'claude' | 'codex', sessionRef: string) {
+    const owners = await launchOwners(
+      agent,
       sessionRef,
       options.store.listLaunches(),
       options.panels(),
@@ -594,21 +608,29 @@ export function createSessionLauncher(options: {
       }
       return startAgent(tmux, { agent, cwd, argv, sessionRef, language });
     },
-    async prepareResume({ sessionRef, folder }) {
+    async prepareResume({ agent, sessionRef, folder }) {
       requireOpen();
+      if (agent !== 'claude' && agent !== 'codex') throw new Error('Invalid agent');
+      // Claude session ids and Codex thread ids are both UUIDs.
       if (typeof sessionRef !== 'string' || !uuid.test(sessionRef))
         throw new Error('Invalid session');
       const cwd = await validFolder(folder);
       const tmux = await options.tmux();
-      const claude = await options.claudeExecutable();
-      const extra = options.store.readLaunchSettings().extraArgs.claude;
-      await requireNotInGloss(tmux, sessionRef);
+      const executable =
+        agent === 'claude'
+          ? await options.claudeExecutable()
+          : await options.resolveExecutable('codex');
+      const extra = options.store.readLaunchSettings().extraArgs[agent];
+      await requireNotInGloss(tmux, agent, sessionRef);
       requireOpen();
-      // `--resume <id>` first, so a variadic extra option has nothing of Gloss's to swallow.
+      // The resume selector comes first, so a variadic extra option has nothing of Gloss's to swallow. `codex resume`
+      // takes the same interactive options after the subcommand, and no prompt, so no `--` either.
+      const head = agent === 'claude' ? ['--resume', sessionRef] : ['resume', sessionRef];
       const prepared: PreparedResume = Object.freeze({
+        agent,
         sessionRef,
         cwd,
-        argv: Object.freeze([claude, '--resume', sessionRef, ...extra]),
+        argv: Object.freeze([executable, ...head, ...extra]),
       });
       preparedResumes.add(prepared);
       return prepared;
@@ -617,22 +639,25 @@ export function createSessionLauncher(options: {
       requireOpen();
       // Single use: a failed start is never repeated with the same preparation.
       if (!preparedResumes.delete(prepared)) throw new Error('Unknown resume');
-      const { sessionRef } = prepared;
+      const { agent, sessionRef } = prepared;
+      const key = `${agent}:${sessionRef}`;
       // Until this launch is recorded, a concurrent resume of the same session can't see it as an owner.
-      if (resuming.has(sessionRef)) throw new Error(MOVE_IN_GLOSS_REASON);
-      resuming.add(sessionRef);
+      if (resuming.has(key)) throw new Error(MOVE_IN_GLOSS_REASON);
+      resuming.add(key);
       try {
         const tmux = await options.tmux();
         // Time passes between preparing and starting (the outside session closes meanwhile): check ownership again.
-        await requireNotInGloss(tmux, sessionRef);
+        await requireNotInGloss(tmux, agent, sessionRef);
+        // The known sessionRef identifies the launch directly, so a Codex resume never searches with findCodex.
         return await startAgent(tmux, {
-          agent: 'claude',
+          agent,
           cwd: prepared.cwd,
           argv: [...prepared.argv],
           sessionRef,
+          awaitFirstIdentify: true,
         });
       } finally {
-        resuming.delete(sessionRef);
+        resuming.delete(key);
       }
     },
     async run({ folder, command, originSessionId }) {

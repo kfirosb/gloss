@@ -33,7 +33,7 @@ import {
   type VerifiedRecord,
 } from '../agents/claude/move.js';
 import {
-  claudeOwners,
+  launchOwners,
   type LaunchRecord,
   type PreparedResume,
   type SessionLauncher,
@@ -172,8 +172,12 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
   /** C1: what Gloss itself holds, from its launches now. An unanswered pane check counts as a running pane. */
   async function glossLaunches(sessionRef: string): Promise<GlossLaunches> {
     const launches = options.launcher.list();
-    const owners = await claudeOwners(sessionRef, launches, options.panels(), (launchId) =>
-      options.paneAlive(launchId).catch(() => true),
+    const owners = await launchOwners(
+      'claude',
+      sessionRef,
+      launches,
+      options.panels(),
+      (launchId) => options.paneAlive(launchId).catch(() => true),
     );
     return { owners, panePids: launches.map((launch) => launch.panePid) };
   }
@@ -334,7 +338,7 @@ export function createClaudeMove(options: ClaudeMoveOptions): ClaudeMoveService 
     const folder = before.cwd;
     let prepared: PreparedResume;
     try {
-      prepared = await options.launcher.prepareResume({ sessionRef: ref, folder });
+      prepared = await options.launcher.prepareResume({ agent: 'claude', sessionRef: ref, folder });
     } catch (error) {
       // Nothing was closed: the session still runs in its terminal, so no manual command is offered.
       failures.set(ref, { reason: errorText(error) });

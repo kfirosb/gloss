@@ -122,7 +122,7 @@ async function setup(
   const events: string[] = [];
   const signals: [number, string][] = [];
   const signalledAt: number[] = [];
-  const prepares: { sessionRef: string; folder: string }[] = [];
+  const prepares: { agent: 'claude' | 'codex'; sessionRef: string; folder: string }[] = [];
   const resumes: { sessionRef: string; folder: string }[] = [];
   const ends: string[] = [];
   const logs: string[] = [];
@@ -152,6 +152,7 @@ async function setup(
       await hooks.onPrepare?.();
       if (options.prepare === 'throws') throw new Error('Choose a project folder');
       const prepared: PreparedResume = Object.freeze({
+        agent: input.agent,
         sessionRef: input.sessionRef,
         cwd: input.folder,
         argv: Object.freeze(['/bin/claude', '--resume', input.sessionRef]),
@@ -276,7 +277,7 @@ it('moves an idle outside session: prepare, one SIGTERM, then resume in the reco
   expect(f.signals).toEqual([[OUTSIDE_PID, 'SIGTERM']]);
   // The reopen is checked before anything is closed, and started only after the process is gone.
   expect(f.events).toEqual(['prepare', 'SIGTERM', 'resume']);
-  expect(f.prepares).toEqual([{ sessionRef: SESSION, folder: f.project }]);
+  expect(f.prepares).toEqual([{ agent: 'claude', sessionRef: SESSION, folder: f.project }]);
   expect(f.resumes).toEqual([{ sessionRef: SESSION, folder: f.project }]);
   // The resumed record has no status yet (Task 1); the same session with a live Claude is a good reopen.
   for (let i = 0; i < 20; i++) await tick();

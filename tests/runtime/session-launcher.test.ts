@@ -21,6 +21,7 @@ import {
   CLAUDE_SETUP_PROMPT,
   createClaudeChannelSetup,
 } from '../../src/runtime/claude-channel-setup.js';
+import { MOVE_IN_GLOSS_REASON } from '../../src/agents/claude/move.js';
 
 const dirs: string[] = [];
 const launchers: SessionLauncher[] = [];
@@ -1058,7 +1059,7 @@ it('resumes an existing Claude session in tmux with the extra arguments and no c
   });
   launchers.push(launcher);
   const record = await launcher.resume(
-    await launcher.prepareResume({ sessionRef: RESUMED, folder }),
+    await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
   );
   const session = [...t.live.values()][0];
   expect(session?.argv).toEqual(['/bin/claude', '--resume', RESUMED, '--add-dir', 'a', 'b']);
@@ -1096,11 +1097,11 @@ it('resumes an existing Claude session in tmux with the extra arguments and no c
 });
 it('prepareResume refuses a bad id or an unknown folder and starts nothing', async () => {
   const { launcher, folder, t } = await setup();
-  await expect(launcher.prepareResume({ sessionRef: '--help', folder })).rejects.toThrow(
-    'Invalid session',
-  );
   await expect(
-    launcher.prepareResume({ sessionRef: RESUMED, folder: '/not-known' }),
+    launcher.prepareResume({ agent: 'claude', sessionRef: '--help', folder }),
+  ).rejects.toThrow('Invalid session');
+  await expect(
+    launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder: '/not-known' }),
   ).rejects.toThrow('Choose a project folder');
   expect(t.live.size).toBe(0);
 });
@@ -1113,9 +1114,9 @@ it('prepareResume fails before anything is started when Claude, tmux or the laun
     },
   });
   launchers.push(noClaude);
-  await expect(noClaude.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'Claude not found',
-  );
+  await expect(
+    noClaude.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('Claude not found');
   const noTmux = createSessionLauncher({
     ...options,
     tmux: async () => {
@@ -1123,23 +1124,23 @@ it('prepareResume fails before anything is started when Claude, tmux or the laun
     },
   });
   launchers.push(noTmux);
-  await expect(noTmux.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'tmux not found',
-  );
+  await expect(
+    noTmux.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('tmux not found');
   launcher.close();
-  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'Session launcher is closed',
-  );
+  await expect(
+    launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('Session launcher is closed');
   expect(t.live.size).toBe(0);
 });
 it('resume refuses a session a Claude launch owns directly, and checks again when it starts', async () => {
   const { launcher, folder, t } = await setup();
-  const first = await launcher.prepareResume({ sessionRef: RESUMED, folder });
-  const second = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const first = await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder });
+  const second = await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder });
   await launcher.resume(first);
-  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'This session already runs in Gloss',
-  );
+  await expect(
+    launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('This session already runs in Gloss');
   // Prepared before the first one started: the start re-checks, so a second pane never opens.
   await expect(launcher.resume(second)).rejects.toThrow('This session already runs in Gloss');
   expect(t.live.size).toBe(1);
@@ -1157,9 +1158,9 @@ it('resume refuses a session a Claude launch owns through its panel', async () =
     state: 'running',
     createdAt: 1,
   });
-  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'This session already runs in Gloss',
-  );
+  await expect(
+    launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('This session already runs in Gloss');
   expect(t.live.size).toBe(0);
 });
 it('resume refuses while an ended launch of the session still has its pane, and allows it once the pane is gone', async () => {
@@ -1175,12 +1176,12 @@ it('resume refuses while an ended launch of the session still has its pane, and 
     createdAt: 1,
   });
   t.live.set('gloss-ended-alive', { cwd: folder, argv: [], panePid: 5, currentCommand: 'claude' });
-  await expect(launcher.prepareResume({ sessionRef: RESUMED, folder })).rejects.toThrow(
-    'This session already runs in Gloss',
-  );
+  await expect(
+    launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('This session already runs in Gloss');
   t.live.delete('gloss-ended-alive');
   const record = await launcher.resume(
-    await launcher.prepareResume({ sessionRef: RESUMED, folder }),
+    await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder }),
   );
   expect(record).toMatchObject({ sessionRef: RESUMED });
   expect(t.live.size).toBe(1);
@@ -1205,7 +1206,7 @@ it('resume ignores other agents and other sessions, and starts only what prepare
     state: 'running',
     createdAt: 1,
   });
-  const prepared = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const prepared = await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder });
   await expect(launcher.resume({ ...prepared, argv: ['/bin/sh', '-c', 'echo'] })).rejects.toThrow(
     'Unknown resume',
   );
@@ -1213,10 +1214,97 @@ it('resume ignores other agents and other sessions, and starts only what prepare
   await launcher.resume(prepared);
   expect([...t.live.values()].map((s) => s.argv)).toEqual([['/bin/claude', '--resume', RESUMED]]);
 });
+it('resumes a Codex thread with `codex resume <id>` and the Codex extra arguments, identified without findCodex', async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'gloss-resume-codex-')));
+  dirs.push(folder);
+  const t = fakeTmux();
+  const store = new SqliteStore(join(folder, 'state.db'));
+  store.writeLaunchSettings({
+    extraArgs: { claude: [], codex: ['-a', 'never'] },
+    popup: 'auto',
+    terminalView: 'popup',
+  });
+  const register = vi.fn(async (target: Target): Promise<SessionRecord> => ({
+    id: 'panel-codex',
+    target,
+    canonicalRoot: folder,
+    projectName: 'p',
+    enabled: true,
+  }));
+  const findCodex = vi.fn(async () => undefined);
+  const launcher = createSessionLauncher({
+    tmux: async () => t.tmux,
+    store,
+    shell: '/bin/zsh',
+    sessions: { register },
+    panels: () => store.listSessions(),
+    claudeExecutable: async () => '/bin/claude',
+    findCodex,
+    resolveExecutable: async () => '/bin/codex',
+    knownFolder: async (f: string) => f === folder,
+    sleep: async () => {},
+    identifyTimeoutMs: 20,
+    now: () => 7,
+  });
+  launchers.push(launcher);
+  const record = await launcher.resume(
+    await launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  );
+  const session = [...t.live.values()][0];
+  expect(session?.argv).toEqual(['/bin/codex', 'resume', RESUMED, '-a', 'never']);
+  expect(session?.argv).not.toContain('--');
+  expect(findCodex).not.toHaveBeenCalled();
+  expect(register.mock.calls[0]?.[0]).toEqual({
+    agent: 'codex',
+    sessionRef: RESUMED,
+    projectId: folder,
+  });
+  expect(record).toMatchObject({
+    agent: 'codex',
+    sessionRef: RESUMED,
+    panelSessionId: 'panel-codex',
+    state: 'running',
+  });
+  launcher.close();
+  store.close();
+});
+it('refuses to resume a Codex thread a live Gloss launch owns, and one whose ended pane still runs', async () => {
+  const { launcher, folder, t, store } = await setup();
+  const first = await launcher.resume(
+    await launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  );
+  await expect(
+    launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow(MOVE_IN_GLOSS_REASON);
+  // Ended on record but the pane is still alive: still owned.
+  store.putLaunch({ ...first, state: 'ended' });
+  await expect(
+    launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  ).rejects.toThrow(MOVE_IN_GLOSS_REASON);
+  // Pane gone: free to resume again.
+  t.live.clear();
+  await expect(
+    launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder }),
+  ).resolves.toMatchObject({ agent: 'codex' });
+});
+it('two resumes of one Codex thread started together open one pane', async () => {
+  const { launcher, folder, t } = await setup();
+  const first = await launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder });
+  const second = await launcher.prepareResume({ agent: 'codex', sessionRef: RESUMED, folder });
+  const results = await Promise.allSettled([launcher.resume(first), launcher.resume(second)]);
+  expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+  expect(t.live.size).toBe(1);
+});
+it('prepareResume rejects an unknown agent', async () => {
+  const { launcher, folder } = await setup();
+  await expect(
+    launcher.prepareResume({ agent: 'shell' as never, sessionRef: RESUMED, folder }),
+  ).rejects.toThrow('Invalid agent');
+});
 it('two resumes of one session started together open one pane', async () => {
   const { launcher, folder, t } = await setup();
-  const first = await launcher.prepareResume({ sessionRef: RESUMED, folder });
-  const second = await launcher.prepareResume({ sessionRef: RESUMED, folder });
+  const first = await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder });
+  const second = await launcher.prepareResume({ agent: 'claude', sessionRef: RESUMED, folder });
   const results = await Promise.allSettled([launcher.resume(first), launcher.resume(second)]);
   expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
   expect(t.live.size).toBe(1);
