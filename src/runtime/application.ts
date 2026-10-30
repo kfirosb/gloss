@@ -1,6 +1,7 @@
 import { createSessionCatalog, type SessionCatalog } from './session-catalog.js';
 import { createAsyncCache } from '../core/async-cache.js';
 import type { SeenStore } from '../core/session-catalog.js';
+import type { HiddenSessionStore } from '../core/session-contracts.js';
 import { readFileContext } from './file-content.js';
 import type { FileReferenceStore, FileRegistry } from '../core/file-references.js';
 import type { DeliveryRoute, ImageAttachment } from '../core/contracts.js';
@@ -100,7 +101,8 @@ export interface ApplicationOptions {
     Partial<LanguageSettingsStore> &
     Partial<LaunchStore> &
     Partial<ConnectedFolderStore> &
-    Partial<SeenStore>;
+    Partial<SeenStore> &
+    Partial<HiddenSessionStore>;
   agents: AgentAdapter[];
   languageBackends: Partial<Record<AgentKind, LanguageBackend>>;
   host?: HostAdapter;
@@ -470,6 +472,8 @@ export function createApplication(options: ApplicationOptions): Application {
             file.source === 'upload' &&
             options.store.fileOwners(file.id).every((owner) => owner === sessionId),
         );
+      const { target } = sessionRecord(sessionId);
+      options.store.hideSession?.(target.agent, target.sessionRef);
       await sessions.remove(sessionId, { catalogClosed: entry !== undefined });
       catalog.forget(sessionId);
       await Promise.all(uploads.map((file) => unlink(file.path).catch(() => {})));

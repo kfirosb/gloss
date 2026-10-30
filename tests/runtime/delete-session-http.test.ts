@@ -122,3 +122,9 @@ it('refuses a session whose launch is still running', async () => {
   expect(store.listSessions()).toHaveLength(1);
   await app.close();
 });
+
+it('hides the removed conversation so a disk listing cannot bring it back', async () => {
+  const { request, store } = await setup();
+  expect((await request('sessions/B', 'DELETE')).status).toBe(200);
+  expect(store.listHiddenSessions()).toEqual([{ agent: 'codex', sessionRef: 'B' }]);
+});
