@@ -32,6 +32,8 @@ export function createPastSessionsService(options: {
   knownFolder(folder: string): Promise<boolean>;
   /** Whether an ended launch's tmux pane still runs; absent means ended launches don't own their session. */
   paneAlive?(launchId: string): Promise<boolean>;
+  /** Whether a Gloss panel is an open tab now; open tabs are not saved sessions, so their conversations are left out. */
+  openPanel?(panelSessionId: string): boolean;
   now?: () => number;
   log?: (message: string) => void;
 }): PastSessionsService {
@@ -119,11 +121,15 @@ export function createPastSessionsService(options: {
       openOutside(),
     ]);
     const sources = [...rows, ...listings.flatMap((listing): AgentPastSession[] => listing ?? [])];
-    const hidden = new Set(
-      (options.store.listHiddenSessions?.() ?? []).map((h) =>
+    // Left out like hidden ones, before the cap: removed conversations and those open as tabs.
+    const hidden = new Set([
+      ...(options.store.listHiddenSessions?.() ?? []).map((h) =>
         pastSessionKey(h.agent, h.sessionRef),
       ),
-    );
+      ...rows
+        .filter((row) => options.openPanel?.(row.panelSessionId))
+        .map((row) => pastSessionKey(row.agent, row.sessionRef)),
+    ]);
     // Only the listed entries need ownership checks, and those may ask tmux; the merge's state callback is synchronous.
     const merged = mergePastSessions(sources, hidden, () => 'closed');
     const entries = await Promise.all(

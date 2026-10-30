@@ -254,6 +254,61 @@ it('lists a Gloss row with no agent counterpart without a time, after dated entr
   expect(entries[1]).not.toHaveProperty('lastActiveAt');
 });
 
+it('leaves out Gloss rows that are open tabs, before the cap, and keeps a launched row that is no tab', async () => {
+  const f = await folder();
+  const row = (id: string, sessionRef: string) => ({
+    id,
+    target: { agent: 'claude', sessionRef, projectId: f },
+    canonicalRoot: f,
+    projectName: 'p',
+    enabled: true,
+  });
+  const past = Array.from({ length: 10 }, (_, i) => ({
+    agent: 'codex',
+    sessionRef: `t${i}`,
+    lastActiveAt: 100 + i,
+  }));
+  const openPanel = vi.fn((id: string) => id === 'TAB');
+  const service = createPastSessionsService({
+    store: { listSessions: () => [row('TAB', 'tab'), row('RUN', 'run')] } as never,
+    agents: [
+      adapter('claude', [
+        { agent: 'claude', sessionRef: 'tab', lastActiveAt: 900 },
+        { agent: 'claude', sessionRef: 'run', lastActiveAt: 800 },
+      ]),
+      adapter('codex', past),
+    ],
+    launcher: {
+      list: () => [
+        {
+          id: 'L',
+          agent: 'claude',
+          panelSessionId: 'RUN',
+          state: 'running',
+          folder: f,
+          panePid: 1,
+          createdAt: 0,
+        },
+      ],
+    },
+    knownFolder: async () => true,
+    openPanel,
+  });
+  const { entries } = await service.list(f);
+  expect(entries.map((e) => e.sessionRef)).not.toContain('tab');
+  expect(entries).toHaveLength(10);
+  expect(entries[0]).toMatchObject({ sessionRef: 'run', state: 'open-in-gloss' });
+  expect(entries.map((e) => e.sessionRef)).toEqual([
+    'run',
+    ...past
+      .slice(1)
+      .reverse()
+      .map((p) => p.sessionRef),
+  ]);
+  expect(openPanel).toHaveBeenCalledWith('TAB');
+  service.close();
+});
+
 function application(launcher?: Partial<SessionLauncher>) {
   const store = new SqliteStore(':memory:');
   const app = createApplication({
