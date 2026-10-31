@@ -294,7 +294,11 @@ Today, when the Gloss window is not in front, Gloss only bounces the Dock icon, 
 
 ## 38. Gloss on the phone: read, reply and get notified from anywhere
 
-Status: captured on 2026-10-22; needs design.
+Status: visual direction and interactive HTML mockup approved on 2026-10-31;
+written specification awaiting review. See
+[mobile design](mobile-gloss-design.md) and
+[19-screen HTML prototype](mockups/mobile/index.html). Production implementation
+has not started.
 
 Today Gloss works only on the computer it runs on. The local server accepts only loopback hosts and origins (`isLoopbackHost` / `isLoopbackOrigin` in `src/runtime/http-server.ts`, bound to `LOOPBACK_HOST`), and the web UI is laid out for a desktop window. The user wants to follow and answer their sessions from the phone while away from the computer, not only on the same Wi-Fi. The agents keep running on the Mac; the phone is a remote view and composer.
 
