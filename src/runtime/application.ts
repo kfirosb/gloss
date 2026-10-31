@@ -363,6 +363,17 @@ export function createApplication(options: ApplicationOptions): Application {
       : {}),
   });
   const unsubscribeUsage = usage.tracker.subscribe(() => catalog.refresh());
+  // Saved sessions leaves out open tabs, so a cached listing is stale once the set of open sessions changes.
+  let openSessionIds = '';
+  const unsubscribeOpenTabs = catalog.subscribe((snapshot) => {
+    const open = snapshot.entries
+      .flatMap((entry) => (entry.open && entry.sessionId ? [entry.sessionId] : []))
+      .sort()
+      .join('\n');
+    if (open === openSessionIds) return;
+    openSessionIds = open;
+    options.pastSessions?.invalidate();
+  });
   // One lookup (and its cached capability probe) for both registration and channel setup.
   const claude = createClaudeExecutable();
   const claudeRegistration = options.claudeRegistration ?? createClaudeRegistration({ claude });
@@ -1033,6 +1044,7 @@ export function createApplication(options: ApplicationOptions): Application {
         closed = true;
         try {
           unsubscribeUsage();
+          unsubscribeOpenTabs();
           options.dictation?.close();
           options.attention?.close();
           options.terminals?.close();

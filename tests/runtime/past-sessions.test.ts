@@ -8,6 +8,7 @@ import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import type { SessionLauncher } from '../../src/runtime/session-launcher.js';
 import type { AgentAdapter } from '../../src/core/contracts.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
+import { FakeLanguageSession } from '../helpers/fake-language.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -512,4 +513,38 @@ it('refuses to reopen a conversation open outside Gloss, before anything starts'
   expect(openOutside).toHaveBeenCalledWith('codex', 't');
   expect(resume).not.toHaveBeenCalled();
   await app.close();
+});
+
+it("recomputes a folder's listing once the set of open tabs changes, not from the cache", async () => {
+  const f = await folder();
+  const store = new SqliteStore(':memory:');
+  const listPast = vi.fn(async () => []);
+  let app: ReturnType<typeof createApplication> | undefined;
+  const pastSessions = createPastSessionsService({
+    store,
+    agents: [{ ...adapter('claude', []), listPast }],
+    knownFolder: async () => true,
+    openPanel: (id) => app?.catalog?.entryFor(id)?.open === true,
+  });
+  app = createApplication({
+    store,
+    agents: [new FakeAgent('claude')],
+    conversationId: 'A',
+    languageBackends: {
+      claude: { open: async () => new FakeLanguageSession(), models: async () => [] },
+    },
+    pastSessions,
+  });
+  app.catalog!.start();
+  try {
+    await app.sessions!.register({ agent: 'claude', sessionRef: 'S', projectId: f }, 'S');
+    await vi.waitFor(() => expect(app!.catalog!.entryFor('S')?.open).toBe(false));
+    expect((await app.pastSessions!(f)).entries.map((e) => e.panelSessionId)).toEqual(['S']);
+    await app.sessions!.ensure('S');
+    await vi.waitFor(() => expect(app!.catalog!.entryFor('S')?.open).toBe(true));
+    expect((await app.pastSessions!(f)).entries).toEqual([]);
+    expect(listPast).toHaveBeenCalledTimes(2);
+  } finally {
+    await app.close();
+  }
 });
