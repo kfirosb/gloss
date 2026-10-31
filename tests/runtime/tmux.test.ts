@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  CLAUDE_SESSION_ENV,
   createTmux,
   ensureSocketDirectory,
   hasLaunchSession,
@@ -107,18 +108,23 @@ it('checks the desktop-provided bundled tmux after Homebrew and before resources
   ]);
   expect(tmuxCandidates({}, undefined)).toEqual(['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux']);
 });
-it('runs tmux without the panel capability and never lets tmux shell-parse a one-item command', async () => {
+it('runs tmux without the panel capability or an enclosing Claude session and never lets tmux shell-parse a one-item command', async () => {
   const calls: { args: string[]; options?: ProcessOptions }[] = [];
-  const saved = {
-    cap: process.env.LANGUAGE_PANEL_CAPABILITY,
-    node: process.env.ELECTRON_RUN_AS_NODE,
-    tmux: process.env.TMUX,
-  };
-  Object.assign(process.env, {
+  // A Gloss opened from inside a Claude Code session inherits that session's markers; an agent that still sees
+  // CLAUDE_CODE_CHILD_SESSION keeps no transcript, which Gloss needs to read and reach the session.
+  const leaked = {
     LANGUAGE_PANEL_CAPABILITY: 'secret-cap',
     ELECTRON_RUN_AS_NODE: '1',
     TMUX: '/x,1,0',
-  });
+    CLAUDECODE: '1',
+    CLAUDE_CODE_CHILD_SESSION: '1',
+    CLAUDE_CODE_SESSION_ID: 'outer-session',
+    CLAUDE_PID: '4242',
+    CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks/4242.sock',
+    CLAUDE_CODE_MESSAGING_TOKEN: 'outer-token',
+  };
+  const saved = Object.fromEntries(Object.keys(leaked).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, leaked);
   try {
     const tmux = await createTmux({
       stateDir: await temp(),
@@ -134,35 +140,28 @@ it('runs tmux without the panel capability and never lets tmux shell-parse a one
     });
     await tmux.newSession('la-one', '/tmp', ['/Applications/My Tools/codex']);
   } finally {
-    for (const [k, v] of [
-      ['LANGUAGE_PANEL_CAPABILITY', saved.cap],
-      ['ELECTRON_RUN_AS_NODE', saved.node],
-      ['TMUX', saved.tmux],
-    ] as const)
+    for (const [k, v] of Object.entries(saved))
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
   }
+  const unsetFromAgent = [
+    'LANGUAGE_PANEL_CAPABILITY',
+    'ELECTRON_RUN_AS_NODE',
+    ...CLAUDE_SESSION_ENV,
+  ];
   const create = calls.find((c) => c.args.includes('new-session'))!;
   expect(create.args.slice(create.args.indexOf('--'))).toEqual([
     '--',
     '/usr/bin/env',
-    '-u',
-    'LANGUAGE_PANEL_CAPABILITY',
-    '-u',
-    'ELECTRON_RUN_AS_NODE',
+    ...unsetFromAgent.flatMap((k) => ['-u', k]),
     '/Applications/My Tools/codex',
   ]);
   for (const call of calls) {
     expect(call.options?.env).toBeDefined();
-    expect(call.options!.env).not.toHaveProperty('LANGUAGE_PANEL_CAPABILITY');
-    expect(call.options!.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
-    expect(call.options!.env).not.toHaveProperty('TMUX');
+    for (const key of Object.keys(leaked)) expect(call.options!.env).not.toHaveProperty(key);
   }
   expect(calls.map((c) => c.args.slice(5, 9).join(' '))).toEqual(
-    expect.arrayContaining([
-      'set-environment -g -u LANGUAGE_PANEL_CAPABILITY',
-      'set-environment -g -u ELECTRON_RUN_AS_NODE',
-    ]),
+    expect.arrayContaining(unsetFromAgent.map((k) => `set-environment -g -u ${k}`)),
   );
 });
 it('rejects unsafe socket directories', async () => {
@@ -241,7 +240,7 @@ describe.skipIf(!available)('with real tmux on a private socket', () => {
     const script = join(bin, 'agent');
     await writeFile(
       script,
-      '#!/bin/sh\necho "agent-ran cap=[$LANGUAGE_PANEL_CAPABILITY] node=[$ELECTRON_RUN_AS_NODE]"\nsleep 30\n',
+      '#!/bin/sh\necho "agent-ran cap=[$LANGUAGE_PANEL_CAPABILITY] node=[$ELECTRON_RUN_AS_NODE] child=[$CLAUDE_CODE_CHILD_SESSION]"\nsleep 30\n',
     );
     await chmod(script, 0o755);
     const socket = join(state, 'tmux', 'socket');
@@ -258,15 +257,17 @@ describe.skipIf(!available)('with real tmux on a private socket', () => {
       ...process.env,
       LANGUAGE_PANEL_CAPABILITY: 'leaked',
       ELECTRON_RUN_AS_NODE: '1',
+      CLAUDE_CODE_CHILD_SESSION: '1',
     });
     expect(await tmuxCmd(['show-environment', '-g'])).toContain('LANGUAGE_PANEL_CAPABILITY=leaked');
     await tmux.newSession('la-t2', state, [script]);
     await expect
       .poll(() => tmux.capturePane('la-t2'), { timeout: 5000 })
-      .toContain('agent-ran cap=[] node=[]');
+      .toContain('agent-ran cap=[] node=[] child=[]');
     const globalEnv = await tmuxCmd(['show-environment', '-g']);
     expect(globalEnv).not.toContain('LANGUAGE_PANEL_CAPABILITY');
     expect(globalEnv).not.toMatch(/^ELECTRON_RUN_AS_NODE=/m);
+    expect(globalEnv).not.toMatch(/^CLAUDE_CODE_CHILD_SESSION=/m);
     expect(await tmuxCmd(['show-options', '-gv', 'prefix'])).toBe('None\n');
     expect(await tmuxCmd(['show-options', '-gv', 'status'])).toBe('off\n');
     expect(await tmuxCmd(['show-options', '-sv', 'escape-time'])).toBe('0\n');

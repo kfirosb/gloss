@@ -65,8 +65,27 @@ export function tmuxCandidates(
     ),
   ];
 }
-// Never hand the panel capability, Electron's node mode or an enclosing tmux to the private server or its agents.
-const AGENT_SECRETS = ['LANGUAGE_PANEL_CAPABILITY', 'ELECTRON_RUN_AS_NODE'];
+/** The variables Claude Code exports to its child processes. A Gloss opened from inside a Claude session (and the
+ * tmux server that Gloss started, which outlives it) carries them; an agent that inherits CLAUDE_CODE_CHILD_SESSION
+ * believes it is a subagent and keeps no transcript, so Gloss can neither read nor reach it. Gloss agents are
+ * never that session's children. */
+export const CLAUDE_SESSION_ENV = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_PID',
+  'CLAUDE_PROJECT_DIR',
+  'CLAUDE_EFFORT',
+  'AI_AGENT',
+];
+// Never hand the panel capability, Electron's node mode, an enclosing Claude session or an enclosing tmux to the
+// private server or its agents.
+const AGENT_SECRETS = ['LANGUAGE_PANEL_CAPABILITY', 'ELECTRON_RUN_AS_NODE', ...CLAUDE_SESSION_ENV];
 const PRIVATE_ENV = [...AGENT_SECRETS, 'TMUX', 'TMUX_PANE'];
 export function tmuxEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const clean = { ...env };
