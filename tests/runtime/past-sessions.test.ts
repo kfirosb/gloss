@@ -309,6 +309,93 @@ it('leaves out Gloss rows that are open tabs, before the cap, and keeps a launch
   service.close();
 });
 
+it('lists only Gloss rows of a folder that no longer exists, without asking the agents', async () => {
+  const gone = join(await folder(), 'deleted-worktree');
+  const listPast = vi.fn(async () => []);
+  const discoverOpen = vi.fn(async () => ({ complete: true, candidates: [] }));
+  const knownFolder = vi.fn(async () => true);
+  const store = {
+    listSessions: () => [
+      {
+        id: 'P',
+        target: { agent: 'claude', sessionRef: 'c', projectId: '/repo' },
+        worktreePath: gone,
+        canonicalRoot: gone,
+        projectName: 'p',
+        enabled: true,
+        sessionTitle: 'Old work',
+      },
+      {
+        id: 'Q',
+        target: { agent: 'codex', sessionRef: 'q', projectId: '/elsewhere' },
+        canonicalRoot: '/elsewhere',
+        projectName: 'p',
+        enabled: true,
+      },
+    ],
+  };
+  const service = createPastSessionsService({
+    store: store as never,
+    agents: [{ ...adapter('claude', []), listPast, discoverOpen }],
+    launcher: {
+      list: () => [
+        {
+          id: 'L',
+          agent: 'claude',
+          panelSessionId: 'P',
+          state: 'running',
+          folder: gone,
+          panePid: 1,
+          createdAt: 0,
+        },
+      ],
+    },
+    knownFolder,
+  });
+  const response = await service.list(gone);
+  expect(response).toMatchObject({
+    folder: gone,
+    folderMissing: true,
+    entries: [{ sessionRef: 'c', panelSessionId: 'P', title: 'Old work', state: 'open-in-gloss' }],
+  });
+  expect(response.entries).toHaveLength(1);
+  expect(listPast).not.toHaveBeenCalled();
+  expect(discoverOpen).not.toHaveBeenCalled();
+  expect(knownFolder).not.toHaveBeenCalled();
+  service.close();
+});
+it('refuses a folder that does not exist when no stored session names it', async () => {
+  const gone = join(await folder(), 'never-was');
+  const service = createPastSessionsService({
+    store: {
+      listSessions: () => [
+        {
+          id: 'P',
+          target: { agent: 'claude', sessionRef: 'c', projectId: '/repo' },
+          worktreePath: '/repo/.worktrees/other',
+          canonicalRoot: '/repo',
+          projectName: 'p',
+          enabled: true,
+        },
+      ],
+    } as never,
+    agents: [],
+    knownFolder: async () => true,
+  });
+  await expect(service.list(gone)).rejects.toThrow('Choose a project folder');
+  service.close();
+});
+it('marks an existing folder as present', async () => {
+  const f = await folder();
+  const service = createPastSessionsService({
+    store: { listSessions: () => [] } as never,
+    agents: [],
+    knownFolder: async () => true,
+  });
+  expect(await service.list(f)).not.toHaveProperty('folderMissing');
+  service.close();
+});
+
 function application(launcher?: Partial<SessionLauncher>) {
   const store = new SqliteStore(':memory:');
   const app = createApplication({

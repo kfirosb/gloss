@@ -48,23 +48,37 @@ export function createPastSessionsService(options: {
     return undefined;
   };
 
-  const canonicalFolder = async (folder: unknown): Promise<string> => {
+  /** A stored session's own folder paths, as recorded. */
+  const storedPaths = (row: ReturnType<SessionStore['listSessions']>[number]) =>
+    [row.target.projectId, row.worktreePath].filter((path) => path !== undefined);
+  /**
+   * The real path of a known folder, or a folder that no longer exists but that a stored session
+   * names exactly (a deleted worktree): its saved rows stay listable and removable.
+   */
+  const canonicalFolder = async (
+    folder: unknown,
+  ): Promise<{ folder: string; missing: boolean }> => {
     const refuse = () => new Error('Choose a project folder');
     if (typeof folder !== 'string' || !isAbsolute(folder)) throw refuse();
     const real = await realpath(folder).catch(() => undefined);
-    if (real === undefined || !(await options.knownFolder(real))) throw refuse();
-    return real;
+    if (real === undefined) {
+      if (options.store.listSessions().some((row) => storedPaths(row).includes(folder)))
+        return { folder, missing: true };
+      throw refuse();
+    }
+    if (!(await options.knownFolder(real))) throw refuse();
+    return { folder: real, missing: false };
   };
 
   /** Gloss's own rows for the folder; they carry no time of their own and take the agent's entry's when it has one. */
-  const glossRows = async (folder: string) => {
+  const glossRows = async (folder: string, missing: boolean) => {
     const rows = options.store.listSessions();
+    // A missing folder has no real path, so its rows are matched by the path they recorded.
     const inFolder = await Promise.all(
       rows.map(async (row) => {
-        for (const path of [row.target.projectId, row.worktreePath]) {
-          if (path === undefined) continue;
+        if (missing) return storedPaths(row).includes(folder);
+        for (const path of storedPaths(row))
           if ((await realpath(path).catch(() => undefined)) === folder) return true;
-        }
         return false;
       }),
     );
@@ -110,15 +124,18 @@ export function createPastSessionsService(options: {
     return false;
   };
 
-  const read = async (folder: string): Promise<PastSessionsResponse> => {
+  /** A missing folder lists only Gloss's rows: the agents have nothing to read there, and it cannot be reopened in. */
+  const read = async (folder: string, missing: boolean): Promise<PastSessionsResponse> => {
     const [rows, listings, outside] = await Promise.all([
-      glossRows(folder),
-      Promise.all(
-        options.agents.map((agent) =>
-          agent.listPast?.(folder).catch(failed('Past session listing', agent.kind)),
-        ),
-      ),
-      openOutside(),
+      glossRows(folder, missing),
+      missing
+        ? []
+        : Promise.all(
+            options.agents.map((agent) =>
+              agent.listPast?.(folder).catch(failed('Past session listing', agent.kind)),
+            ),
+          ),
+      missing ? new Set<string>() : openOutside(),
     ]);
     const sources = [...rows, ...listings.flatMap((listing): AgentPastSession[] => listing ?? [])];
     // Left out like hidden ones, before the cap: removed conversations and those open as tabs.
@@ -141,14 +158,15 @@ export function createPastSessionsService(options: {
         return entry;
       }),
     );
-    return { folder, entries };
+    return { folder, entries, ...(missing ? { folderMissing: true } : {}) };
   };
 
   return {
     async list(folder) {
       if (closing.signal.aborted) throw new Error('Past sessions unavailable');
-      const real = await canonicalFolder(folder);
-      return cache.get(real, () => read(real));
+      const { folder: key, missing } = await canonicalFolder(folder);
+      // Keyed apart, so a folder that reappears at the same path is not answered from its missing listing.
+      return cache.get(missing ? `missing:${key}` : key, () => read(key, missing));
     },
     async openOutside(agent, sessionRef) {
       const adapter = options.agents.find((a) => a.kind === agent);

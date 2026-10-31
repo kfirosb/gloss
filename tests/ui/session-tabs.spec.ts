@@ -808,6 +808,35 @@ test.describe('remove from history', () => {
     expect(hidden).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
     await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
   });
+  test('a missing folder lists its saved rows with Remove and no Reopen', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    await context.route('**/api/past-sessions**', (r) =>
+      r.fulfill({
+        json: {
+          folder: '/repo',
+          folderMissing: true,
+          entries: [
+            { agent: 'codex', sessionRef: 'T1', title: 'Thread one', state: 'closed' },
+            { agent: 'claude', sessionRef: 'c-2', title: 'Claude two', state: 'closed' },
+          ],
+        },
+      }),
+    );
+    await serve(context, catalogFor(f));
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (2)' }).click();
+    await expect(page.getByRole('menuitem', { name: /Thread one/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /Claude two/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Reopen/ })).toHaveCount(0);
+    // Rows without a Gloss session are not selectable; their context menu opens from the keyboard.
+    await page.getByRole('menuitem', { name: /Thread one/ }).press('Shift+F10');
+    const actions = page.getByRole('menu', { name: 'Session actions' });
+    await expect(actions.getByRole('menuitem', { name: 'Remove from history…' })).toBeVisible();
+    await expect(actions.getByRole('menuitem', { name: 'Reopen' })).toHaveCount(0);
+  });
   test('a Gloss session row that is not saved here offers no removal and never the hide dialog', async ({
     page,
     context,

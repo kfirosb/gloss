@@ -27,7 +27,11 @@ export function usePastSessions(folderPath: string | undefined, changes: string)
         if (current())
           setLists((previous) => ({
             ...previous,
-            [folder]: { entries: response.entries, loading: false },
+            [folder]: {
+              entries: response.entries,
+              loading: false,
+              folderMissing: response.folderMissing === true,
+            },
           }));
       },
       (e: unknown) => {
@@ -37,6 +41,7 @@ export function usePastSessions(folderPath: string | undefined, changes: string)
             [folder]: {
               entries: previous[folder]?.entries ?? [],
               loading: false,
+              folderMissing: previous[folder]?.folderMissing,
               error: errorMessage(e, 'unknown error'),
             },
           }));
