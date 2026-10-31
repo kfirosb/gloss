@@ -683,3 +683,45 @@ it('reaches a launch that still runs under its pre-rename tmux name', async () =
     services.claudeMove.close();
   }
 });
+
+it("leaves the application's open tabs out of a folder's saved sessions", async () => {
+  const f = await realpath(await mkdtemp(join(tmpdir(), 'gloss-ls-past-')));
+  const row = (id: string) => ({
+    id,
+    target: { agent: 'claude' as const, sessionRef: id.toLowerCase(), projectId: f },
+    canonicalRoot: f,
+    projectName: 'p',
+    enabled: true,
+  });
+  const entryFor = vi.fn((id: string) => ({ open: id === 'TAB' }));
+  const services = createLaunchServices({
+    store: {
+      listSessions: () => [row('TAB'), row('SAVED')],
+      listLaunches: () => [],
+      putLaunch() {},
+      readLaunchSettings: () => ({
+        extraArgs: { claude: [], codex: [] },
+        popup: 'auto',
+        terminalView: 'popup',
+      }),
+      writeLaunchSettings() {},
+      deleteLaunch() {},
+    } as any,
+    codex: { discoverOpen: async () => ({ candidates: [], complete: true }) } as any,
+    application: () => ({ catalog: { refresh() {}, entryFor } }),
+    tmux: async () => ({ listSessions: async () => [] }) as any,
+    runner: ps({}),
+  });
+  try {
+    const { entries } = await services.pastSessions.list(f);
+    expect(entries.map((e) => e.panelSessionId)).toEqual(['SAVED']);
+    expect(entryFor).toHaveBeenCalledWith('TAB');
+  } finally {
+    services.pastSessions.close();
+    services.launcher.close();
+    services.attention.close();
+    services.terminals.close();
+    services.claudeMove.close();
+    await rm(f, { recursive: true, force: true });
+  }
+});

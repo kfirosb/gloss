@@ -258,6 +258,7 @@ export function createLaunchServices(options: {
       snapshot?(): {
         entries: { target: Target; worktreePath?: string; launchId?: string; sessionId?: string }[];
       };
+      entryFor?(sessionId: string): { open: boolean } | undefined;
     };
   };
   tmux?: () => Promise<Tmux>;
@@ -366,6 +367,8 @@ export function createLaunchServices(options: {
     launcher,
     knownFolder: launchFolderKnown,
     paneAlive,
+    // The application's catalog says which panels are open tabs; it exists only after the services.
+    openPanel: (id) => live().catalog?.entryFor?.(id)?.open === true,
   });
   return {
     launcher,

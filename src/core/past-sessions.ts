@@ -29,6 +29,8 @@ export interface PastSession {
 export interface PastSessionsResponse {
   folder: string;
   entries: PastSession[];
+  /** The folder no longer exists: only Gloss's own rows are listed, and none can be reopened there. */
+  folderMissing?: boolean;
 }
 
 type PastSessionSource = AgentPastSession & { panelSessionId?: string };

@@ -8,6 +8,7 @@ import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import type { SessionLauncher } from '../../src/runtime/session-launcher.js';
 import type { AgentAdapter } from '../../src/core/contracts.js';
 import { FakeAgent } from '../helpers/fake-agent.js';
+import { FakeLanguageSession } from '../helpers/fake-language.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -254,6 +255,148 @@ it('lists a Gloss row with no agent counterpart without a time, after dated entr
   expect(entries[1]).not.toHaveProperty('lastActiveAt');
 });
 
+it('leaves out Gloss rows that are open tabs, before the cap, and keeps a launched row that is no tab', async () => {
+  const f = await folder();
+  const row = (id: string, sessionRef: string) => ({
+    id,
+    target: { agent: 'claude', sessionRef, projectId: f },
+    canonicalRoot: f,
+    projectName: 'p',
+    enabled: true,
+  });
+  const past = Array.from({ length: 10 }, (_, i) => ({
+    agent: 'codex',
+    sessionRef: `t${i}`,
+    lastActiveAt: 100 + i,
+  }));
+  const openPanel = vi.fn((id: string) => id === 'TAB');
+  const service = createPastSessionsService({
+    store: { listSessions: () => [row('TAB', 'tab'), row('RUN', 'run')] } as never,
+    agents: [
+      adapter('claude', [
+        { agent: 'claude', sessionRef: 'tab', lastActiveAt: 900 },
+        { agent: 'claude', sessionRef: 'run', lastActiveAt: 800 },
+      ]),
+      adapter('codex', past),
+    ],
+    launcher: {
+      list: () => [
+        {
+          id: 'L',
+          agent: 'claude',
+          panelSessionId: 'RUN',
+          state: 'running',
+          folder: f,
+          panePid: 1,
+          createdAt: 0,
+        },
+      ],
+    },
+    knownFolder: async () => true,
+    openPanel,
+  });
+  const { entries } = await service.list(f);
+  expect(entries.map((e) => e.sessionRef)).not.toContain('tab');
+  expect(entries).toHaveLength(10);
+  expect(entries[0]).toMatchObject({ sessionRef: 'run', state: 'open-in-gloss' });
+  expect(entries.map((e) => e.sessionRef)).toEqual([
+    'run',
+    ...past
+      .slice(1)
+      .reverse()
+      .map((p) => p.sessionRef),
+  ]);
+  expect(openPanel).toHaveBeenCalledWith('TAB');
+  service.close();
+});
+
+it('lists only Gloss rows of a folder that no longer exists, without asking the agents', async () => {
+  const gone = join(await folder(), 'deleted-worktree');
+  const listPast = vi.fn(async () => []);
+  const discoverOpen = vi.fn(async () => ({ complete: true, candidates: [] }));
+  const knownFolder = vi.fn(async () => true);
+  const store = {
+    listSessions: () => [
+      {
+        id: 'P',
+        target: { agent: 'claude', sessionRef: 'c', projectId: '/repo' },
+        worktreePath: gone,
+        canonicalRoot: gone,
+        projectName: 'p',
+        enabled: true,
+        sessionTitle: 'Old work',
+      },
+      {
+        id: 'Q',
+        target: { agent: 'codex', sessionRef: 'q', projectId: '/elsewhere' },
+        canonicalRoot: '/elsewhere',
+        projectName: 'p',
+        enabled: true,
+      },
+    ],
+  };
+  const service = createPastSessionsService({
+    store: store as never,
+    agents: [{ ...adapter('claude', []), listPast, discoverOpen }],
+    launcher: {
+      list: () => [
+        {
+          id: 'L',
+          agent: 'claude',
+          panelSessionId: 'P',
+          state: 'running',
+          folder: gone,
+          panePid: 1,
+          createdAt: 0,
+        },
+      ],
+    },
+    knownFolder,
+  });
+  const response = await service.list(gone);
+  expect(response).toMatchObject({
+    folder: gone,
+    folderMissing: true,
+    entries: [{ sessionRef: 'c', panelSessionId: 'P', title: 'Old work', state: 'open-in-gloss' }],
+  });
+  expect(response.entries).toHaveLength(1);
+  expect(listPast).not.toHaveBeenCalled();
+  expect(discoverOpen).not.toHaveBeenCalled();
+  expect(knownFolder).not.toHaveBeenCalled();
+  service.close();
+});
+it('refuses a folder that does not exist when no stored session names it', async () => {
+  const gone = join(await folder(), 'never-was');
+  const service = createPastSessionsService({
+    store: {
+      listSessions: () => [
+        {
+          id: 'P',
+          target: { agent: 'claude', sessionRef: 'c', projectId: '/repo' },
+          worktreePath: '/repo/.worktrees/other',
+          canonicalRoot: '/repo',
+          projectName: 'p',
+          enabled: true,
+        },
+      ],
+    } as never,
+    agents: [],
+    knownFolder: async () => true,
+  });
+  await expect(service.list(gone)).rejects.toThrow('Choose a project folder');
+  service.close();
+});
+it('marks an existing folder as present', async () => {
+  const f = await folder();
+  const service = createPastSessionsService({
+    store: { listSessions: () => [] } as never,
+    agents: [],
+    knownFolder: async () => true,
+  });
+  expect(await service.list(f)).not.toHaveProperty('folderMissing');
+  service.close();
+});
+
 function application(launcher?: Partial<SessionLauncher>) {
   const store = new SqliteStore(':memory:');
   const app = createApplication({
@@ -370,4 +513,38 @@ it('refuses to reopen a conversation open outside Gloss, before anything starts'
   expect(openOutside).toHaveBeenCalledWith('codex', 't');
   expect(resume).not.toHaveBeenCalled();
   await app.close();
+});
+
+it("recomputes a folder's listing once the set of open tabs changes, not from the cache", async () => {
+  const f = await folder();
+  const store = new SqliteStore(':memory:');
+  const listPast = vi.fn(async () => []);
+  let app: ReturnType<typeof createApplication> | undefined;
+  const pastSessions = createPastSessionsService({
+    store,
+    agents: [{ ...adapter('claude', []), listPast }],
+    knownFolder: async () => true,
+    openPanel: (id) => app?.catalog?.entryFor(id)?.open === true,
+  });
+  app = createApplication({
+    store,
+    agents: [new FakeAgent('claude')],
+    conversationId: 'A',
+    languageBackends: {
+      claude: { open: async () => new FakeLanguageSession(), models: async () => [] },
+    },
+    pastSessions,
+  });
+  app.catalog!.start();
+  try {
+    await app.sessions!.register({ agent: 'claude', sessionRef: 'S', projectId: f }, 'S');
+    await vi.waitFor(() => expect(app!.catalog!.entryFor('S')?.open).toBe(false));
+    expect((await app.pastSessions!(f)).entries.map((e) => e.panelSessionId)).toEqual(['S']);
+    await app.sessions!.ensure('S');
+    await vi.waitFor(() => expect(app!.catalog!.entryFor('S')?.open).toBe(true));
+    expect((await app.pastSessions!(f)).entries).toEqual([]);
+    expect(listPast).toHaveBeenCalledTimes(2);
+  } finally {
+    await app.close();
+  }
 });

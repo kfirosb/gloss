@@ -808,6 +808,48 @@ test.describe('remove from history', () => {
     expect(hidden).toEqual([{ agent: 'claude', sessionRef: 'c-9' }]);
     await expect(page.getByRole('button', { name: 'Saved sessions (0)' })).toBeDisabled();
   });
+  test('a missing folder lists its saved rows with Remove and no Reopen', async ({
+    page,
+    context,
+  }) => {
+    const f = await sessionFixture(context);
+    const closed = { open: false, activity: 'disconnected' as const };
+    await serve(context, catalogFor(f, { A: closed, B: closed }));
+    // A missing folder lists only Gloss's own panel rows, each of a saved session here.
+    await context.route('**/api/past-sessions**', (r) =>
+      r.fulfill({
+        json: {
+          folder: '/repo',
+          folderMissing: true,
+          entries: f.records.map((record) => ({
+            agent: 'codex',
+            sessionRef: record.target.sessionRef,
+            panelSessionId: record.id,
+            title: `Session ${record.id}`,
+            state: 'closed',
+          })),
+        },
+      }),
+    );
+    const deleted: string[] = [];
+    await deleteRoute(context, f, deleted);
+    await page.goto('/#capability=test');
+    await page.getByRole('button', { name: 'Saved sessions (2)' }).click();
+    await expect(page.getByRole('menuitem', { name: /Session A/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /Session B/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Reopen/ })).toHaveCount(0);
+    await page.getByRole('menuitem', { name: /Session B/ }).click({ button: 'right' });
+    const actions = page.getByRole('menu', { name: 'Session actions' });
+    await expect(actions.getByRole('menuitem', { name: 'Reopen' })).toHaveCount(0);
+    await actions.getByRole('menuitem', { name: 'Remove from history…' }).click();
+    // The saved session's own removal, not the hide dialog for conversations Gloss never saved.
+    const dialog = page.getByRole('dialog', { name: 'Remove from history' });
+    await expect(dialog).toContainText("agent's own transcript");
+    await expect(dialog).not.toContainText('Gloss keeps no history for this conversation.');
+    await dialog.getByRole('button', { name: 'Remove from history', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(deleted).toEqual(['B']);
+  });
   test('a Gloss session row that is not saved here offers no removal and never the hide dialog', async ({
     page,
     context,

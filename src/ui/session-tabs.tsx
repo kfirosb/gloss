@@ -47,6 +47,7 @@ export interface PastSessionsList {
   entries: PastSession[];
   loading: boolean; // no answer yet for this folder
   error?: string | undefined; // the last fetch failed; `entries` are from an earlier answer, if any
+  folderMissing?: boolean | undefined; // the folder no longer exists: its rows can be removed, not reopened
 }
 const PAST_STATE_LABEL: Record<Exclude<PastSession['state'], 'closed'>, string> = {
   'open-in-gloss': 'Open in Gloss',
@@ -180,8 +181,11 @@ export function SessionTabs({
   const canRemove = (entry: PastSession) =>
     entry.state !== 'open-in-gloss' &&
     (entry.panelSessionId ? !!savedFor(entry) && !!onRemove : !!onRemovePast);
+  // Reopening runs the agent in the folder, so a folder that no longer exists offers none.
+  const canReopen = (entry: PastSession) =>
+    entry.state === 'closed' && !pastSessions?.folderMissing && !!onReopen;
   const savedMenuItems = (entry: PastSession) => [
-    ...(entry.state === 'closed' && onReopen
+    ...(canReopen(entry) && onReopen
       ? [{ key: 'reopen', content: 'Reopen', onChoose: () => onReopen(entry) }]
       : []),
     ...(canRemove(entry)
@@ -329,7 +333,7 @@ export function SessionTabs({
       onChoose: () => {
         if (panelId) onSelect(panelId);
       },
-      ...(entry.state === 'closed' && onReopen
+      ...(canReopen(entry) && onReopen
         ? {
             action: {
               label: reopening === key ? 'Reopening…' : 'Reopen',
